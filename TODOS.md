@@ -1,20 +1,58 @@
-# Njord 2026 — Outstanding Gaps
+# ASKET 2.0 (Kelp Blue, Namibia) — Outstanding Work
 
-## HIGH PRIORITY — Blocking Water Test (Wednesday)
+IDs in brackets refer to the Kelp design documents in
+`Mission controls and documents/`: **M0–M8** are missions in
+`KELP_MISSIONS.md`; **C/P/D/R/S/E** items and bench tests **T01–T18** are in
+`KELP_CAPABILITIES.md` §4.3 and §5.7.
 
-- [x] **Disable RPP rotate-to-heading** — done. `FRAME_TYPE` confirmed `0`
-  (`FRAME_CLASS=2`, Boat) by pulling FCU params directly via
-  `/mavros/param` against the real Pixhawk (2026-08-08/09 stand test) — this
-  boat is normal rudder+throttle steering, not skid-steer. Set
-  `use_rotate_to_heading: false` and `allow_reversing: false` in
-  `bringup/config/nav2_params.yaml`'s `FollowPath` block per the decision
-  above. Root cause of a real symptom hit live: with rotate-to-heading on,
-  a bypass/reroute goal made the controller try to rotate the boat in
-  place — physically meaningless for a rudder — so it commanded steering
-  deflection with ~zero throttle and the boat never visibly moved.
+## CRITICAL — do first
 
-- [ ] **Stand-test dry-run before water**
-  1. Boat on a stand, FCU + RPi + thrusters connected.
+- [ ] **Revoke the GitHub token that was hard-coded in `scripts/init.sh`**
+  (C9). It has been removed from the file on the `namibia-kelp-cleanup`
+  branch, but it is still in the git history of every clone and of the
+  public `node-ros-2026` repo. Removing it from the file does not un-leak it:
+  revoke it in GitHub settings, create a new `read:packages` token, and pass
+  it only through the environment (`sudo GHCR_TOKEN=<pat> bash
+  scripts/init.sh`). Also note that `init.sh` writes the token into
+  `/etc/systemd/system/njord-update.service` in plain text; move it to a
+  root-only `EnvironmentFile=` instead. `scripts/deploy-pi.sh` passes the SSH
+  password on the `sshpass` command line with host-key checking off; switch
+  to SSH keys.
+
+## Before any autonomy trial (safety chain)
+
+- [ ] **`pid_controller` subscribes to `/imu/data`, which nothing publishes**
+  (C1, bench test T16). `imu_gps_driver` publishes `/imu_driver/imu_raw`, so
+  yaw-rate feedback is stuck at 0, and the stale-IMU warning never fires
+  because it only checks after a first message. Change the topic and warn
+  when no IMU message has ever arrived (patch in `KELP_CAPABILITIES.md`
+  §5.8).
+
+- [ ] **Finish the command watchdog** (C2, bench test T15). `pid_controller`
+  already zeroes a setpoint older than 0.5 s, but it keeps publishing
+  `/control/effort` at 20 Hz, so if `pid_controller` itself dies
+  `actuator_driver` keeps the last RC override latched, and `pico_bridge`'s
+  0.3 s timeout never fires while `pid_controller` is alive. Add
+  neutral-on-silence + override release to `actuator_driver` (§5.8 patch),
+  then run the kill-upstream test on each wired actuation path.
+
+- [ ] **Enable the Nav2 `collision_monitor` stop polygon** (C3, T17).
+  `FootprintApproach` is `enabled: false` in `bringup/config/nav2_params.yaml`.
+  Measure the stopping distance `d_stop` on the water first (M2), then size
+  the stop/slow polygons.
+
+- [ ] **Decide and document the wired actuation path** (C4): MAVROS RC
+  override (`actuator_driver`, default) or Pico 2 (`use_pico_bridge:=true`,
+  firmware in `firmware/pico/`). Redraw the safety chain (Capabilities §5.3)
+  from the real firmware: Ch8 LOW = ESTOP, MID = manual forced, HIGH =
+  autonomy permitted; neutral on serial-heartbeat loss.
+
+- [ ] **Thruster count vs mixer** (C5). The URDF and `pico_bridge._mix` have
+  two thrusters; the Kelp BOM has three T200 + three BESC30. Spare or third
+  thruster? A third changes the mixer, ESC mapping and frame type.
+
+- [ ] **Stand-test dry-run before water** (M0)
+  1. Boat on a stand, FCU + onboard computer + thrusters connected.
   2. Launch the stack. Confirm: `/mavros/state.connected=true`,
      `/imu_driver/imu_raw` + `/gps_driver/gps_raw` publishing,
      `/odometry/filtered` position updates when boat is physically carried
@@ -23,340 +61,146 @@
      spin in a direction that would drive toward the goal.
   4. Call `/mission/abort`. Confirm thrusters stop within 2 s.
 
-## Navigation (Docking)
+- [x] **Disable RPP rotate-to-heading** — done. `FRAME_TYPE` confirmed `0`
+  (`FRAME_CLASS=2`, Boat) by pulling FCU params directly via
+  `/mavros/param` against the real Pixhawk (2026-08-08/09 stand test) — this
+  boat is normal rudder+throttle steering, not skid-steer. Set
+  `use_rotate_to_heading: false` and `allow_reversing: false` in
+  `bringup/config/nav2_params.yaml`'s `FollowPath` block. Re-check if the
+  thruster layout changes (C5).
 
-Dock **detection** now exists: `perception/dock_detector_node` clusters
-`/obstacles/lidar` (DBSCAN), extracts wall segments (RANSAC), and matches
-them against a U-shaped berth template — including multiple adjoining
-berths sharing a wall, each independently classified occupied/free.
-Publishes every recognized berth on `/perception/dock_targets`
-(`njord_msgs/DockTargetArray`), plus a backward-compatible
-`/perception/dock_target` (highest-confidence FREE berth only).
-`description/worlds/dockingWorld.sdf` (single berth) and
-`dockingWorldOccupied.sdf` (two berths, one occupied by a static decoy
-boat) provide sim testing worlds. This superseded the vision/AprilTag
-dock-pose idea below — LiDAR gives short-range geometry directly without
-needing a fiducial marker on the dock. What's still missing is everything
-downstream of detection:
+## Kelp mission backlog
 
-- [x] **Multi-berth + occupancy detection** — done. Verified both via a
-  synthetic test suite (`src/perception/test/test_dock_detector.py`, no
-  Gazebo needed — 27-case distance/angle/occupied-berth matrix, 0 failures)
-  and against real simulated LiDAR data in `dockingWorldOccupied.sdf`
-  (confirmed: the occupied berth is flagged `occupied=true` and excluded
-  from `/perception/dock_target`; the free berth reports `occupied=false`).
-  The real-Gazebo pass caught 3 bugs the synthetic-only test couldn't:
-  (1) a shared back wall's per-berth corner can fall mid-segment, not at
-  an endpoint — `_find_u_shapes`' corner-gap check now measures distance
-  to the back-wall *segment*, not just its two endpoints; (2) real
-  (non-uniform) LiDAR sampling can fragment one physical wall into
-  multiple DBSCAN clusters — `cluster_eps` raised 0.4→0.6; (3) a border-line
-  weak RANSAC fit (exactly at the old `ransac_min_inliers=6` floor) could
-  absorb a few of an occupying boat's hull points as if they were "wall,"
-  silently defeating the occupancy check — raised to 10, and a real
-  index-mapping bug (`wall_inlier_idx` was cluster-local but compared
-  against the full-scan point array) was also fixed. `ransac_dist_threshold_m`
-  was tightened 0.05→0.03 so RANSAC cleanly separates a shared wall's two
-  faces (~0.1 m apart) instead of fitting one straddling "compromise" line.
+### M0 — Harbour acceptance
+- [ ] Turn the M0 go/no-go table and bench tests T01–T18 into a written
+  checklist the crew runs before every sortie.
+- [ ] Leak sensors and enclosure humidity/temperature publishers (§4.1 "Hull
+  and enclosure").
 
-- [ ] **Temporal filtering/tracking for `dock_detector_node`**
-  Detection currently runs per-scan only — no smoothing or persistence of
-  `detected` across frames. Reuse the `Tracker` class already implemented in
-  `src/fusion/fusion/geo_fusion_node.py` (~line 368: constant-velocity Kalman
-  filter per track, gating, hit-confirmation, miss-count-based death) — the
-  dock node's own docstring points at this as the intended next step.
+### M1 — Manual transit + link baseline
+- [ ] Log MikroTik NetMetal RSSI / rate / chain balance (RouterOS API) and
+  RTCM age at 1 Hz for the range walk.
+- [ ] MQTT telemetry bridge (`mqtt_bridge`, topic taxonomy in Missions §4.2,
+  `(mission_id, seq)` on every message, Last Will = offline).
 
-- [x] **Wire docking into the behavior tree** — done (PR #16 + follow-ups).
-  `boat_bt/src/docking_nodes.cpp` implements a state machine
-  (`WAITING_FOR_TARGET → ALIGNING → APPROACHING → FINAL_ENTRY → DOCKED` →
-  hold → reverse → complete) consuming the singular `/perception/dock_target`
-  topic, wired into `simple_boat.xml` as the `DockingTask` subtree
-  (`ExecuteDocking`), selected via `competition_manager`'s
-  `/competition/set_task`. Live-tested end to end (real `dock_detector_node`
-  + `boat_bt_node` + `competition_manager`, synthetic-physics closed loop —
-  see PR #16 review): reaches the berth, holds `docking_hold_duration_sec`
-  (10 s default), reverses out at `docking_reverse_speed_mps`
-  (−0.25 m/s default) for `docking_reverse_duration_sec` (4 s default), and
-  reports completion via `/competition/complete`. Still uses the singular
-  `/perception/dock_target` only — `/perception/dock_targets` (multi-berth
-  array) has no consumer yet.
+### M2 — Autonomous transit + collision avoidance
+- [ ] Keep-out layer (L0): Nav2 keep-out costmap filter built from the Kelp
+  Blue farm GeoJSON, plus a geofence check in `mission_manager` before it
+  accepts waypoints. Treat farm geometry as versioned data (the farm grows
+  ~4 ha/month).
+- [ ] Livox Mid-360S → `livox_ros_driver2` (risk S2: not released for
+  Jazzy, build from source) → point-cloud-to-laser-scan slice at waterline → publish on
+  `/lidar_driver/scan_raw` so every existing consumer works unchanged
+  (Capabilities §5.5). Inverted mount = roll 180°.
+- [ ] OAK-D-LR RGB → `/front_camera_driver/image_raw` + `camera_info`
+  (depthai-ros, Jazzy). Redo intrinsics and the LiDAR–camera extrinsic for
+  the new hardware.
+- [ ] Retrain the YOLO model for kelp canopy and farm demarcation buoys.
+  `models/yolo26n-seg-navier.onnx` is the Njord buoy/cardinal model; update
+  `buoy_*_class_id` in `njord.launch.py` and `CLASS_COLORS`/`CLASS_LABELS`
+  in `src/foxglove/gui_markers.py` to the new class order.
+- [ ] Speed governor and entanglement detection (commanded thrust high,
+  speed-over-ground low for N s → stop, alert, hold). The BESC30 has no
+  current telemetry (P14).
+- [ ] Gazebo world for the farm: surface canopy patches, demarcation buoys,
+  lanes, a service vessel. `collisionAvoidanceWorld.sdf` (buoy gates +
+  moving vessel) is the closest existing stand-in.
+- [ ] Set the sim GPS datum to the real launch / F9P base point. It is an
+  approximate Lüderitz point in `basicWorld.sdf` and
+  `collisionAvoidanceWorld.sdf` (was Trondheim). Re-run the "Verified
+  working" sim checks in the README with the southern-hemisphere datum.
 
-- [x] **Docking-approach path planning / maneuver** — done, as a BT-internal
-  proportional bearing/heading controller in `docking_nodes.cpp`
-  (`docking_bearing_gain`/`docking_heading_gain`, not a Nav2 goal sequence).
+### M3 — Sonar survey, lane following
+- [ ] Lawnmower lane generator: farm polygon + line spacing + range →
+  waypoint list for `/mission/start`. Raise `desired_linear_vel` in
+  `nav2_params.yaml` if surveying at 1.5 m/s.
+- [ ] SonarView on the onboard computer (BlueOS extension on the Pi, Docker
+  on a Jetson); Omniscan in a tank first (T09).
+- [ ] `nmea_udp_bridge`: GGA + heading sentences from MAVROS to SonarView
+  over UDP.
+- [ ] `sonar_bridge`: SonarLink listen-only WebSocket → QC metrics
+  (Missions §5.6) → MQTT + MCAP.
+- [ ] Auto-pause the survey line (hold, not abort) on heading invalid, RTK
+  lost for more than N s, or ping loss above 5 %.
 
-- [x] **Mission-manager / lifecycle hookup** — done via `competition_manager`
-  (new package). `/competition/set_task` + `/competition/start` select and
-  launch a task; waypoint-less tasks (docking, collision avoidance) skip
-  `mission_manager` entirely and run the BT directly, reporting back via
-  `/competition/complete`. See "Competition Behavior Tree" section below for
-  what's still open (path finding/maneuvering, tests, AR-tags, Task 3.2).
+### M4 — Structure verification
+- [ ] Offset-pass planner (10 / 15 / 25 m from a known line, two tilts, two
+  speeds) and a detection-scoring table against Kelp Blue's surveyed float
+  and anchor positions.
 
-- [ ] **Add reacquisition robustness for near-symmetric multi-berth scenes**
-  Found while live-testing the fix above: if `dock_detector_node`'s berth
-  pick flickers between two similarly-scored free berths (e.g. a perfectly
-  symmetric two-berth layout — likely an edge case, not typical competition
-  geometry) while `boat_bt_node` is `APPROACHING`, the boat can oscillate
-  hard before losing lock. `docking_reacquire_timeout_sec` now recovers from
-  a *lost* target, but doesn't smooth out a *flickering* one. Consider berth
-  ID hysteresis/sticky-selection in the detector, or a jump-limiter on
-  boat_bt's steering command.
+### M6 — Drift and deviation monitor
+- [ ] Node that computes cross-track error against the active leg, heading
+  error, speed-made-good vs commanded and a set/drift estimate, with the
+  warn/alarm thresholds in Missions §2 M6.
 
-- [ ] **Improve detection robustness/range against `dockingWorldOccupied.sdf`**
-  Occupancy classification itself is verified (see above), but detection is
-  still viewing-angle-sensitive: from the default spawn pose (dead-center,
-  ~5 m out, symmetric between both berths) the two-berth structure isn't
-  cleanly resolved at all (`detected=false` — a safe fallback, not a
-  false positive, but not useful either); off-center vantage points closer
-  to one berth resolve cleanly. Worth tuning further (segment budget,
-  clustering, or a wider approach-angle sweep in the BT/mission layer) so a
-  boat navigating straight in on the GPS waypoint doesn't need to be
-  laterally offset to get a clean read.
+### M7 — Failsafe and recovery
+- [ ] Escalation ladder: link lost > 10 s → hold; > 60 s → retrace;
+  battery below return-energy + reserve → return; leak → stop, alert,
+  return. `boat_bt` is the natural home (subtree between `GlobalSafety` and
+  `MissionMonitor`).
 
-- [ ] **Tune detection parameters against real hardware LiDAR noise**
-  Current defaults (`cluster_eps=0.6`, `ransac_dist_threshold_m=0.03`,
-  `ransac_min_inliers=10`, angle/width tolerances) were tuned against sim
-  data (including the multi-berth/occupancy fixes above) and are untested
-  on hardware. Also verify `lidar_yaw_offset_deg` (currently 90°,
-  sim-derived) against the real mount.
+### M8 — Post-mission offload + QA
+- [ ] `rosbag2` MCAP recorder (rotated, zstd) on a local SSD, not microSD.
+- [ ] Integrity-checked offload and a generated mission report.
 
-- [ ] **Resolve the orphaned `opennav_docking` wiring**
-  `src/bringup/launch/navigation_no_collision.launch.py` already
-  instantiates Nav2's stock `opennav_docking` `DockingServer` (lifecycle
-  node + component), but this launch file isn't included by
-  `njord.launch.py` and isn't referenced anywhere else in the repo. Decide:
-  consolidate it into the new LiDAR-geometric approach, repurpose it for a
-  different dock type (e.g. a charging dock vs. the Task 3.1 competition
-  berth), or delete it — leaving it as dead code next to the new,
-  actually-wired `dock_detector_node` invites confusion about which is the
-  real docking path.
+### Explainable autonomy and telemetry (Missions §3–§4)
+- [ ] `/node/decision` decision log (JSON schema in Missions §3.1), emitted
+  from `boat_bt_node` on every stop/slow/divert/hold/pause.
+- [ ] Health monitor (compute, power, comms, enclosure) and the alert rules
+  in Missions §4.6.
+- [ ] Foxglove: bind or firewall `foxglove_bridge` (port 8765, no auth) to
+  the boat LAN only (C8). The missing navigation-monitor panels are listed
+  in `src/foxglove/README.md`.
 
-## Competition Behavior Tree / Task Orchestration
+### Platform and integration
+- [ ] Decide the onboard computer (Pi + BlueOS as in this repo, or Jetson AGX
+  Orin) and its power path (Capabilities §0.5, P9). On a Jetson, `fcu_url`
+  must become a serial/UDP URL (C6).
+- [ ] udev symlinks by ID for the Pixhawk, Pico and RPLidar instead of
+  `/dev/ttyACM0` / `/dev/ttyUSB0` (C7).
+- [ ] UM982 GPS-yaw in ArduPilot (Capabilities §5.5 checklist) and RTCM
+  injection through `/mavros/gps_rtk/send_rtcm`.
+- [ ] Add the Kelp sensors to the URDF: UM982 antenna phase centres, Livox
+  (inverted), OAK-D-LR, sonar transducers with tilt (lever arms, Capabilities
+  §5.4).
 
-`boat_bt` (BT.CPP 4 tree, `boat_bt_node`) + `competition_manager` (task
-selection/lifecycle, new package) landed via PR #16. Reviewed against the
-official Njord 2026 task specs (9.1 Maneuvering/Path Finding, 9.2 Collision
-Avoidance, 9.3 Docking) and live-tested; see the PR's review comments for
-full evidence. Docking is covered above. Status of the rest:
+## Repository housekeeping
 
-- [x] **CRITICAL FIX — BT stopped ticking forever after any waypoint-based
-  task's first abort/failure** — found and fixed 2026-08-12 during a
-  full-stack smoke test that cycled all six competition tasks through one
-  long-running `boat_bt_node` process (the realistic pattern for an actual
-  competition day). Root cause: `tick_tree()` latches `tree_finished_ =
-  true` (and then permanently skips ticking the tree at all — `GlobalSafety`
-  included, not just the selected task) whenever `MainTree`'s
-  `ReactiveSequence` resolves to `SUCCESS`/`FAILURE`, which `MissionMonitor`
-  causes for ANY waypoint-based task (maneuvering, path_finding, and now
-  collision_avoidance) ending in `FAILED`/`ABORTED` — e.g. a plain
-  `/mission/abort`. Only `docking_task_started`/`docking_parallel_task_started`
-  ever reset it back to `false`, so a single aborted attempt at *any*
-  waypoint-based task silently killed BT ticking for every task attempted
-  afterward, with no symptom beyond one `"Behavior Tree failed"` ERROR log
-  — `competition_manager`/`mission_manager` state kept progressing normally
-  throughout since that's independent of tree ticking, which is exactly
-  what made this easy to miss (confirmed live: task 2/3's tree genuinely
-  never ticked after task 1's deliberate abort, in a smoke test that
-  otherwise looked completely healthy at the service-response level).
-  **This predates the 9.2 work above but was masked until now** — nothing
-  before this session ever ran more than one waypoint-based task attempt
-  in the same process during testing. Fixed by resetting `tree_finished_`
-  generically on any task transitioning into `STATE_RUNNING`
-  (`boat_bt_node.cpp`'s new `any_task_started`), not just docking/
-  docking_parallel. Re-verified live after the fix: `SelectPathFindingTask`/
-  `SelectCollisionAvoidanceTask` both confirmed ticking (100+ times each)
-  throughout their active window on the very next task after an aborted
-  maneuvering attempt, where before the fix they ticked zero times.
-
-- [x] **Task 9.2 (Collision Avoidance) — gate-crossing + COLREG give-way** —
-  done 2026-08-12. Brought up to the same standard as 9.1/3.1/3.2:
-  `mission_collision_avoidance` sequencer (GPS point 5 → 6 via
-  `mission_manager`/Nav2, same pattern as 9.1 — confirmed live: "Mission
-  started: 2 waypoints" → "Waiting for Nav2..." not an instant
-  `STATE_RUNNING` jump, now that `collision_avoidance.yaml` carries
-  waypoints), a task-scoped 2-knot speed-setpoint override
-  (`/controller_server/set_parameters`, restored after), and real
-  task-specific BT logic in `collision_nodes.cpp`: `updateGateState` pairs
-  green/red buoys into gate 1 then gate 2 and detects line-crossing for
-  each; `updateMarkerVesselState` identifies the marker vessel ("The Otter
-  of Njord", no matching YOLO class) kinematically — nearest moving,
-  unclassified obstacle in the forward sector; `colregGiveWaySide` is a
-  pragmatic, documented simplification of COLREG Rules 14/15, now using the
-  new `Obstacle.velocity_bearing_deg` field (relative-velocity *direction*,
-  not just the previously-exposed scalar speed) to only give way when the
-  vessel is actually converging. `GlobalSafety`'s generic bearing-only
-  reflex is unchanged and still runs unconditionally for this task as the
-  range-closing backstop — this new logic layers on top, same pattern as
-  Maneuvering/Path Finding's cardinal-marker handling.
-  Live-verified (bench, zero-actuation, synthetic `/obstacles/global`): gate
-  1/2 pairing + crossing, marker-vessel identification, and give-way target
-  generation all confirmed firing correctly (`Give-way target generated:
-  ... side=starboard` for a vessel converging from starboard).
-  **Still not a full CPA/judging-accurate COLREG classifier**, and
-  **UNVERIFIED against real gates or a real vessel**, on the bench or in
-  the water — see `enable_collision_avoidance_mission`'s launch-arg
-  description. Do a bench check before enabling for a real attempt.
-
-- [x] **Task 9.2 — marker-vessel detection sector too narrow for part 2's
-  0-90 deg starboard approach** — fixed 2026-08-12, re-reading the full
-  official spec text (part 1: Otter approaches dead-ahead on a collision
-  course; part 2: same GPS point, Otter approaches from the ASV's
-  starboard side at a bearing anywhere from 0 to 90 deg relative to the
-  ASV's direction of travel). `vessel_forward_sector_deg_` defaulted to
-  100.0 (halved to a +/-50 deg detection cone in `updateMarkerVesselState`),
-  which silently could never detect a vessel approaching near dead abeam
-  (90 deg) -- and on a genuine constant-bearing collision course the
-  bearing barely changes as it closes, so it would never enter that 50 deg
-  cone before impact. Yesterday's dry run didn't catch this because the
-  synthetic test vessel happened to be placed inside the narrow cone.
-  Widened default to 200.0 (+/-100 deg, covering the full 0-90 deg spec
-  range with margin) in `boat_bt_node.cpp`. `colregGiveWaySide`'s
-  bearing-sign convention (negative = starboard) and the give-way-target
-  offset maneuver were both re-checked against the spec and are already
-  correct -- no other code change needed for part 1 or part 2.
-  **Real-hardware hybrid bench test done 2026-08-12** (real Pico on
-  `/dev/ttyACM0` armed AUTONOMOUS, Gazebo-simulated GPS/localization,
-  synthetic `/obstacles/global` gate+vessel injection, full real
-  competition_manager/mission_manager/Nav2/pico_bridge stack): confirmed
-  the widened sector correctly detects a vessel at bearing -85 deg
-  (previously undetectable), correctly computes `side=starboard`, and the
-  resulting give-way bypass genuinely propagates end-to-end — real
-  `/mission/set_bypass_target` service call, real Nav2 goal cancel +
-  reissue, and a real non-neutral differential motor command
-  (`/pico_bridge/motor_cmd: 1.000,0.143`) written over serial to the real,
-  armed, AUTONOMOUS Pico. Also found and fixed live (not a code bug):
-  `navsat_transform_node`'s datum was defaulting to (0,0,0) because
-  `datum_sync` depends on real `/mavros/home_position/home`, which this
-  hybrid test setup (Pico-only actuation, no Pixhawk in the loop)
-  never provides -- worked around this run via a manual `/datum` service
-  call seeded from the live GPS fix; see the new
-  `datum-sync-mavros-dependency` TODO item below for the real fix. Also
-  found: bypass goals that are close-range (the give-way case, ~15-20m)
-  eventually abort after ~25s on this stationary bench rig, almost
-  certainly Nav2's progress checker correctly noticing the boat isn't
-  actually moving (it's on a stand) -- expected for a bench test, not
-  re-verifiable as a real issue until tested with the boat actually able
-  to move.
-
-- [ ] **Collision Avoidance — no real course configured**
-  Same gap as Maneuvering/Path Finding below:
-  `competition_manager/competition_tasks/collision_avoidance.yaml`'s point
-  5/point 6 are still the venue's single address point duplicated, not the
-  real on-site gate/vessel course.
-
-- [ ] **Maneuvering / Path Finding — no real course configured**
-  `mission_maneuvering_pathfinding` (sequencer), the resume-from-point-3
-  rule, and the retry-recovery fix are all done and dry-run verified (see
-  git log 2026-08-09/10). What's still missing: real GPS waypoints.
-  `competition_manager/competition_tasks/maneuvering.yaml` and
-  `path_finding.yaml` both currently just duplicate the venue's single
-  address point (not `[]` anymore — that was fixed earlier — but still not
-  a real course). Per the official spec
-  (njord.gitbook.io/2026/9-task-descriptions/9.1-maneuvering-and-path-finding,
-  read 2026-08-10, supersedes the imprecise "point 1 → waypoints 1.1–1.10"
-  note this item used to cite): one combined course, GPS point 1 → 3 → 4,
-  8–15 intermediate waypoints across the two parts — `maneuvering.yaml`
-  needs the point 1→3 leg, `path_finding.yaml` needs the point 3→4 leg.
-  Once real waypoints land, still needs verification that Nav2 actually
-  drives the real course end to end (only ever tested against a single
-  placeholder point so far). **Owner: Sara (Nav2/path-finding).**
+- [ ] **Rename the Njord identifiers** once the Pi deployment can be updated
+  in the same step: `njord_msgs` (used by `mission`, `fusion`, `boat_bt`,
+  `foxglove`), `njord.launch.py`, `/opt/njord` (`Containerfile`,
+  `entrypoint.sh`), the `njord` container and `njord.service` /
+  `njord-update.service` units (`scripts/init.sh`), `99-njord.rules`, the
+  devcontainer name, and the maintainer entries (`njord@stud.ntnu.no`) in
+  every `package.xml` / `setup.py`.
+- [ ] **Resolve the orphaned `navigation_no_collision.launch.py`**. It
+  instantiates Nav2's `opennav_docking` server but is not included by
+  `njord.launch.py` or referenced anywhere. Delete it or repurpose it.
+- [ ] **Move or rename `Mission controls and documents/`** to a path without
+  spaces (e.g. `docs/kelp/`) if tooling ever needs to reference it.
 
 - [ ] **`datum_sync` hard-depends on real mavros `/mavros/home_position/home`,
   breaking any Pico-only (no Pixhawk in the loop) run's GPS-waypoint
-  navigation** -- found 2026-08-12 during Task 9.2's hybrid bench test.
+  navigation** — found 2026-08-12 during a hybrid bench test.
   `sensors/datum_sync.py` only calls `/datum` on `navsat_transform_node`
   when it receives a `HomePosition` from mavros; with `enable_mavros:=false`
-  (this hybrid test's setup: real Pico for actuation, Gazebo for
-  GPS/perception, no real or simulated Pixhawk at all) it never fires, so
-  `navsat_transform_node` falls back to a (0,0,0) datum and every `/fromLL`
-  conversion (used by every GPS-waypoint mission, not just 9.2) comes out
-  wildly wrong -- confirmed live: `bt_navigator` computed a goal ~700km
-  away in UTM easting/northing and immediately aborted. Worked around this
-  session with a one-off manual `/datum` service call from the live GPS
-  fix; not a real fix. Only matters when Pixhawk/mavros genuinely isn't in
-  the loop -- the documented real-competition config
-  ([[pico-actuation-architecture]]) runs mavros alongside pico_bridge for
-  GPS/IMU sensing, so this may not affect competition day, but it silently
-  breaks this exact hybrid bench-test pattern and would affect any other
-  Pico-only test setup. Needs a real fix (e.g. `datum_sync` falling back to
-  the first live GPS fix itself when mavros home position never arrives
-  within some timeout) before relying on this test pattern again.
+  (real Pico for actuation, Gazebo for GPS/perception, no Pixhawk) it never
+  fires, so `navsat_transform_node` falls back to a (0,0,0) datum and every
+  `/fromLL` conversion comes out wildly wrong — confirmed live:
+  `bt_navigator` computed a goal ~700 km away and immediately aborted.
+  Worked around with a one-off manual `/datum` service call from the live
+  GPS fix. Needs a real fix (e.g. `datum_sync` falling back to the first live
+  GPS fix when mavros home position never arrives within some timeout).
 
-- [ ] **No automated tests for `boat_bt` or `competition_manager`**
-  ~1,500 new C++ lines across `docking_nodes.cpp`, `collision_nodes.cpp`,
-  `cardinal_nodes.cpp`, `mission_monitor.cpp`, plus `competition_manager`'s
-  entire task/state machine, ship with only boilerplate lint tests
-  (`test_copyright.py`/`test_flake8.py`/`test_pep257.py`). No regression
-  coverage for the docking state machine, the bypass-side logic, or task
-  selection/rejection — unlike `perception`'s
-  `test_dock_detector.py` precedent (a real synthetic integration suite).
-
-- [ ] **No AR-tag/ArUco detection for docking**
-  Spec 9.3 frames 3 AR-tags as the primary berth-identification method
-  (LiDAR-shape detection as the documented fallback when tags aren't
-  available); the current pipeline only implements the fallback.
-
-- [x] **Task 3.2 (parallel docking)** — done 2026-08-09/10. `TASK_DOCKING_PARALLEL`
-  `CompetitionState` value, `ExecuteDockingParallel` BT controller
-  (`parallel_docking_nodes.cpp`), `wall_detector_node` (LiDAR U-shape match,
-  reparametrized from `dock_detector_node` for the 4m-wall/2m-arm berth),
-  `docking_parallel.yaml` task definition, and `mission_docking_parallel`
-  sequencer (GPS points 10/11/12, matching spec 9.3) all exist. Hold
-  duration corrected to 5s per spec 9.3 (was wrongly copying 3.1's 10s).
-  Dry-run verified (zero-actuation, synthetic perception input) — **still
-  UNVERIFIED against a real wall**, on the bench or in the water, and no
-  Gazebo world exists for this berth yet unlike 3.1's `dockingWorld.sdf`.
-
-- [ ] **Task 9.4 (Surprise)** — structurally implemented 2026-08-12 from the
-  team's own working-draft interpretation of the course sketch, **not** an
-  official spec (the njord.gitbook.io 9.4 page is still blank, "revealed
-  during competition"). `mission_surprise` sequencer chains normal docking
-  (`TASK_DOCKING`) → open-water transit (`TASK_SURPRISE`, own 7-point leg
-  from `config/surprise_9_4_waypoints.yaml`) → parallel docking
-  (`TASK_DOCKING_PARALLEL`), ending stationary in the final berth with no
-  exit leg. `SurpriseTask` in `simple_boat.xml` now layers cardinal-mark
-  passing (reused as-is) and a new individual-buoy COLREG-side reflex
-  (`updateBuoyMarkerState` in `collision_nodes.cpp`, `Buoy*` BT nodes in
-  `bt_registration.cpp`) on top of `GlobalSafety`'s existing generic
-  buoy-standoff/collision-risk reflex. **UNVERIFIED end to end** — never
-  run, on the bench or in the water; chains mission_docking's proven
-  orchestration with mission_docking_parallel's own still-UNVERIFIED
-  close-range controller (see that entry above), and the new buoy-side
-  logic has no prior real-world exercise at all. `enable_surprise_mission`
-  defaults off. Open questions carried over from the team's own draft, all
-  still unresolved:
-  1. Real GPS-point IDs and order — the sketch's 12/14/4.1-4.5/13 labelling
-     is explicitly not the real numbering issued at competition.
-  2. Whether the sketch's "S"/"E" markers are genuinely IALA cardinal marks
-     (as assumed — this reuses the existing cardinal-mark pipeline as-is)
-     or something else, e.g. additional AR-tag posts.
-  3. Real parallel-berth dimensions (assumed same 2×4 m spec as Task 3.2).
-  4. **Buoy colour→side convention**: implemented as a single fixed
-     `red_buoy_side` param (default `"port"`) applied for the *whole*
-     open-water leg, not a per-sub-leg seaward/shoreward detector — the
-     source doc flags "which side is seaward" as unresolved (no compass
-     reference on the sketch), but since Surprise's transit is one
-     continuous one-way leg dock-to-dock (not an out-and-back course),
-     there is no reversal case to detect within a single run; flip the
-     param on-site if the real course orientation comes out reversed from
-     this assumption.
-  5. Cardinal-mark and buoy handling share one bypass-target mechanism
-     (`/mission/set_bypass_target`) — only one detour can be active per
-     tick, so a cardinal mark and a buoy needing action in the same tick
-     would have cardinal take priority. Not expected to matter given the
-     course sketch's spacing, but untested.
-
-- [ ] **`/perception/dock_targets` (multi-berth array) has no consumer**
-  `boat_bt_node`'s docking controller only subscribes to the singular
-  `/perception/dock_target` (best free berth). Fine for a single-target
-  competition task, but the multi-berth-aware output has no use yet — worth
-  revisiting if a future task needs to choose among several free berths or
-  reason about which one is occupied.
+- [ ] **No automated tests for `boat_bt`**. The GlobalSafety risk scoring,
+  bypass-side choice and MissionMonitor re-arm logic have only boilerplate
+  lint tests. The perception package lost its only real test suite with the
+  docking detectors; `lidar_obstacle_node` and `fusion_node` have none.
 
 ## Simulation Performance (no-GPU / headless sandboxes)
 
-Found while getting a real-Gazebo docking run working in a GPU-less sandbox
-(see PR #16 review and the `fix/docking-fov-tracking-loss` branch):
+Found while getting a real-Gazebo run working in a GPU-less sandbox
+(Njord PR #16 review):
 
 - [x] **Gazebo sensor rendering hangs in server-only (`-s`) mode** — root
   cause identified: `-s` mode deadlocks `gz-sim`'s `Sensors` render thread
@@ -373,7 +217,7 @@ Found while getting a real-Gazebo docking run working in a GPU-less sandbox
 - [ ] **Real-time factor is very low under software rendering** — measured
   directly (sim `/clock` vs wall clock): RTF ≈ 0.08 (~12x slower than
   real-time) with `headless:=false` + camera/gpu_lidar sensors active.
-  Since `docking_reacquire_timeout_sec` and friends are sim-time durations,
+  Since BT/mission timeouts are sim-time durations,
   this makes a "3 second" timeout take ~35 real seconds — painful for
   interactive testing, though the underlying control logic still behaves
   correctly in sim-time terms (bearing convergence traced cleanly:
@@ -384,8 +228,8 @@ Found while getting a real-Gazebo docking run working in a GPU-less sandbox
 - [ ] **`gpu_lidar` → CPU-raycast `lidar` sensor type: tried, reverted**
   Attempted switching Asket's LiDAR sensor (`asket.urdf.xacro`) from
   `type="gpu_lidar"` to `type="lidar"` to sidestep Ogre2 rendering
-  entirely for the one sensor docking actually consumes (cameras aren't
-  used by docking). Same `<ray>` schema, should be a drop-in swap per the
+  entirely for the LiDAR (cameras aren't
+  needed for LiDAR-only tests). Same `<ray>` schema, should be a drop-in swap per the
   gz-sensors docs. In practice it produced zero scan data in this
   gz-sensors8 build — confirmed at both the ROS topic and native `gz
   topic` level, even 45+ seconds after spawn. Didn't dig further into
@@ -457,13 +301,6 @@ Found while getting a real-Gazebo docking run working in a GPU-less sandbox
   (e.g. 8 s). Publish map state as a separate `/obstacles/tracked` topic.
 
 ## Control
-
-- [ ] **Close the speed loop in `pid_controller`**
-  `control/control/pid_controller.py` runs the speed PID open-loop (no feedback
-  sensor). Provide speed feedback — options: use `/mavros/local_position/velocity_body`
-  (ArduPilot EKF output), or `/odometry/filtered` from robot_localization.
-  Subscribe to whichever is available and feed the measured linear speed as the
-  process variable.
 
 - [ ] **Verify RC channel mapping in `actuator_driver`**
   Channel indices (`CHAN_STEERING=0`, `CHAN_THROTTLE=2`) and the `RC_RANGE`

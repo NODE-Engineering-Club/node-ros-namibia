@@ -2,7 +2,7 @@
 <package format="3">
   <name>sim</name>
   <version>0.0.2</version>
-  <description>2D Python simulator for Asket ASV — aligned with Njord stack</description>
+  <description>2D Python simulator for the ASKET ASV</description>
   <maintainer email="node@iaac.net">NODE</maintainer>
   <license>MIT</license>
 

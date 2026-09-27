@@ -3,7 +3,7 @@
 <package format="3">
   <name>bringup</name>
   <version>0.1.0</version>
-  <description>Launch and config files for the Njord 2026 USV</description>
+  <description>Launch and config files for the ASKET ASV</description>
   <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
   <license>MIT</license>
 
@@ -14,7 +14,6 @@
   <exec_depend>perception</exec_depend>
   <exec_depend>control</exec_depend>
   <exec_depend>mission</exec_depend>
-  <exec_depend>mission_maneuvering_pathfinding</exec_depend>
   <exec_depend>vision</exec_depend>
   <exec_depend>ros2launch</exec_depend>
   <exec_depend>mavros</exec_depend>

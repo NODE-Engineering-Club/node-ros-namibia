@@ -7,7 +7,7 @@ if [[ $EUID -ne 0 ]]; then
   echo "Run with sudo: sudo GHCR_TOKEN=<pat> bash init-pi.sh" >&2
   exit 1
 fi
-GHCR_TOKEN="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"
+GHCR_TOKEN="${GHCR_TOKEN:?Set GHCR_TOKEN to a GitHub PAT with read:packages, e.g. sudo GHCR_TOKEN=<pat> bash init.sh}"
 USERNAME="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
 
 # ── System update ────────────────────────────────────────────────────────────

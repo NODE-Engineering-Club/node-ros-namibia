@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="Camera–LiDAR extrinsic calibration tooling for the Njord 2026 USV",
+    description="Camera–LiDAR extrinsic calibration tooling for the ASKET ASV",
     license="MIT",
     entry_points={
         "console_scripts": [

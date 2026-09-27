@@ -14,14 +14,12 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="Perception nodes for the Njord 2026 USV",
+    description="Perception nodes for the ASKET ASV",
     license="MIT",
     entry_points={
         "console_scripts": [
             "lidar_obstacle_node = perception.lidar_obstacle_node:main",
             "fusion_node = perception.fusion_node:main",
-            "dock_detector_node = perception.dock_detector_node:main",
-            "wall_detector_node = perception.wall_detector_node:main",
             "perception_all = perception.launch_all:main",
         ],
     },

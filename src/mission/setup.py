@@ -20,7 +20,7 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="Mission management for the Njord 2026 USV",
+    description="Mission management for the ASKET ASV",
     license="MIT",
     tests_require=["pytest"],
     entry_points={
@@ -28,7 +28,6 @@ setup(
             "mission_manager = mission.mission_manager:main",
             "north_test_mission = mission.north_test_mission:main",
             "random_test_mission = mission.random_test_mission:main",
-            "waypoints_and_detection_mission = mission.waypoints_and_detection_mission:main",
         ],
     },
 )

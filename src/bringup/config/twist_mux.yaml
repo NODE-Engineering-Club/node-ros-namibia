@@ -8,7 +8,9 @@ twist_mux:
     # mismatching message types on every topic it touches.
     use_stamped: false
     topics:
-      docking:
+      # Direct commands from boat_bt_node (e.g. its stop-on-tree-finish, or
+      # future hold/stop behaviours for the failsafe ladder) outrank Nav2.
+      behavior_tree:
         topic: boat_bt/cmd_vel
         timeout: 0.5
         priority: 100

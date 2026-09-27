@@ -3,7 +3,7 @@
 <package format="3">
   <name>mission</name>
   <version>0.1.0</version>
-  <description>Mission management for the Njord 2026 USV</description>
+  <description>Mission management for the ASKET ASV</description>
   <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
   <license>MIT</license>
 

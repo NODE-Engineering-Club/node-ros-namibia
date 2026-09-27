@@ -13,7 +13,7 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="Control nodes for the Njord 2026 USV",
+    description="Control nodes for the ASKET ASV",
     license="MIT",
     entry_points={
         "console_scripts": [

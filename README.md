@@ -1,6 +1,57 @@
-# Njord 2026
+# ASKET 2.0 — Kelp Blue, Namibia
 
-ROS 2 Jazzy autonomous surface vessel (ASV) stack for the [NODE Engineering Club](https://github.com/NODE-Engineering-Club) competition robot **Asket**.
+ROS 2 Jazzy autonomous surface vessel (ASV) stack for the [NODE Engineering Club](https://github.com/NODE-Engineering-Club) boat **ASKET**, adapted from the Njord 2026 competition stack for the **Kelp Blue** kelp-farm missions in Lüderitz (Shearwater Bay), Namibia, with a **Cerulean Omniscan 450 SS** side-scan sonar.
+
+The mission design lives in [`Mission controls and documents/`](Mission%20controls%20and%20documents/):
+
+- [`KELP_MISSIONS.md`](Mission%20controls%20and%20documents/KELP_MISSIONS.md) — the M0–M8 mission set, autonomy/decision log, telemetry and cloud design, sonar pipeline, network, phased plan.
+- [`KELP_CAPABILITIES.md`](Mission%20controls%20and%20documents/KELP_CAPABILITIES.md) — component register, compatibility desk-check, power budget, bench tests T01–T18, risk register.
+
+The outstanding work is tracked in [`TODOS.md`](TODOS.md).
+
+## Namibia mission status
+
+What the repo already provides for each mission in `KELP_MISSIONS.md`, and what is still to build. "Exists" means the code is here; most of it has only been bench- or sim-tested (see `TODOS.md`).
+
+| ID | Mission | Exists in this repo | Still to build |
+|---|---|---|---|
+| **M0** | Harbour acceptance | Stand-test procedure (`TODOS.md`); Pico 2 e-stop/arm/mode firmware (`firmware/pico/`); BMS reader (`sensors/bms_reader`) | Go/no-go checklist wired to bench tests T01–T18; leak sensors; watchdog kill-upstream test (T15) |
+| **M1** | Manual transit + link baseline | RC control through the Pico or ArduPilot; Foxglove GUI (boat LAN only) | MikroTik RSSI/rate logging; MQTT telemetry bridge to the shore station |
+| **M2** | Autonomous transit + collision avoidance | `mission_manager` → Nav2 waypoint chains; `boat_bt` GlobalSafety obstacle bypass; LiDAR + camera fusion (`/obstacles/fused`, `/obstacles/global`); Nav2 `collision_monitor` (stop polygon **disabled**) | Farm-GeoJSON keep-out costmap filter + geofence check; enable/tune the stop polygon after measuring `d_stop`; Livox Mid-360S and OAK-D-LR adapters onto the existing topics; speed governor; entanglement detection |
+| **M3** | Sonar survey, lane following | Lanes can already be flown as a waypoint list through `/mission/start` | Lawnmower lane generator; SonarView (Docker or BlueOS extension); `nmea_udp_bridge`; `sonar_bridge`; auto-pause on RTK/heading/ping loss |
+| **M4** | Structure verification | — | Offset-pass planner around known targets; detection scoring table |
+| **M5** | Repeat-pass monitoring (post-MVP) | `mission_manager` checkpoint resume (note: identical waypoint lists resume the earlier pass) | Change detection between passes |
+| **M6** | Drift and deviation monitor | — | Cross-track / heading / speed-made-good monitor node and alerts |
+| **M7** | Failsafe and recovery | `pid_controller` stale-setpoint hold; Pico neutral-on-silence and Ch8 ESTOP | Link-loss hold → return ladder; battery return-energy check; `actuator_driver` neutral-on-silence |
+| **M8** | Post-mission offload + QA | — | MCAP recorder; integrity-checked offload; mission report |
+
+### Where this repo differs from the Kelp documents
+
+The two Kelp documents were written against an older public snapshot (`node-ros-2026` at commit `f61b8a3`, 6 Aug 2026). Reading this repo changes several of their findings:
+
+| Kelp doc says | This repo | Effect |
+|---|---|---|
+| Pico 2 firmware is not in the repo (Missions §0.4 #6, question 17) | It is: [`firmware/pico/asket_ec_pico.ino`](firmware/pico/asket_ec_pico.ino). Ch8 LOW = ESTOP, MID = manual forced, HIGH = autonomy permitted; neutral on serial-heartbeat loss | Question 17 can be answered from the source |
+| No battery telemetry code (Missions §0.4 #8) | `sensors/bms_reader` reads a BQ76920 BMS over an MCP2221 bridge → `/battery/state`, `/diagnostics` (launch arg `enable_bms`) | A starting point for the §4.1 power signals |
+| 2D RPLidar, 12 m, custom driver (Missions §0.4 #7, M2 horizon table) | RPLIDAR **S2M1** via Slamtec `sllidar_ros2` (submodule), ~0.05–30 m, DenseBoost mode | The M2 detection-horizon table can use the S2's real range; measure it on water |
+| Command watchdog defeated (C2) | `pid_controller` now zeroes a setpoint older than 0.5 s. It still publishes effort at 20 Hz, and `actuator_driver` has no neutral-on-silence | Partly fixed; the `actuator_driver` half of the §5.8 patch and bench test T15 still apply |
+| `pid_controller` listens on `/imu/data` (C1) | Still true | Open; see `TODOS.md` |
+| `collision_monitor` polygon disabled (C3) | Still true (`nav2_params.yaml`, `FootprintApproach.enabled: false`) | Open |
+| `FRAME_TYPE` unconfirmed (C13) | Confirmed `FRAME_CLASS=2` (Boat), `FRAME_TYPE=0` against the real Pixhawk on 2026-08-08/09; RPP `use_rotate_to_heading: false` | Closed for the current hull; re-check if the thruster layout changes (C5) |
+| GitHub token hard-coded in `scripts/init.sh` (C9) | Removed from the file on this branch; `init.sh` now requires `GHCR_TOKEN` from the environment | **The token is still in git history and must be revoked** |
+
+## What was removed from the Njord stack
+
+Everything specific to the Njord 2026 competition courses was removed; it remains in git history on `main` before this cleanup.
+
+- `competition_manager` (task selection/lifecycle, `/competition/*` services and topic) and its task YAMLs
+- The five competition mission sequencers: `mission_maneuvering_pathfinding`, `mission_collision_avoidance`, `mission_docking`, `mission_docking_parallel`, `mission_surprise`
+- Docking perception (`dock_detector_node`, `wall_detector_node`) and their tests, and the docking Gazebo worlds
+- In `boat_bt`: the docking and parallel-docking controllers, cardinal-mark passing, the Task 9.2 gate/marker-vessel COLREG logic and the Task 9.4 buoy-side logic
+- `njord_msgs` interfaces used only by the above: `CompetitionState`, `DockTarget(Array)`, `WallTarget(Array)`, `SetCompetitionTask`
+- Ad-hoc Trondheim test missions (`waypoints_and_detection_mission`, `send_waypoints`) and an empty `buoy_decision_node`
+
+Names such as `njord_msgs`, `njord.launch.py`, `/opt/njord` and the `njord.service` systemd unit are kept for now so the deployed Pi and CI keep working; renaming them is tracked in `TODOS.md`.
 
 ## Getting Started
 
@@ -31,7 +82,16 @@ ros2 launch bringup njord.launch.py \
   enable_mavros:=false
 ```
 
-This launches Gazebo with `basicWorld.sdf`, spawns the Asket URDF, bridges the sim clock, and runs the full navigation/control/mission stack against simulated sensor topics.
+This launches Gazebo with `basicWorld.sdf`, spawns the ASKET URDF, bridges the sim clock, and runs the full navigation/control/mission stack against simulated sensor topics. Add `world:=collisionAvoidanceWorld.sdf` for buoy and moving-vessel obstacles.
+
+**Send a waypoint mission** (any list of lat/lon points, e.g. survey lanes):
+```bash
+ros2 service call /mission/start njord_msgs/srv/StartMission \
+  "{waypoints: [{latitude: -26.6475, longitude: 15.1540, altitude: 0.0}]}"
+ros2 topic echo /mission/status
+ros2 service call /mission/abort std_srvs/srv/Trigger
+```
+`ros2 run mission north_test_mission` and `ros2 run mission random_test_mission` send a single goal offset from the current GPS fix.
 
 **Rebuild after adding new files** (`--symlink-install` means code edits don't need a rebuild for Python packages):
 ```bash
@@ -44,57 +104,61 @@ source install/setup.bash
 | Argument | Default | Description |
 |---|---|---|
 | `use_sim` | `false` | Enable Gazebo, sim clock, gz_bridge |
+| `world` | `basicWorld.sdf` | World file under `description/worlds/` (`basicWorld.sdf`, `collisionAvoidanceWorld.sdf`) |
+| `headless` | `true` | Run Gazebo server-only (`gz sim -s`). **In practice `-s` deadlocks sensor rendering even under software rendering — set `false` to actually get sensor data in a no-GPU environment.** See `TODOS.md`. |
 | `enable_mavros` | `true` | MAVROS FCU bridge (ArduPilot) |
-| `enable_localization` | `true` | EKF + NavSat transform |
+| `fcu_url` | `tcp://localhost:5777` | MAVROS FCU URL (BlueOS MAVLink router on the Pi) |
+| `gcs_url` | `udp://@localhost:14556` | MAVROS GCS URL |
+| `enable_localization` | `true` | EKF + NavSat transform + `datum_sync` |
 | `enable_nav2` | `true` | Full Nav2 stack |
 | `enable_sensors` | `true` | Camera, LiDAR, IMU/GPS drivers |
-| `enable_perception` | `true` | LiDAR obstacle node + fusion |
-| `enable_control` | `true` | nav_to_pid, PID, actuator driver |
-| `enable_mission` | `true` | GPS waypoint sequencer |
-| `enable_maneuvering_pathfinding_mission` | `false` | Task 9.1 (Maneuvering + Path Finding) mission sequencer — off by default; set `true` to actually run the competition sequence on bringup |
-| `enable_collision_avoidance_mission` | `false` | Task 9.2 (Collision Avoidance) mission sequencer — off by default, same reasoning as above. Its gate-crossing + COLREG give-way handling (`updateGateState`/`updateMarkerVesselState` in `collision_nodes.cpp`) exists but is **UNVERIFIED against real gates or a real vessel** (bench/water) — do not enable for a real attempt without a bench check first |
-| `enable_docking_mission` | `false` | Task 3.1 (Normal Docking) mission sequencer — off by default, same reasoning as above |
-| `enable_docking_parallel_mission` | `false` | Task 3.2 (Parallel Docking) mission sequencer — off by default. Its close-range controller (`ExecuteDockingParallel`) and perception (`wall_detector_node`) exist but are **UNVERIFIED against a real wall** (bench/water) — do not enable for a real attempt without a bench check first |
-| `enable_surprise_mission` | `false` | Task 9.4 (Surprise) mission sequencer — off by default, same reasoning as above. TEAM WORKING DRAFT (the official 9.4 spec is still unreleased) that chains normal docking → open-water transit → parallel docking into one run. **UNVERIFIED end to end** — never run, on the bench or in the water. Do NOT enable alongside `enable_docking_mission`/`enable_docking_parallel_mission`/`enable_collision_avoidance_mission` — they would race for the same `competition_manager` task selection |
-| `enable_vision` | `true` | YOLO inference node |
-| `enable_foxglove` | `true` | Foxglove WebSocket bridge (port 8765) |
-| `vision_confidence` | `0.5` | YOLO detection confidence threshold |
 | `camera_device` | `/dev/video0` | Camera device path |
 | `lidar_device` | `/dev/ttyUSB0` | LiDAR serial device path |
-| `camera_info_url` | `package://bringup/config/front_camera.yaml` | `camera_info_manager` URL for camera intrinsics YAML |
+| `enable_perception` | `true` | LiDAR obstacle node + fusion |
+| `enable_geo_fusion` | `true` | Geo-referenced fusion + tracker → `/obstacles/global` |
 | `lidar_camera_extrinsic` | `""` | Path to `lidar_camera_extrinsic.yaml`; empty = use URDF nominal `lidar→front_camera` TF |
-| `world` | `basicWorld.sdf` | World file name under `description/worlds/` to load in Gazebo (e.g. `dockingWorld.sdf` for the U-shaped Task 3.1 berth) |
-| `enable_competition` | `true` | Competition Manager (task selection + lifecycle) |
-| `enable_boat_bt` | `true` | Competition Behavior Tree (`boat_bt_node`) |
-| `headless` | `true` | Run Gazebo server-only (`gz sim -s`). **In practice `-s` deadlocks sensor rendering even under software rendering (Xvfb, `LIBGL_ALWAYS_SOFTWARE`, `--headless-rendering` — all tried, all hung identically) — set `false` to actually get sensor data in a no-GPU environment.** Real-time factor is still low without a GPU (~0.08 measured in one sandbox); see `TODOS.md`. |
+| `enable_vision` | `true` | YOLO inference node |
+| `vision_confidence` | `0.5` | YOLO detection confidence threshold |
+| `enable_control` | `true` | nav_to_pid, PID, actuator driver |
+| `use_pico_bridge` | `false` | Drive thrusters through the Pico 2 (`pico_bridge`) instead of MAVROS RC override (`actuator_driver`) |
+| `pico_port` | `/dev/ttyACM0` | Pico serial port |
+| `enable_bms` | `false` | BMS reader (`sensors/bms_reader`) |
+| `bms_port` | `/dev/ttyACM3` | BMS serial port |
+| `enable_mission` | `true` | GPS waypoint sequencer (`mission_manager`) |
+| `enable_boat_bt` | `true` | Safety Behavior Tree (`boat_bt_node`) |
+| `enable_foxglove` | `true` | Foxglove WebSocket bridge (port 8765, **no authentication — boat LAN only**) |
 
 ## Workspace Layout
 
 ```
 src/
-├── description/    # URDF (asket.urdf.xacro), meshes, Gazebo worlds (basicWorld.sdf, dockingWorld.sdf)
-├── sensors/        # camera_driver, lidar_driver, imu_gps_driver
-├── perception/     # lidar_obstacle_node, fusion_node, dock_detector_node, wall_detector_node
-├── control/        # nav_to_pid, pid_controller, actuator_driver
-├── mission/        # mission_manager (GPS waypoint sequencer used by Nav2-based tasks)
-├── mission_maneuvering_pathfinding/  # Task 9.1 mission sequencer (maneuvering -> path_finding)
-├── mission_docking/            # Task 3.1 mission sequencer (transit -> ExecuteDocking -> transit)
-├── mission_docking_parallel/   # Task 3.2 mission sequencer (transit -> ExecuteDockingParallel -> transit)
-├── mission_surprise/           # Task 9.4 mission sequencer (ExecuteDocking -> open-water transit -> ExecuteDockingParallel)
+├── description/    # URDF (asket.urdf.xacro), meshes, Gazebo worlds (basicWorld, collisionAvoidanceWorld)
+├── sensors/        # camera_driver, imu_gps_driver, datum_sync, bms_reader
+├── sllidar_ros2/   # Slamtec RPLIDAR S2 driver (git submodule)
+├── perception/     # lidar_obstacle_node, fusion_node
+├── fusion/         # geo_fusion_node (GPS-frame obstacles + Kalman tracker)
 ├── vision/         # vision_node (YOLO26n-seg ONNX inference)
+├── control/        # nav_to_pid, pid_controller, actuator_driver, pico_bridge
+├── mission/        # mission_manager (GPS waypoint sequencer) + test missions
+├── boat_bt/        # boat_bt_node — safety Behavior Tree (BT.CPP 4)
+├── njord_msgs/     # Shared interfaces (Obstacle(Array), MissionStatus, StartMission, SetBypassTarget)
 ├── calibration/    # scan_to_cloud, collect_data, calibrate, extrinsic_tf_publisher
-├── boat_bt/        # boat_bt_node — competition Behavior Tree (BT.CPP 4)
-├── competition_manager/  # competition_manager — task selection + lifecycle state machine
-├── njord_msgs/     # Shared interfaces (DockTarget, WallTarget, CompetitionState, SetBypassTarget, ...)
+├── sim/            # 2D Python simulator + sim_nav2.launch.py
+├── foxglove/       # Foxglove layout + GUI helper scripts
 └── bringup/        # njord.launch.py + config/
     └── config/
         ├── ekf.yaml                      # robot_localization EKF params
         ├── navsat.yaml                   # NavSat transform params
-        ├── nav2_params.yaml              # Nav2 planner/controller/costmap params
+        ├── nav2_params.yaml              # Nav2 planner/controller/costmap/collision_monitor params
+        ├── twist_mux.yaml                # boat_bt vs Nav2 cmd_vel arbitration
         ├── gz_bridge.yaml                # Gazebo ↔ ROS topic bridges
         ├── front_camera.yaml             # camera intrinsics (generate with calibrate_camera.launch.py)
         └── lidar_camera_extrinsic.yaml   # LiDAR→camera extrinsic (generate with calibrate_lidar_camera.launch.py)
-models/             # ONNX weights (bind-mounted, gitignored)
+firmware/pico/      # Pico 2 (RP2350) low-level controller: RC/SBUS, ESTOP, arming, mode authority
+models/             # YOLO weights (Njord buoy/cardinal model; to be retrained for kelp canopy/buoys)
+scripts/            # init.sh (Pi provisioning), deploy-pi.sh
+docs/               # session notes from hardware tests
+Mission controls and documents/  # Kelp Blue mission and capability design documents
 ```
 
 ## Architecture
@@ -102,83 +166,67 @@ models/             # ONNX weights (bind-mounted, gitignored)
 ```mermaid
 flowchart TD
     subgraph Sim["Simulation (use_sim:=true)"]
-        GZ[Gazebo Harmonic] -->|gz_bridge| CLK[/clock/]
-        GZ -->|gz_bridge| LIDAR_SIM[/lidar_driver/scan_raw/]
-        GZ -->|gz_bridge| IMU_SIM[/imu_driver/imu_raw/]
-        GZ -->|gz_bridge| GPS_SIM[/gps_driver/gps_raw/]
-        GZ -->|gz_bridge| CAM_SIM[/front_camera_driver/image_raw/]
+        GZ[Gazebo Harmonic] -->|gz_bridge| SIMTOPICS[/scan, imu, gps, camera, clock/]
     end
 
     subgraph Sensors["Sensors (enable_sensors:=true)"]
-        LD[lidar_driver] --> Scan[/scan/]
-        CD[camera_driver] --> Image[/image_raw/]
-        IG[imu_gps_driver]
+        LD[sllidar_node<br/>RPLIDAR S2] --> Scan[/lidar_driver/scan_raw/]
+        CD[camera_driver] --> Image[/front_camera_driver/image_raw/]
+        IG[imu_gps_driver<br/>MAVROS relay]
     end
 
     subgraph Perception
-        Y[vision_node<br/>YOLO26n-seg ONNX] --> Det[/yolo/detections/]
-        Y --> Mask[/yolo/seg_mask/]
+        Y[vision_node<br/>YOLO26n-seg ONNX] --> Det[/yolo/detections + seg_mask/]
         LO[lidar_obstacle_node] --> LidarPts[/obstacles/lidar/]
         FN[fusion_node<br/>LiDAR+YOLO] --> Fused[/obstacles/fused/]
-        DD[dock_detector_node<br/>DBSCAN+RANSAC U-match] --> DockT[/perception/dock_target/]
-        WD[wall_detector_node<br/>DBSCAN+RANSAC U-match] --> WallT[/perception/wall_target/]
+        GF[geo_fusion_node<br/>GPS frame + tracker] --> Global[/obstacles/global/]
     end
 
     subgraph Localization
-        EKF[ekf_node<br/>IMU + odometry] --> OdomF[/odometry/filtered/]
-        NS[navsat_transform_node] --> GPSF[GPS in map frame]
+        EKF[ekf_node] --> OdomF[/odometry/filtered/]
+        NS[navsat_transform_node<br/>/fromLL]
     end
 
-    subgraph Navigation["Navigation — Nav2"]
-        GCM[global_costmap]
-        LCM[local_costmap]
+    subgraph Navigation["Nav2"]
         PS[planner_server]
-        CS[controller_server]
-        BT[bt_navigator]
+        CS[controller_server<br/>Regulated Pure Pursuit]
+        CM[collision_monitor]
     end
 
-    subgraph Control
-        N2P[nav_to_pid<br/>cmd_vel clamp] --> SP[/control/setpoint/]
-        PID[pid_controller<br/>speed+yaw PID] --> Effort[/control/effort/]
-        ACT[actuator_driver<br/>MAVROS RC override]
+    subgraph Safety["Safety Behavior Tree"]
+        BT[boat_bt_node<br/>GlobalSafety + MissionMonitor]
     end
 
     subgraph Mission
         MM[mission_manager<br/>GPS waypoint queue]
     end
 
-    subgraph CompetitionBT["Competition Behavior Tree"]
-        CM[competition_manager<br/>task + lifecycle] --> CS2[/competition/status/]
-        CBT[boat_bt_node<br/>BT.CPP 4] -->|"/mission/set_bypass_target"| MM
+    subgraph Control
+        TM[twist_mux] --> CMD[/cmd_vel/]
+        N2P[nav_to_pid] --> PID[pid_controller]
+        PID --> ACT[actuator_driver<br/>MAVROS RC override]
+        PID --> PB[pico_bridge<br/>optional]
     end
 
     Image --> Y
     Scan --> LO
     Det --> FN
-    Mask --> FN
     LidarPts --> FN
-    LidarPts --> DD
-    LidarPts --> WD
-    Fused --> GCM
-    Fused --> LCM
-    OdomF --> EKF
-    OdomF --> NS
-    NS --> GCM
-    GCM --> PS
-    LCM --> CS
-    PS --> BT
-    BT --> CS
-    CS --> N2P
-    N2P --> PID
-    PID --> ACT
-    ACT -->|/mavros/rc/override| MAVROS[MAVROS → ArduPilot]
-    MM -->|NavigateToPose action| BT
-    DockT --> CBT
-    WallT --> CBT
-    CS2 --> CBT
+    LidarPts --> GF
+    Det --> GF
+    Fused --> PS
+    Fused --> CS
+    Global --> BT
+    MM -->|NavigateToPose| CS
+    BT -->|/mission/set_bypass_target| MM
+    CS --> CM -->|nav2/cmd_vel| TM
+    BT -->|boat_bt/cmd_vel| TM
+    CMD --> N2P
+    ACT --> MAVROS[MAVROS → ArduPilot]
+    PB --> PICO[Pico 2 → ESCs]
 ```
 
-`competition_manager` also calls `mission_manager`'s `/mission/start` directly for waypoint-based tasks (not shown — see Competition Behavior Tree section below for the full task-routing picture); `boat_bt_node` additionally subscribes to a global obstacle-tracking topic (from the `fusion` package, not pictured here) for `GlobalSafety`'s collision-risk detection.
+The Kelp additions in `KELP_MISSIONS.md` §3–§5 (decision log, health monitor, MQTT bridge, recorder, SonarView + `sonar_bridge` + `nmea_udp_bridge`) plug into this graph; none of them exist yet.
 
 ## TF Frame Tree
 
@@ -220,86 +268,75 @@ Static sensor transforms (published to `/tf_static` by `robot_state_publisher` f
 
 | Topic | Type | Direction | Description |
 |---|---|---|---|
-| `/lidar_driver/scan_raw` | `sensor_msgs/LaserScan` | in | LiDAR scan (hardware driver or Gazebo bridge) |
+| `/lidar_driver/scan_raw` | `sensor_msgs/LaserScan` | in | LiDAR scan (hardware driver or Gazebo bridge). The contract a Livox slice should satisfy (Capabilities §5.5) |
 | `/lidar_driver/cloud` | `sensor_msgs/PointCloud2` | out | LaserScan reprojected to 3D (z=0, frame `lidar`) — published by `scan_to_cloud` during calibration |
-| `/front_camera_driver/image_raw` | `sensor_msgs/Image` | in | Front camera frame (BGR8 640×480) |
+| `/front_camera_driver/image_raw` | `sensor_msgs/Image` | in | Front camera frame (BGR8 640×480). The contract an OAK-D-LR RGB stream should satisfy |
 | `/front_camera_driver/image_raw/camera_info` | `sensor_msgs/CameraInfo` | out | Camera intrinsics (K, D) loaded from `front_camera.yaml` via `camera_info_manager` |
-| `/imu_driver/imu_raw` | `sensor_msgs/Imu` | in | IMU data |
+| `/imu_driver/imu_raw` | `sensor_msgs/Imu` | in | IMU data (relayed from `/mavros/imu/data`; carries UM982 GPS-yaw once ArduPilot is configured for it) |
 | `/gps_driver/gps_raw` | `sensor_msgs/NavSatFix` | in | GPS fix |
 | `/odom` | `nav_msgs/Odometry` | in (sim) | Gazebo ground-truth odometry (OdometryPublisher) |
 | `/clock` | `rosgraph_msgs/Clock` | in (sim) | Simulation clock |
 | `/yolo/detections` | `vision_msgs/Detection2DArray` | out | YOLO detections |
 | `/yolo/seg_mask` | `sensor_msgs/Image` | out | Instance segmentation mask |
 | `/obstacles/lidar` | `sensor_msgs/PointCloud2` | out | Raw LiDAR obstacles (frame: `lidar`) |
-| `/obstacles/fused` | `sensor_msgs/PointCloud2` | out | LiDAR+YOLO fused obstacles (frame: `base_link`) |
-| `/perception/dock_target` | `njord_msgs/DockTarget` | out | Backward-compatible singular topic: highest-confidence FREE berth (`occupied=false`), or `detected=false` if none — `base_link` frame |
-| `/perception/dock_targets` | `njord_msgs/DockTargetArray` | out | Every U-shaped berth recognized this scan, occupied and free (Task 3.1), `base_link` frame — see `DockTarget.msg` for fields |
-| `/perception/wall_target` | `njord_msgs/WallTarget` | out | Highest-confidence FREE pier wall (Task 3.2), or `detected=false` if none — `base_link` frame |
-| `/perception/wall_targets` | `njord_msgs/WallTargetArray` | out | Every wall segment recognized this scan, occupied and free (Task 3.2), `base_link` frame — see `WallTarget.msg` for fields |
+| `/obstacles/fused` | `sensor_msgs/PointCloud2` | out | LiDAR+YOLO fused obstacles (frame: `base_link`), feeds the Nav2 costmaps |
+| `/obstacles/global` | `njord_msgs/ObstacleArray` | out | Tracked obstacles in the GPS/map frame + boat pose, consumed by `boat_bt` |
 | `/odometry/filtered` | `nav_msgs/Odometry` | out | EKF-fused odometry |
-| `/odometry/gps` | `nav_msgs/Odometry` | out | GPS converted to map frame (navsat_transform_node) |
-| `/cmd_vel` | `geometry_msgs/Twist` | out | Final arbitrated velocity command consumed by `nav_to_pid` (hardware) and `ros_gz_bridge`/`VelocityControl` (sim). Published by `twist_mux`, not Nav2 or boat_bt directly — see below. |
-| `/nav2/cmd_vel` | `geometry_msgs/Twist` | out | Nav2's own output (`cmd_vel_nav` → `velocity_smoother` → `cmd_vel_smoothed` → `collision_monitor` → here). twist_mux input, priority 10. |
-| `/boat_bt/cmd_vel` | `geometry_msgs/Twist` | out | `boat_bt_node`'s direct docking commands. twist_mux input, priority 100. |
+| `/cmd_vel` | `geometry_msgs/Twist` | out | Final arbitrated velocity command consumed by `nav_to_pid` (hardware) and `ros_gz_bridge`/`VelocityControl` (sim). Published by `twist_mux` |
+| `/nav2/cmd_vel` | `geometry_msgs/Twist` | out | Nav2's own output (`velocity_smoother` → `collision_monitor` → here). twist_mux input, priority 10 |
+| `/boat_bt/cmd_vel` | `geometry_msgs/Twist` | out | `boat_bt_node`'s direct commands (stop on tree finish). twist_mux input, priority 100 |
 | `/control/setpoint` | `geometry_msgs/Twist` | out | Clamped speed/yaw setpoint |
 | `/control/effort` | `geometry_msgs/Twist` | out | PID output |
 | `/mavros/rc/override` | `mavros_msgs/OverrideRCIn` | out | RC channels to ArduPilot |
-| `/competition/status` | `njord_msgs/CompetitionState` | out | Current competition task + lifecycle state, published by `competition_manager` (transient-local) |
-| `/competition/set_task` | `njord_msgs/SetCompetitionTask` (service) | in | Select the active competition task by `CompetitionState.TASK_*` value |
-| `/competition/start` | `std_srvs/Trigger` (service) | in | Start the selected task (skips `mission_manager` and runs the BT directly for waypoint-less tasks) |
-| `/competition/complete` | `std_srvs/Trigger` (service) | in | Called by `boat_bt_node` to report a direct-BT task (e.g. docking) finished |
-| `/mission/set_bypass_target` | `njord_msgs/SetBypassTarget` (service) | in | Requested by `boat_bt_node` to route around a cardinal marker or collision risk |
+| `/mission/start` | `njord_msgs/StartMission` (service) | in | Start a mission from a list of `GeoPoint` waypoints |
+| `/mission/abort` | `std_srvs/Trigger` (service) | in | Abort the running mission |
+| `/mission/status` | `njord_msgs/MissionStatus` | out | Mission state + waypoint progress (transient-local) |
+| `/mission/log` | `std_msgs/String` | out | Human-readable mission trail for the GUI |
+| `/mission/set_bypass_target` | `njord_msgs/SetBypassTarget` (service) | in | Temporary detour requested by `boat_bt_node` (collision risk) |
+| `/battery/state` | `sensor_msgs/BatteryState` | out | BMS pack state (`enable_bms:=true`) |
 
 ## Node Reference
 
 ### `description`
-- **`asket.urdf.xacro`** — Full robot URDF with root link `base_link` (hull body), propellers, LiDAR, cameras, GPS, IMU, and PX4 mount. Includes Gazebo sensor plugins (camera, GPU LiDAR, NavSat, IMU). `robot_state_publisher` reads this file and broadcasts the complete static TF tree on startup.
+- **`asket.urdf.xacro`** — Full robot URDF with root link `base_link` (hull body), propellers, LiDAR, cameras, GPS, IMU, and PX4 mount. Includes Gazebo sensor plugins (camera, GPU LiDAR, NavSat, IMU). `robot_state_publisher` reads this file and broadcasts the complete static TF tree on startup. Sensor heights do not yet match the hardware (see `TODOS.md`); the Kelp sensors (Livox, OAK-D-LR, UM982 antennas, sonar transducers) are not in it yet.
 - **`worlds/basicWorld.sdf`** — Minimal Gazebo Harmonic world with Physics, UserCommands, SceneBroadcaster, Sensors (camera+lidar), IMU, and NavSat system plugins.
-- **`worlds/dockingWorld.sdf`** — Same base plugins plus a static `dock_task_3_1` model: a U-shaped berth (two parallel arms + a back wall, ~2.1 m opening) for testing `dock_detector_node`. Load it with `world:=dockingWorld.sdf`.
-- **`worlds/dockingWorldOccupied.sdf`** — Two adjoining 2m×2m berths sharing a middle wall, plus a static `decoy_boat` model (reusing Asket's own hull mesh, plugin-free) parked in one berth — for testing occupied-berth handling. Load it with `world:=dockingWorldOccupied.sdf`.
+- **`worlds/collisionAvoidanceWorld.sdf`** — Two green/red buoy gates and a moving vessel (`otter`, driven on `/model/otter/cmd_vel`). Useful as a stand-in for demarcation buoys and service vessels when exercising GlobalSafety. Read its header comment: the sim LiDAR has a starboard blind spot.
 
 ### `sensors`
 - **`camera_driver`** — OpenCV camera capture → `/front_camera_driver/image_raw` + `/front_camera_driver/image_raw/camera_info`. Starts in degraded mode if no camera connected. Loads camera intrinsics via `camera_info_manager` from the URL given by the `camera_info_url` parameter (default `package://bringup/config/front_camera.yaml`). Accepts `device` (default `/dev/video0`) and `frame_id` (default `front_camera`) parameters.
 - **RPLIDAR S2M1-R2L** — driven by Slamtec's official `sllidar_ros2` (vendored as the `src/sllidar_ros2` submodule, node name `lidar_driver`), not a package in this workspace. Publishes `/lidar_driver/scan_raw` (`sensor_msgs/LaserScan`, `frame_id: lidar`, ~0.05–30 m, variable ray count set by the SDK's `DenseBoost` scan mode) — configured in `bringup/launch/njord.launch.py` (`serial_baudrate: 1000000`, topic remapped from the package's default `scan`).
 - **`imu_gps_driver`** — Relays MAVROS IMU (`/mavros/imu/data` → `/imu_driver/imu_raw`) and GPS (`/mavros/global_position/raw/fix` → `/gps_driver/gps_raw`) to the unified driver topic names. Hardware only (disabled in sim).
+- **`datum_sync`** — Anchors `navsat_transform_node`'s datum to the FC's home position so `/fromLL` waypoints and odom agree on the origin. Depends on `/mavros/home_position/home` (see `TODOS.md` for the Pico-only caveat).
+- **`bms_reader`** — Sole owner of the BMS serial link (BQ76920 via MCP2221). Publishes `/battery/state` and per-cell detail on `/battery/status_raw` and `/diagnostics`.
 
 ### `perception`
 - **`lidar_obstacle_node`** — Converts `/lidar_driver/scan_raw` → `/obstacles/lidar` (PointCloud2). Filters returns outside `minimum_obstacle_range_m`/`maximum_obstacle_range_m` (defaults 0.5–20 m) and decimates to one nearest point per `angular_decimation_deg` bin (default 1°) to bound cloud size against the RPLIDAR S2's dense native scan resolution.
 - **`fusion_node`** — Fuses LiDAR point cloud with YOLO segmentation mask via TF projection. Looks up `lidar → camera_frame` in TF to project LiDAR points into the image plane; points confirmed by the segmentation mask are labeled as obstacles. Unmatched YOLO detections get a bearing estimate at 5 m. Publishes `/obstacles/fused` in `base_link` frame. Camera intrinsics update live from `/front_camera_driver/image_raw/camera_info`. Parameters: `lidar_frame` (default `lidar`), `camera_frame` (default `front_camera`, switches to `front_camera_cal` when `lidar_camera_extrinsic` launch arg is set), `camera_info_topic`.
-- **`dock_detector_node`** — Recognizes U-shaped docking berths (Task 3.1, "normal docking") from `/obstacles/lidar`, including multiple adjoining berths sharing a wall: DBSCAN separates the cloud into candidate objects, iterative RANSAC extracts straight wall segments from each, and the segments are matched against a U template (two parallel arms + a perpendicular back wall, opening toward the boat) — every valid match within a cluster is kept, not just the best, so a wall shared between two berths can yield a separate detection per berth. Each match is classified occupied/free by checking whether scan points fall inside its interior beyond what its own matched walls explain. Publishes every recognized berth on `/perception/dock_targets` (`njord_msgs/DockTargetArray`), plus a backward-compatible `/perception/dock_target` (`njord_msgs/DockTarget`): the highest-confidence FREE berth, or `detected=false` if none. Key parameters: `berth_width_m` (default 2.0), `width_tolerance_m`, `arm_length_min_m`/`arm_length_max_m`, `parallel_angle_tol_deg`, `perp_angle_tol_deg`, `lidar_yaw_offset_deg` (mount-yaw correction into `base_link`, default 90°), `occupancy_margin_m`/`occupancy_min_points` (occupancy classification). Perception-only — no temporal filtering across scans yet. Consumed by `boat_bt_node`'s docking controller via the singular `/perception/dock_target` topic (see `boat_bt` below); the richer `/perception/dock_targets` array is published but not yet consumed by anything. Test coverage: `test/test_dock_detector.py` (27/27 passing as of 2026-08-09) + a required real-Gazebo pass (`dockingWorld.sdf`/`dockingWorldOccupied.sdf`) — see Docking Detection Testing below.
-- **`wall_detector_node`** — Recognizes a U-shaped berth (Task 3.2, "parallel docking": a ~4 m back wall the boat lies against, flanked by two ~2 m perpendicular arms, opening ~4 m wide) from `/obstacles/lidar`. Same DBSCAN+RANSAC line-extraction pipeline as `dock_detector_node`, and the same U-matching algorithm (`_find_u_shapes`/`_find_u_walls`, both deliberately duplicated rather than imported so this can't regress the tested 3.1 path), reparametrized for Task 3.2's proportions: `berth_width_m` (4.0), `width_tolerance_m` (0.6), `arm_length_min_m`/`arm_length_max_m` (1.5/2.5), `back_wall_length_min_m`/`back_wall_length_max_m` (3.0/5.0), `parallel_angle_tol_deg`/`perp_angle_tol_deg` (12°), `corner_gap_tol_m` (0.35). Matching against the full U (not just a length-filtered lone segment) both raises confidence — three corroborating segments, not one — and means a bare wall with no arms attached correctly does **not** get mistaken for this berth (see `test_wall_detector.py`'s negative-control case). Unlike `dock_detector_node`'s `opening_center` (the U's mouth, for bow-in entry), this publishes `aim_point` = the matched **back wall's own** midpoint offset by `standoff_distance_m` (default 0.5 m, **not measured against the boat's actual beam** — placeholder) toward the boat's side — Task 3.2 needs the boat to end up alongside the back wall, not enter through the opening toward it. `heading` is canonicalized to within ±90° of the boat's current heading (see `_canonicalize_heading`'s docstring for a known coin-flip edge case at exactly dead-on approach). Publishes `/perception/wall_targets` (`njord_msgs/WallTargetArray`) + singular `/perception/wall_target` (`njord_msgs/WallTarget`), same pattern as the dock detector. There is no vision class for "pier"/"wall" in the YOLO model, so — like the dock detector — this is LIDAR-only despite the vision pipeline existing elsewhere in the stack. **UNVERIFIED against a real wall** (bench/water); algorithm-level correctness only, via `test/test_wall_detector.py` (2026-08-09: 29/29 passing including the negative control, no Gazebo world exists yet for this berth to additionally check sim/hardware fidelity against, unlike Task 3.1).
 
-### `boat_bt`
-- **`boat_bt_node`** — Competition Behavior Tree (BT.CPP 4, tree defined in `bt_xml/simple_boat.xml`). Ticks at 10 Hz once odometry (`/odometry/filtered`) is received — **note:** this was `/odometry/gps` (a topic nothing publishes; see `ekf.yaml`) until 2026-08-09, which silently meant the tree never ticked at all despite every startup/service-routing check looking fine. Fixed; if you're reading old notes/branches that still say `/odometry/gps`, they predate the fix. Structure:
-  - **`GlobalSafety`** — runs on every tick regardless of the selected task (except during docking/docking_parallel, where close-range dock/wall geometry would otherwise be misread as a collision risk). Selects the highest-risk obstacle from `/obstacles/global` (nearest, most-forward, fastest-closing within `collision_forward_sector_deg`, default ±60°) and requests a bypass via `/mission/set_bypass_target`. Bypass side follows the obstacle's bearing (`+` = port → bypass starboard, `-` = starboard → bypass port; obstacles within a ±2° centreline deadband default to starboard) — a conservative reactive rule, not a full COLREG/CPA classifier.
-  - **`CompetitionTaskSelector`** — routes to a per-task subtree based on `/competition/status`. **Maneuvering** and **Path Finding** both currently only handle cardinal-marker bypass (`CardinalMarkerDetected` → `DeterminePassingSide` → `DetermineCardinalBypassTarget` → `RequestCardinalBypass`, following IALA convention: pass a marker on the side it names) — actual waypoint-course navigation for these two tasks uses only placeholder waypoints so far (their `competition_tasks/*.yaml` duplicate a single venue point, not a real course; see below). **Collision Avoidance** (Task 9.2) layers a gate-crossing + COLREG give-way sequence (`MarkerVesselDetected` → `DetermineGiveWaySide` → `DetermineGiveWayTarget` → `RequestGiveWayBypass`) on top of `GlobalSafety`'s generic reflex — see the Collision-avoidance controller paragraph below. **Docking** runs `ExecuteDocking`; **Docking Parallel** runs `ExecuteDockingParallel` (both below). **Surprise** (Task 9.4, added 2026-08-12, team working draft — see `mission_surprise` below) layers cardinal-mark passing (reused as-is from Maneuvering/Path Finding) and a new individual-buoy COLREG-side reflex (`BuoyMarkerDetected` → `DetermineBuoyPassingSide` → `DetermineBuoyBypassTarget` → `RequestBuoyBypass`, fixed `red_buoy_side` colour→side convention, default `"port"`) on top of `GlobalSafety`'s generic reflex, active only during the open-water leg between the two dockings. **UNVERIFIED end to end** — see Mission 4 below.
-  - **`MissionMonitor`** — maps `/mission/status` (`MissionStatus.SUCCEEDED/FAILED/ABORTED`) to BT `SUCCESS`/`FAILURE`, `RUNNING` otherwise.
-
-  **Docking controller** (`docking_nodes.cpp`, Task 3.1): a state machine — `WAITING_FOR_TARGET → ALIGNING → APPROACHING → FINAL_ENTRY → DOCKED` (hold) `→` reverse `→` complete — driven by `/perception/dock_target`. On reaching the opening it holds station for `docking_hold_duration_sec` (default 10 s), then reverses out at `docking_reverse_speed_mps` (default −0.25 m/s) for `docking_reverse_duration_sec` (default 4 s), then reports completion via `/competition/complete`. If the target is lost mid-approach it stops and waits up to `docking_reacquire_timeout_sec` (default 3 s) before giving up and resetting to `WAITING_FOR_TARGET`; a steering correction is only trusted for `docking_steering_hold_sec` (default 0.3 s) after it arrives, past which the boat holds rather than keep steering on a stale reading. Target confidence must clear `docking_min_confidence` (default 0.45). Publishes to `/boat_bt/cmd_vel`, not `/cmd_vel` directly — see `twist_mux` below. No AR-tag support (LiDAR-geometry detection only). Live-verified (bench, zero-actuation, synthetic perception input): the full cycle runs correctly end to end.
-
-  **Parallel-docking controller** (`parallel_docking_nodes.cpp`, Task 3.2): same state-machine shape and steering law as the docking controller above, retargeted at lying parallel alongside a wall instead of entering a U-shaped opening — `WAITING_FOR_TARGET → ALIGNING → APPROACHING → FINAL_APPROACH → DOCKED` (hold) `→` reverse `→` complete — driven by `/perception/wall_target` (`aim_point` = the wall's midpoint offset by `standoff_distance_m`, so the same bearing+heading blended steering used for docking applies unchanged). Parameter names mirror the docking controller with a `docking_parallel_` prefix, except `docking_parallel_hold_duration_sec` (default **5 s**, not 10 — spec 9.3 requires 5s for parallel docking specifically, corrected 2026-08-10 after having wrongly copied 3.1's 10s value). **UNVERIFIED against a real wall** — bench-checked only with synthetic `/perception/wall_target` input (see Running Competition Missions below), never against real LiDAR returns from an actual berth, on the bench or in the water. The berth is a 4 m×2 m U (4 m back wall the boat lies against, flanked by two 2 m perpendicular arms) — `wall_detector_node` now matches the full U (see its Node Reference entry above), so detection itself is arm-aware and high-confidence. The *controller*, though, still has no explicit real-time awareness of the arms during approach — it steers at the back wall's center (2 m clearance either way by construction) but never checks distance-to-arm directly, unlike Task 3.1's `ExecuteDocking`, which explicitly checks lateral alignment before committing to final entry. Treat this as a known gap, not a verified-safe margin.
-
-  **Collision-avoidance controller** (`collision_nodes.cpp`'s `updateGateState`/`updateMarkerVesselState`/`colregGiveWaySide`, Task 9.2, added 2026-08-12): unlike docking/parallel-docking, this is not a `BT::StatefulActionNode` — the boat transits GPS point 5 → point 6 via `mission_manager`/Nav2 (same mechanism as Maneuvering/Path Finding), and this logic just layers reactive gate/vessel handling on top, driven entirely off `/obstacles/global` (no dedicated perception node — both the gate buoys and the marker vessel are already individually tracked there). `updateGateState` pairs green+red buoys within `gate_pair_min_spacing_m`/`gate_pair_max_spacing_m` (default 3.0/7.0 m, spec: 5 m nominal) into gate 1, then (after gate 1 is crossed) gate 2, restricted to `gate_min_separation_m` (default 15.0 m) beyond gate 1 so its own buoys can't be re-matched; crossing is detected as a sign flip in the boat's perpendicular offset from the gate line between ticks. Buoy left/right (port/starboard) assignment is by boat-relative bearing at detection time, **not a fixed colour convention** — the spec text doesn't fix one for this course. The marker vessel ("The Otter of Njord") has no matching YOLO class (only buoys + 4 cardinal directions are classified), so `updateMarkerVesselState` identifies it kinematically: the nearest `lidar_confirmed`, unclassified (`class_id == "unknown"`) obstacle with `speed_mps >= vessel_min_speed_mps` (default 0.3) within `vessel_max_range_m` (default 25.0 m) and `vessel_forward_sector_deg` (default 100.0°, directly matching spec 9.2's ±100° approach angle). `colregGiveWaySide` is a **pragmatic, documented simplification** of COLREG Rules 14/15 (head-on/crossing) — not a full CPA/judging-accurate classifier: a vessel is only treated as an active give-way situation if `Obstacle.velocity_bearing_deg` (new field, added this session — the tracker's relative-velocity *direction*, previously only speed magnitude was exposed) is roughly converging back toward the boat; starboard-side-and-converging → give way, alter to starboard, pass astern; port-side-and-converging → nominally stand-on, no action (relies on `GlobalSafety`'s generic reflex as the backstop if range genuinely closes); near-dead-ahead → head-on, both alter starboard. Give-way target is a simple fixed `vessel_giveway_offset_m` (default 15.0 m) sideways offset via the same `offsetGeoPointRelativeToBoat` helper `GlobalSafety`'s own avoidance path uses — not a projected intercept point. Task completion is **not** signalled by `boat_bt` here (no `/competition/complete` call, unlike docking/docking_parallel): `collision_avoidance.yaml` now carries real (placeholder, see below) point-5/point-6 waypoints, so `competition_manager` routes through `mission_manager`'s normal waypoint transit and success is its own final-hold-at-point-6 mechanism — **live-confirmed** ("Mission started: 2 waypoints" → "Waiting for Nav2...", not an instant `STATE_RUNNING` jump). The 2-knot task speed setpoint (spec: "must immediately accelerate to set speed for task") is enforced by `mission_collision_avoidance` via a task-scoped `/controller_server/set_parameters` override of `FollowPath.desired_linear_vel`, restored on completion — a new pattern, no other mission sequencer touches Nav2 params this way. **UNVERIFIED against real gates or a real vessel** — bench-checked only with a synthetic `/obstacles/global` publisher (see Running Competition Missions below): gate 1/2 pairing and crossing, marker-vessel identification, and give-way target generation all confirmed firing correctly; the bypass request itself correctly reports "service not available" in that isolated test since no `mission_manager` was running alongside it.
-
-### `twist_mux`
-Arbitrates `/boat_bt/cmd_vel` (docking, priority 100) and `/nav2/cmd_vel` (Nav2's own output, priority 10) into the final `/cmd_vel`. Necessary because Nav2's pipeline (`controller_server`, `behavior_server`'s recovery behaviors, `collision_monitor`'s safety-stop heartbeat) keeps publishing even with no active goal — without arbitration it intermittently overrides boat_bt's direct docking commands. Config: `bringup/config/twist_mux.yaml`. `use_stamped: false` — twist_mux 4.5+ defaults to `TwistStamped` for the Nav2/REP-147 migration; this stack is still plain `Twist` throughout.
-
-### `competition_manager`
-- **`competition_manager`** — Owns competition task selection and lifecycle (`TASK_NONE/MANEUVERING/PATH_FINDING/COLLISION_AVOIDANCE/DOCKING/SURPRISE/DOCKING_PARALLEL` × `STATE_IDLE/READY/RUNNING/SUCCEEDED/FAILED/ABORTED`), published on `/competition/status`. `/competition/set_task` loads and schema-validates the task's YAML definition from `competition_tasks/`; `/competition/start` either calls `mission_manager`'s `/mission/start` with the task's waypoints (rejecting the request if a waypoint-requiring task — Maneuvering, Path Finding, or Collision Avoidance — has none configured) or, for waypoint-less tasks like Docking/Docking Parallel, jumps straight to `STATE_RUNNING` and lets `boat_bt_node` drive directly, reporting back via `/competition/complete`. Task definitions live in `competition_tasks/*.yaml` (schema v1: `task.id`/`name`/`description` + `mission.waypoints`) — `docking.yaml` and `docking_parallel.yaml` are waypoint-less BT-direct tasks and always startable; `maneuvering.yaml`, `path_finding.yaml`, and (as of 2026-08-12) `collision_avoidance.yaml` now have a non-empty waypoint list each (so they pass `competition_manager`'s waypoint-required check and route through `mission_manager`) but it's just the venue's GPS point duplicated, **not the real course** — replace with real on-site-captured waypoints before a real attempt.
+### `fusion`
+- **`geo_fusion_node`** — Associates vision detections with LiDAR clusters, lifts them into the GPS/map frame and tracks them with a constant-velocity Kalman filter. Publishes `/obstacles/global` (`njord_msgs/ObstacleArray`). See `src/fusion/README.md`.
 
 ### `vision`
-- **`vision_node`** — YOLO26n-seg ONNX Runtime inference (CPU). Publishes `Detection2DArray` and an instance mask image. Confidence threshold configurable via `vision_confidence` launch arg.
+- **`vision_node`** — YOLO26n-seg ONNX Runtime inference (CPU). Publishes `Detection2DArray` and an instance mask image. Confidence threshold configurable via `vision_confidence` launch arg. The current model (`models/yolo26n-seg-navier.onnx`) was trained on Njord buoys and cardinal marks (`{0: green, 1: red, 2: north, 3: east, 4: south, 5: west}`); the Kelp missions need a model for kelp canopy and farm demarcation buoys.
+
+### `boat_bt`
+- **`boat_bt_node`** — Safety Behavior Tree (BT.CPP 4, tree in `bt_xml/simple_boat.xml`). Ticks at 10 Hz once odometry (`/odometry/filtered`) is received. Structure:
+  - **`GlobalSafety`** — runs on every tick. Selects the highest-risk obstacle from `/obstacles/global` (nearest, most-forward, fastest-closing within `collision_forward_sector_deg`, default ±60°, range `collision_risk_range_m`, default 20 m) and requests a detour via `/mission/set_bypass_target` (offset `collision_avoidance_offset_m`, default 12 m, cooldown `request_cooldown_sec`, default 5 s). Bypass side follows the obstacle's bearing (`+` = port → bypass starboard, `-` = starboard → bypass port; ±2° centreline deadband defaults to starboard) — a conservative reactive rule, not a COLREG/CPA classifier. A buoy-classed obstacle inside `buoy_min_standoff_m` always wins (class ids set in `njord.launch.py` for the current model). Acts only while `mission_manager` is running a mission (it is the one that executes the detour).
+  - **`MissionMonitor`** — maps `/mission/status` (`SUCCEEDED/FAILED/ABORTED`) to BT `SUCCESS`/`FAILURE`, `RUNNING` otherwise. When the tree finishes it stops ticking and publishes a stop on `/boat_bt/cmd_vel`; it re-arms automatically when the next mission starts.
+  - Kelp-specific subtrees (survey-line pause/hold, canopy keep-out, failsafe ladder) slot in between `GlobalSafety` and `MissionMonitor`.
+
+### `twist_mux`
+Arbitrates `/boat_bt/cmd_vel` (priority 100) and `/nav2/cmd_vel` (Nav2's own output, priority 10) into the final `/cmd_vel`. Necessary because Nav2's pipeline (`controller_server`, `behavior_server`'s recovery behaviors, `collision_monitor`'s safety-stop heartbeat) keeps publishing even with no active goal. Config: `bringup/config/twist_mux.yaml`. `use_stamped: false` — twist_mux 4.5+ defaults to `TwistStamped` for the Nav2/REP-147 migration; this stack is still plain `Twist` throughout.
 
 ### `control`
-- **`nav_to_pid`** — Clamps Nav2 `/cmd_vel` to safe speed (≤2 m/s) and yaw rate (≤1 rad/s), republishes as `/control/setpoint`.
-- **`pid_controller`** — Dual PID (speed + yaw) driven by `/control/setpoint` and IMU feedback. Publishes `/control/effort`.
+- **`nav_to_pid`** — Clamps `/cmd_vel` to safe speed (≤2 m/s) and yaw rate (≤1 rad/s), republishes as `/control/setpoint`.
+- **`pid_controller`** — Dual PID (speed + yaw) driven by `/control/setpoint`, speed feedback from `/mavros/local_position/velocity_body` and yaw-rate feedback from IMU. Holds a zero setpoint when `/control/setpoint` is older than 0.5 s. Publishes `/control/effort` at 20 Hz. **Known bug:** it subscribes to `/imu/data`, which nothing publishes (see `TODOS.md`).
 - **`actuator_driver`** — Maps `Twist` effort to MAVROS `OverrideRCIn` RC channels (ch1=steering, ch3=throttle, ±400 µs around 1500 µs centre).
+- **`pico_bridge`** — Alternative actuation path (`use_pico_bridge:=true`): sends `L,R` motor commands and `MODE AUTO/MANUAL` to the Pico 2 over USB serial, `PING` when commands go stale (>0.3 s). The Pico firmware is in `firmware/pico/`.
 
 ### `mission`
-- **`mission_manager`** — Low-level GPS waypoint queue: sequences whatever `(lat, lon)` list it's given (via `/mission/start`) through Nav2's `NavigateToPose` action, one at a time. Converts each waypoint GPS → map frame via `robot_localization/FromLL` on demand (not all at once upfront). Persists an on-disk checkpoint so a crash/respawn mid-mission resumes rather than restarting. Not competition-task-aware — the five mission-sequencer packages below are what actually decide *which* waypoints/tasks to run and in what order, calling `mission_manager` (for GPS transit legs) and `competition_manager` (for task selection) underneath.
-
-### `mission_maneuvering_pathfinding`, `mission_collision_avoidance`, `mission_docking`, `mission_docking_parallel`, `mission_surprise`
-Five thin sequencer nodes, one per competition mission — see **Running Competition Missions** below for what each does and how to run it. All five share the same shape: wait for a GPS fix + required services, then drive `competition_manager`/`mission_manager` through the mission's phases, retrying/clearing tasks as needed, reporting only via logs and `/mission/status`+`/competition/status` (no dedicated result topic of their own). `mission_docking`, `mission_docking_parallel`, and `mission_surprise` additionally publish static reference-point `NavSatFix` topics (`/docking_mission/points/*`, `/docking_parallel_mission/points/*`, `/surprise_mission/points/*`) for GUI plotting. `mission_collision_avoidance` additionally enforces the task's 2-knot speed setpoint via a `/controller_server/set_parameters` override at task start/end (see the Collision-avoidance controller paragraph above). `mission_surprise` chains three `competition_manager` task selections in one run (`TASK_DOCKING` → `TASK_SURPRISE` → `TASK_DOCKING_PARALLEL`) rather than just one or two — see Mission 4 below.
+- **`mission_manager`** — GPS waypoint queue: sequences whatever `(lat, lon)` list it's given (via `/mission/start`) through Nav2's `NavigateToPose` action, one at a time, converting each waypoint GPS → map frame via `robot_localization/FromLL` on demand. Accepts temporary detours from `boat_bt` on `/mission/set_bypass_target`. Holds at the final waypoint for `final_hold_duration_sec` (default 5 s) before reporting SUCCEEDED. Persists an on-disk checkpoint so a crash/respawn mid-mission resumes rather than restarting. This is the entry point for the Kelp transit (M2) and survey-lane (M3) missions.
+- **`north_test_mission`**, **`random_test_mission`** — send one goal offset from the current GPS fix (useful for stand and sim tests).
 
 ### `calibration`
 - **`scan_to_cloud`** — Converts `/lidar_driver/scan_raw` (LaserScan) → `/lidar_driver/cloud` (PointCloud2, frame `lidar`, z=0) using `laser_geometry`. Used during calibration for RViz2 visualisation.
@@ -309,16 +346,19 @@ Five thin sequencer nodes, one per competition mission — see **Running Competi
 
 ### `bringup`
 - **`njord.launch.py`** — Single launch file for the entire stack with per-subsystem enable flags and sim/hardware switching.
-- **`ekf.yaml`** — 2D EKF fusing IMU yaw + angular velocity with wheel odometry (if available).
+- **`ekf.yaml`** — 2D EKF fusing IMU yaw + angular velocity with odometry.
 - **`navsat.yaml`** — NavSat transform configured for zero-altitude, Cartesian output, no magnetic declination.
-- **`nav2_params.yaml`** — Regulated Pure Pursuit controller, NavFn planner, obstacle costmaps fed by `/obstacles/fused`.
+- **`nav2_params.yaml`** — Regulated Pure Pursuit controller (`desired_linear_vel: 1.0`), NavFn planner, obstacle costmaps fed by `/obstacles/fused`, `collision_monitor` (stop polygon disabled).
+
+### `foxglove`
+Foxglove Studio layout and helper scripts. See [`src/foxglove/README.md`](src/foxglove/README.md), including which parts of the Kelp navigation-monitor screen (Missions §4.7) are still missing.
 
 ## Simulation Details
 
 Gazebo Harmonic (Sim 8) integration via `ros_gz_bridge` and `ros_gz_sim`:
 
-- World name: `default` (in `basicWorld.sdf`)
-- GPS datum: Trondheim (63.4305°N, 10.3951°E) set via `<spherical_coordinates>` in the world SDF — Gazebo NavSat outputs coordinates relative to this origin
+- World name: `default` (in `basicWorld.sdf` and `collisionAvoidanceWorld.sdf`)
+- GPS datum: Lüderitz, Namibia (approx. 26.648°S, 15.154°E) set via `<spherical_coordinates>` in the world SDF — Gazebo NavSat outputs coordinates relative to this origin. It was Trondheim for Njord; replace it with the surveyed F9P base point once known. The 2D Python simulator (`sim` package) keeps its own Barcelona origin in `simulator.py` for the October Barcelona water tests.
 - Robot spawned via `ros2 run ros_gz_sim create -file asket.urdf -world default` with a 5 s delay to let Gazebo load
 - Clock bridged: `gz.msgs.Clock` → `/clock` (`rosgraph_msgs/Clock`)
 - Sensor topics published by Gazebo directly to their driver topic names (e.g. `/lidar_driver/scan_raw`, `/imu_driver/imu_raw`)
@@ -340,7 +380,7 @@ Gazebo Harmonic (Sim 8) integration via `ros_gz_bridge` and `ros_gz_sim`:
 | `gz::sim::systems::OdometryPublisher` | Ground-truth odometry → `/model/asket/odometry` (bridged to `/odom`). Breaks the EKF↔navsat circular dependency by giving EKF a bootstrap odometry source. |
 | `gz::sim::systems::VelocityControl` | Applies Nav2 `/cmd_vel` Twist directly to the model body. Appropriate for USV where thruster dynamics are not simulated. |
 
-**Verified working (as of 2026-05-17):**
+**Verified working (as of 2026-05-17, with the Trondheim datum — not yet re-run with the Lüderitz datum):**
 - Full TF chain `map → odom → base_link` established at startup
 - All Nav2 lifecycle nodes (controller, planner, bt_navigator, collision_monitor, etc.) activate cleanly
 - GPS waypoint conversion via `/fromLL` returns correct map-frame coordinates
@@ -504,7 +544,7 @@ ros2 topic hz /obstacles/fused               # ~10 Hz from fusion_node
 ros2 topic hz /odometry/filtered             # ~30 Hz from EKF
 ros2 topic hz /odom                          # ~30 Hz (sim only, Gazebo OdometryPublisher)
 ros2 topic echo /yolo/detections             # stream YOLO detections
-ros2 topic echo /gps_driver/gps_raw --once  # verify GPS datum (~63.43°N, ~10.39°E in sim)
+ros2 topic echo /gps_driver/gps_raw --once  # verify GPS datum (~26.65°S, ~15.15°E in Gazebo sim)
 ros2 run tf2_tools view_frames               # render full TF tree to PDF
 ros2 node list                               # confirm all nodes are running
 ```
@@ -522,174 +562,9 @@ ros2 topic hz /obstacles/fused           # expect ~10 Hz (fusion timer, lidar-on
 ros2 topic echo /obstacles/lidar --once  # verify width > 0 (points detected)
 ```
 
-## Docking Detection Testing
+## Running a mission on the real boat (SSH from another laptop)
 
-`dock_detector_node` has two levels of test coverage — run both after touching its parameters or algorithm.
-
-**1. Synthetic test suite (fast, no Gazebo needed):**
-
-```bash
-python3 src/perception/test/test_dock_detector.py
-```
-
-Spins up `DockDetectorNode` in-process and feeds it synthetic `/obstacles/lidar` scenes (see `src/perception/test/dock_scene_publisher.py`) built directly from `dockingWorldOccupied.sdf`'s geometry — two berths, one occupied by a decoy, swept across a 3×3×3 matrix of distances (3/5/8 m), angles (±30°/0°), and which berth is occupied (A/B/neither). Exits non-zero if the **hard invariant** ever fails: the occupied berth must never be reported as an available (`detected=true, occupied=false`) target. Prints a PASS/FAIL line per case, plus soft/informational checks on whether the free berth was actually found.
-
-**2. Real-Gazebo verification (required after any change — the synthetic suite alone can't catch sim/sensor-fidelity issues like clustering fragmentation or mesh-loading errors):**
-
-```bash
-# Launch the two-berth occupied-dock world with perception only
-ros2 launch bringup njord.launch.py use_sim:=true world:=dockingWorldOccupied.sdf \
-  enable_mavros:=false enable_localization:=false enable_nav2:=false \
-  enable_control:=false enable_mission:=false enable_vision:=false
-```
-
-The boat spawns at the world origin facing world +x — by design (see `dockingWorldOccupied.sdf`'s comments) the dock sits at true bearing ~90° (the boat's left) so it falls within the sim `gpu_lidar`'s usable FOV cone. **Keep the boat's yaw at 0** when repositioning for tests — rotating it to "face" the dock breaks that FOV alignment.
-
-Reposition the boat with Gazebo's teleport service instead of driving it (faster, deterministic):
-
-```bash
-# name/position/z are required; keep orientation identity (w:1) per the note above
-gz service -s /world/default/set_pose --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 3000 \
-  --req 'name: "asket", position: {x: -1.05, y: 2.0, z: 0.1}, orientation: {x: 0, y: 0, z: 0.0, w: 1.0}'
-```
-
-Then inspect detections:
-
-```bash
-ros2 topic echo /perception/dock_targets --once   # every berth this scan, occupied and free
-ros2 topic echo /perception/dock_target --once    # best FREE berth only, or detected:false if none
-```
-
-Known-good reference poses (world x/y, yaw=0) against `dockingWorldOccupied.sdf`'s berth layout — Berth A (free) is at world x≈-1.05, Berth B (occupied by the decoy) is at world x≈+1.05, both at world y≈5:
-
-| Pose (world x, y) | Expected result |
-|---|---|
-| `-1.05, 2.0` | Berth A resolves, `occupied: false` |
-| `1.05, 2.0` | Berth B resolves, `occupied: true`; singular topic shows `detected: false` (no free berth in view) |
-| `0.0, 0.0` (default spawn) | `detected: false` on both topics — known viewing-angle limitation, see `TODOS.md` |
-
-## Competition Task Testing
-
-Exercise the competition Behavior Tree directly via `competition_manager`'s services, below `mission_manager`/the mission sequencers — all task IDs are startable now (`maneuvering`/`path_finding`/`collision_avoidance` will run through `mission_manager` and reach a real Nav2 goal, just against the placeholder duplicated-point "course", not a real one):
-
-```bash
-# Select a task (TASK_NONE=0, MANEUVERING=1, PATH_FINDING=2, COLLISION_AVOIDANCE=3, DOCKING=4, SURPRISE=5, DOCKING_PARALLEL=6)
-ros2 service call /competition/set_task njord_msgs/srv/SetCompetitionTask "{task: 4}"
-
-# Start it — for docking/docking_parallel this jumps straight to STATE_RUNNING and
-# boat_bt_node drives directly (no mission_manager waypoints involved). collision_avoidance
-# (as of 2026-08-12) instead routes through mission_manager like maneuvering/path_finding —
-# live-confirmed: "Mission start request sent" -> "Mission started: 2 waypoints" -> "Waiting
-# for Nav2..." rather than an instant STATE_RUNNING jump.
-ros2 service call /competition/start std_srvs/srv/Trigger "{}"
-
-# Watch the lifecycle
-ros2 topic echo /competition/status
-```
-
-For docking specifically, `boat_bt_node` needs a live `/perception/dock_target` — either run against `dockingWorld.sdf`/`dockingWorldOccupied.sdf` in sim (see Docking Detection Testing above), or drive it with synthetic perception input for fast iteration without Gazebo (useful in headless/no-GPU environments where Gazebo's sensor rendering may hang — see `headless` launch arg above): publish a synthetic `sensor_msgs/PointCloud2` on `/obstacles/lidar` using `src/perception/test/dock_scene_publisher.py`'s wall-geometry helpers alongside a real `dock_detector_node`, and a synthetic `nav_msgs/Odometry` on `/odometry/filtered` to satisfy `boat_bt_node`'s odom gate. For docking_parallel, same idea with `wall_scene_publisher.py` + `wall_detector_node` + `/perception/wall_target`, or skip perception entirely and publish synthetic `WallTarget`/`DockTarget` messages directly — see Running Competition Missions below for a worked example of exactly that.
-
-## Running Competition Missions
-
-Each competition mission has its own thin sequencer node (package `mission_maneuvering_pathfinding`/`mission_docking`/`mission_docking_parallel`) that decides *which* `competition_manager` tasks to run, in what order, and stitches GPS transit legs around them via `mission_manager`. All three require, at minimum: a GPS fix on `/gps_driver/gps_raw`, and `competition_manager`+`mission_manager` (for docking/docking_parallel, which have transit legs) or just `competition_manager` (for maneuvering/path_finding, which are pure waypoint tasks) up and reachable.
-
-**Safety note:** all three missions end up commanding real thrusters via `actuator_driver`/MAVROS when the full stack (`enable_control:=true`) is running on hardware. Follow the stand-test procedure in `TODOS.md` before ever running one for real — boat on a stand, human present, know how to kill power. For development/logic testing, use the zero-actuation pattern at the bottom of this section instead.
-
-### Mission 1 — Task 9.1 Maneuvering + Path Finding
-Package: `mission_maneuvering_pathfinding` · Node: `maneuvering_pathfinding_mission` · Launch flag: `enable_maneuvering_pathfinding_mission`
-
-Per spec 9.1: one combined course, GPS point 1 → 3 → 4, split into Part 1 ("maneuvering", GNSS waypoints only, points 1→3) and Part 2 ("path_finding", camera vision + GNSS interpreting cardinal markers/buoys, points 3→4). Each part retries up to `task_retries` (default 1) on failure. **If Part 1 fails after exhausting its retries, the spec explicitly allows resuming at GPS point 3 for Part 2 rather than ending the attempt** — this node does that (falls through to Part 2 instead of stopping), fixed/verified 2026-08-10. Only Part 2 failing ends the whole attempt. Retry recovery itself (both parts): a task timing out at this node's own `task_timeout_s` — as opposed to Nav2 reporting a real FAILED/ABORTED — leaves `competition_manager` stuck at `STATE_RUNNING`; `_abort_mission()` clears it via `/mission/abort` before each retry (fixed/verified live 2026-08-09, see commit `9dbadf4`).
-
-```bash
-# As part of the full stack:
-ros2 launch bringup njord.launch.py enable_maneuvering_pathfinding_mission:=true
-
-# Standalone (needs competition_manager + mission_manager + Nav2 already up):
-ros2 run mission_maneuvering_pathfinding maneuvering_pathfinding_mission \
-  --ros-args -p task_timeout_s:=180.0 -p task_retries:=1
-```
-
-### Mission 2 — Task 9.2 Collision Avoidance
-Package: `mission_collision_avoidance` · Node: `collision_avoidance_mission` · Launch flag: `enable_collision_avoidance_mission` · Waypoints: `competition_manager/competition_tasks/collision_avoidance.yaml` (points 5/6 — **placeholder coordinates**, same convention as `maneuvering.yaml`)
-
-Single task, no Part 1/Part 2 split (unlike Mission 1) — retries up to `task_retries` (default **1**, spec: "2 attempts per collision situation"). At task start (best-effort, does not block/fail the mission on failure) it overrides Nav2's `FollowPath.desired_linear_vel` to the spec's 2-knot set speed (1.029 m/s) via `/controller_server/set_parameters`, restoring the prior value in a `finally` block regardless of outcome — **known limitation**: a crash mid-task would leave the global speed changed until the stack restarts, no cleanup-on-crash handling exists. The gate-crossing + COLREG give-way logic itself lives in `boat_bt`'s `CollisionAvoidanceTask` subtree (see the Collision-avoidance controller paragraph above), not in this sequencer.
-
-```bash
-# As part of the full stack:
-ros2 launch bringup njord.launch.py enable_collision_avoidance_mission:=true
-
-# Standalone (needs competition_manager + mission_manager + Nav2 already up):
-ros2 run mission_collision_avoidance collision_avoidance_mission \
-  --ros-args -p task_timeout_s:=180.0 -p task_retries:=1
-```
-
-### Mission 3.1 — Task 3.1 Docking
-Package: `mission_docking` · Node: `docking_mission` · Launch flag: `enable_docking_mission` · Waypoints: `mission_docking/config/docking_3_1_waypoints.yaml` (points 7/8/9 — **placeholder coordinates**, see the file's own comment)
-
-Three phases: GPS transit to point 8 (staging, ~10 m from the berth) → `ExecuteDocking` via `TASK_DOCKING` (up to `max_docking_attempts`, default 2) → GPS transit to point 9 (stops the spec's task timer). Point 7 (start line) is not itself navigated to — the boat is expected to already be there.
-
-```bash
-ros2 launch bringup njord.launch.py enable_docking_mission:=true
-
-# Standalone (needs mission_manager + competition_manager up):
-ros2 run mission_docking docking_mission \
-  --ros-args -p max_docking_attempts:=2 -p docking_timeout_s:=180.0
-```
-
-### Mission 3.2 — Task 3.2 Parallel Docking
-Package: `mission_docking_parallel` · Node: `docking_parallel_mission` · Launch flag: `enable_docking_parallel_mission` · Waypoints: `mission_docking_parallel/config/docking_3_2_waypoints.yaml` (points 10/11/12 — **placeholder coordinates**)
-
-Same three-phase shape as Mission 3.1: transit to point 11 (staging) → `ExecuteDockingParallel` via `TASK_DOCKING_PARALLEL` (up to `max_docking_attempts`, default 2, matches spec 9.3's "2 attempts for parallel docking") → transit to point 12. Hold time at the berth is 5s (`docking_parallel_hold_duration_sec`, corrected 2026-08-10 — spec 9.3 says 5s, not 3.1's 10s). **The close-range phase is UNVERIFIED against a real wall** (bench/water) — see the `boat_bt` Node Reference entry above and `enable_docking_parallel_mission`'s description. Do a bench check before a real attempt.
-
-```bash
-ros2 launch bringup njord.launch.py enable_docking_parallel_mission:=true
-
-# Standalone (needs mission_manager + competition_manager up):
-ros2 run mission_docking_parallel docking_parallel_mission \
-  --ros-args -p max_docking_attempts:=2 -p docking_timeout_s:=180.0
-```
-
-### Mission 4 — Task 9.4 Surprise
-Package: `mission_surprise` · Node: `surprise_mission` · Launch flag: `enable_surprise_mission` · Waypoints: `mission_surprise/config/surprise_9_4_waypoints.yaml` (points 14/4.1-4.5/13 — **placeholder coordinates**, same convention as the other missions' waypoint files)
-
-TEAM WORKING DRAFT — the official njord.gitbook.io 9.4 page is still blank ("revealed during competition"); this implements the team's own course-sketch interpretation, not a confirmed spec (open questions logged in `TODOS.md`). Three phases, no Part 1/2 split: `TASK_DOCKING` (up to `max_docking_attempts`, default 2) → open-water transit through point_14_exit, point_4_1..point_4_5, point_13_parallel_approach under `TASK_SURPRISE` (activates `SurpriseTask`'s cardinal-mark + individual-buoy COLREG handling in `boat_bt`, see the Node Reference entry above) → `TASK_DOCKING_PARALLEL` (same retry count). Ends the moment the boat is stationary in the final berth — no exit leg, unlike Missions 3.1/3.2. **UNVERIFIED end to end** — chains Mission 3.1's proven orchestration pattern with Mission 3.2's own still-unverified close-range controller, and the new buoy-COLREG logic has no prior real-world exercise at all. Only smoke-tested in a scratch container as of 2026-08-12: clean rebuild, BT loads the new nodes with no factory errors, and a full `njord.launch.py` run confirmed the sequencer correctly drives `competition_manager` into `TASK_DOCKING` for phase 1 — no real GPS course, buoys, or dock target were available to exercise phases 2/3.
-
-```bash
-ros2 launch bringup njord.launch.py enable_surprise_mission:=true
-
-# Standalone (needs mission_manager + competition_manager up):
-ros2 run mission_surprise surprise_mission \
-  --ros-args -p max_docking_attempts:=2 -p docking_timeout_s:=180.0 -p transit_timeout_s:=180.0
-```
-
-If the node exits immediately with `No GPS fix within Ns — aborting surprise mission`, no `/gps_driver/gps_raw` publisher is reachable (raise `gps_timeout_s` or check the GPS driver). If it exits with `<service> not available after Ns`, `competition_manager`/`mission_manager` aren't up yet — bring up the full stack first, or check `ros2 node list` for `competition_manager`/`mission_manager`. A phase that never completes (stuck at `competition_manager`'s `STATE_RUNNING` past this node's own `docking_timeout_s`/`transit_timeout_s`) is the same known limitation as the other sequencers — see Mission 1's retry-recovery note above; this node's own `_clear_competition_task()` unsticks it between attempts.
-
-### Zero-actuation dry run (no Nav2, no hardware, nothing can move)
-Useful for testing `competition_manager`/`boat_bt_node` wiring and the close-range controllers without any risk to the boat. Bring up just the two core nodes — no `actuator_driver`, no MAVROS, no Nav2, so nothing downstream can ever receive a real motion command:
-
-```bash
-ros2 run competition_manager competition_manager &
-ros2 run boat_bt boat_bt_node &
-
-# Unblock WaitForOdom (the tree gates on any message here, content unused)
-ros2 topic pub -r 20 /odometry/filtered nav_msgs/msg/Odometry '{}' &
-
-# Drive Task 3.2 directly, bypassing the mission sequencer and perception:
-ros2 service call /competition/set_task njord_msgs/srv/SetCompetitionTask '{task: 6}'
-ros2 service call /competition/start std_srvs/srv/Trigger '{}'
-ros2 topic pub -r 10 /perception/wall_target njord_msgs/msg/WallTarget \
-  '{header: {frame_id: base_link}, detected: true, aim_point: {x: 0.3, y: 0.0, z: 0.0}, heading: 0.02, length: 4.0, confidence: 0.9, occupied: false}'
-
-# Watch it progress through the state machine
-ros2 topic echo /competition/status
-```
-(Same pattern with `task: 4` + `/perception/dock_target` for Task 3.1.) This is exactly how the Task 3.2 controller was first exercised end to end on 2026-08-09 — see `WAITING_FOR_TARGET → APPROACHING → FINAL_APPROACH → DOCKED → hold → reverse → complete` in the log output.
-
-For Task 9.2 (collision avoidance), the same pattern applies but the fixture is `njord_msgs/ObstacleArray` on `/obstacles/global` (`boat_position`/`boat_heading` plus green/red buoy pairs and, between the two gates, a moving `class_id: "unknown"` obstacle) rather than a single `WallTarget`/`DockTarget` message — `boat_bt_node` needs the `buoy_green_class_id`/`buoy_red_class_id` params set (`njord.launch.py`'s defaults are `"0"`/`"1"`) to pair the buoys into gates at all. This was exercised live 2026-08-12 with a synthetic step-function boat position (three discrete GPS positions held for several seconds each — before gate 1, between the two gates, past gate 2 — deliberately not a continuous ramp, since a continuous ramp's marker-vessel window can race past faster than intended if ROS discovery takes a moment to connect topics): confirmed `Gate 1 found`/`Gate 1 crossed`/`Gate 2 found`/`Gate 2 crossed` and, throughout the between-gates window, repeated `Give-way target generated: ... side=starboard` for a vessel converging from starboard — matching Rule 15's give-way call. **Still NOT verified** against real gates or a real vessel, on the bench or in the water.
-
-### Running a mission on the real boat (SSH from another laptop)
-
-The Jetson runs `njord.service` (installed by `scripts/init.sh`, see Production Deploy below), a systemd unit that keeps a Podman container named `njord` running the full stack — `ros2 launch bringup njord.launch.py` with **default args**, so `enable_control:=true` (real thrusters live) and all three `enable_*_mission` flags `false` (no mission auto-starts on boot). To run one specific mission, SSH in and layer just that mission node onto the already-running stack rather than restarting anything:
+The onboard computer runs `njord.service` (installed by `scripts/init.sh`, see Production Deploy below), a systemd unit that keeps a Podman container named `njord` running the full stack — `ros2 launch bringup njord.launch.py` with **default args**, so `enable_control:=true` (real thrusters live) but no mission starts until one is sent. To run a mission, SSH in and call `/mission/start` inside the running container:
 
 ```bash
 # From your laptop:
@@ -700,25 +575,26 @@ ssh pi@boat.local
 systemctl status njord.service
 podman ps   # expect a container named "njord"
 
-# Exec into the running container and start the mission sequencer.
-# This does NOT restart the main stack — it just adds this one node.
+# Send a waypoint mission inside the running container.
 podman exec -it njord bash -c \
   "source /opt/ros/jazzy/setup.bash && source /opt/njord/setup.bash && \
-   ros2 run mission_docking_parallel docking_parallel_mission"
-# (swap the package/executable for mission_maneuvering_pathfinding /
-# maneuvering_pathfinding_mission, or mission_docking / docking_mission)
+   ros2 service call /mission/start njord_msgs/srv/StartMission \
+   '{waypoints: [{latitude: <lat>, longitude: <lon>, altitude: 0.0}]}'"
 ```
 
-**Before running any of this for real: the thrusters are live.** Boat secured (on a stand or in the water with the area clear), a human present the whole time, and you know how to cut power or hit the kill switch — same stand-test discipline as `TODOS.md`'s pre-water checklist. `Ctrl+C` in that SSH session stops only the mission node (the exec'd process) — the rest of the stack, and any motion already in progress, is unaffected until you separately stop it.
+**Before running any of this for real: the thrusters are live.** Boat secured (on a stand or in the water with the area clear), a human present the whole time, and you know how to cut power or hit the kill switch (Pico Ch8 LOW = ESTOP) — same stand-test discipline as `TODOS.md`'s pre-water checklist and the M0 checks in `KELP_MISSIONS.md`.
 
-Useful commands from a second SSH session while a mission runs (the Jetson host itself has no ROS install — `ros2` commands must run inside the container, same as the mission-launch command above):
+Useful commands from a second SSH session while a mission runs (the host itself has no ROS install — `ros2` commands must run inside the container):
 
 ```bash
 podman logs -f njord                                        # main stack's logs, from the bare host
 podman exec -it njord bash -c \
   "source /opt/ros/jazzy/setup.bash && source /opt/njord/setup.bash && \
-   ros2 topic echo /competition/status"                      # from the bare host, runs inside the container
-sudo systemctl restart njord.service   # full stack restart (stops any running mission with it) — bare host
+   ros2 topic echo /mission/status"                          # runs inside the container
+podman exec -it njord bash -c \
+  "source /opt/ros/jazzy/setup.bash && source /opt/njord/setup.bash && \
+   ros2 service call /mission/abort std_srvs/srv/Trigger"    # abort the mission
+sudo systemctl restart njord.service   # full stack restart — bare host
 podman stop njord                      # hard stop — kills the whole stack, thrusters included — bare host
 ```
 
@@ -728,4 +604,10 @@ podman stop njord                      # hard stop — kills the whole stack, th
 bash scripts/deploy-pi.sh
 ```
 
-SSHes into `pi@boat.local`, pulls the latest image from GHCR, sets up systemd services for BlueOS and Njord, and reboots.
+SSHes into `pi@boat.local`, pulls the latest image from GHCR, sets up systemd services for BlueOS and the stack, and reboots. First-time provisioning of a new Pi uses `scripts/init.sh`, which needs a GitHub token with `read:packages` passed in the environment:
+
+```bash
+sudo GHCR_TOKEN=<pat> bash scripts/init.sh
+```
+
+Never commit the token. The onboard computer for Namibia (Raspberry Pi + BlueOS as here, or a Jetson AGX Orin) is still an open decision, see `KELP_CAPABILITIES.md` §0.5.

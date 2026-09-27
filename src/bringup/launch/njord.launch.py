@@ -39,7 +39,7 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument("world",                default_value="basicWorld.sdf",
                               description="World file name under description/worlds/ to load in Gazebo "
-                                          "(e.g. dockingWorld.sdf for the U-shaped Task 3.1 berth)"),
+                                          "(e.g. collisionAvoidanceWorld.sdf for buoy + moving-vessel obstacles)"),
         DeclareLaunchArgument("enable_mavros",       default_value="true"),
         DeclareLaunchArgument("enable_localization",  default_value="true"),
         DeclareLaunchArgument("enable_nav2",          default_value="true"),
@@ -48,51 +48,6 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_geo_fusion",    default_value="true"),
         DeclareLaunchArgument("enable_control",       default_value="true"),
         DeclareLaunchArgument("enable_mission",       default_value="true"),
-        DeclareLaunchArgument("enable_maneuvering_pathfinding_mission", default_value="false",
-                              description="Run the Task 9.1 (Maneuvering + Path Finding) mission "
-                                          "sequencer — off by default so bringing up the stack "
-                                          "doesn't immediately start the competition run."),
-        DeclareLaunchArgument("enable_docking_mission", default_value="false",
-                              description="Run the Task 3.1 (Normal Docking) mission sequencer "
-                                          "— off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission."),
-        DeclareLaunchArgument("enable_docking_parallel_mission", default_value="false",
-                              description="Run the Task 3.2 (Parallel Docking) mission "
-                                          "sequencer — off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission. Its "
-                                          "close-range manoeuvre (ExecuteDockingParallel) "
-                                          "and wall_detector_node are both real now but "
-                                          "UNVERIFIED — never run against a real wall, on "
-                                          "the bench or in the water — see "
-                                          "DockingParallelTask in simple_boat.xml. Do a "
-                                          "bench check before enabling for a real attempt."),
-        DeclareLaunchArgument("enable_collision_avoidance_mission", default_value="false",
-                              description="Run the Task 9.2 (Collision Avoidance) mission "
-                                          "sequencer — off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission. Its "
-                                          "gate-crossing + COLREG give-way handling "
-                                          "(collision_nodes.cpp's updateGateState/"
-                                          "updateMarkerVesselState) is real now but "
-                                          "UNVERIFIED — never run against real gates or a "
-                                          "real vessel, on the bench or in the water — see "
-                                          "CollisionAvoidanceTask in simple_boat.xml. Do a "
-                                          "bench check before enabling for a real attempt."),
-        DeclareLaunchArgument("enable_surprise_mission", default_value="false",
-                              description="Run the Task 9.4 (Surprise) mission sequencer "
-                                          "— off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission. TEAM "
-                                          "WORKING DRAFT (the official 9.4 spec is still "
-                                          "unreleased) that chains normal docking -> "
-                                          "open-water transit -> parallel docking into one "
-                                          "run — see mission_surprise/surprise_mission.py's "
-                                          "docstring and TODOS.md. UNVERIFIED end to end — "
-                                          "never run, on the bench or in the water. Do NOT "
-                                          "enable alongside enable_docking_mission/"
-                                          "enable_docking_parallel_mission/"
-                                          "enable_collision_avoidance_mission — they would "
-                                          "race for the same competition_manager task "
-                                          "selection."),
-        DeclareLaunchArgument("enable_competition",   default_value="true"),
         DeclareLaunchArgument("enable_boat_bt",       default_value="true"),
         DeclareLaunchArgument("enable_vision",        default_value="true"),
         DeclareLaunchArgument("vision_confidence",    default_value="0.5"),
@@ -362,26 +317,6 @@ def generate_launch_description():
                 ]),
             }, sim_time],
         ),
-        # U-shaped docking-berth detector (Task 3.1) — DBSCAN + RANSAC over
-        # /obstacles/lidar, publishes /perception/dock_target.
-        Node(
-            package="perception",
-            executable="dock_detector_node",
-            name="dock_detector_node",
-            condition=IfCondition(LaunchConfiguration("enable_perception")),
-            parameters=[sim_time],
-        ),
-        # Straight pier-wall detector (Task 3.2) — DBSCAN + RANSAC over
-        # /obstacles/lidar, publishes /perception/wall_target. Same
-        # LIDAR-only reasoning as dock_detector_node above; UNVERIFIED
-        # against a real berth wall, see wall_detector_node's docstring.
-        Node(
-            package="perception",
-            executable="wall_detector_node",
-            name="wall_detector_node",
-            condition=IfCondition(LaunchConfiguration("enable_perception")),
-            parameters=[sim_time],
-        ),
         # Geo-referenced fusion — labelled obstacles in the global GPS frame on
         # /obstacles/global (runs alongside fusion_node for comparison).
         Node(
@@ -427,12 +362,11 @@ def generate_launch_description():
             parameters=[sim_time],
         ),
         # Arbitrates between Nav2's own /cmd_vel output (via collision_monitor,
-        # remapped to nav2/cmd_vel) and boat_bt's direct docking commands
-        # (boat_bt/cmd_vel) — both used to independently publish straight onto
-        # the shared /cmd_vel that nav_to_pid/ros_gz_bridge consume, racing
-        # each other whenever Nav2's pipeline stayed alive (e.g. its
-        # collision_monitor safety-stop heartbeat) during a BT-direct task
-        # like docking. See bringup/config/twist_mux.yaml for priorities.
+        # remapped to nav2/cmd_vel) and boat_bt's direct commands
+        # (boat_bt/cmd_vel). Without it the two race on the shared /cmd_vel that
+        # nav_to_pid/ros_gz_bridge consume, because Nav2's pipeline keeps
+        # publishing (e.g. collision_monitor's safety-stop heartbeat) even with
+        # no active goal. See bringup/config/twist_mux.yaml for priorities.
         Node(
             package="twist_mux",
             executable="twist_mux",
@@ -502,37 +436,11 @@ def generate_launch_description():
             output="screen",
         ),
 
-        # Competition lifecycle coordination.
+        # Safety Behavior Tree (GlobalSafety obstacle bypass + MissionMonitor).
         #
-        # respawn=True: a crash here loses the selected task/lifecycle state
-        # (also in-memory only) — the operator (or the mission sequencer, if
-        # it is still alive) must re-issue /competition/set_task +
-        # /competition/start after a respawn.
-        TimerAction(
-            period=2.0,
-            actions=[
-                Node(
-                    package="competition_manager",
-                    executable="competition_manager",
-                    name="competition_manager",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_competition")
-                    ),
-                    parameters=[sim_time],
-                    respawn=True,
-                    respawn_delay=2.0,
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Competition Behavior Tree.
-        #
-        # respawn=True: a crash mid-docking resets the docking state machine
-        # to WAITING_FOR_TARGET on respawn (docking_state_ is in-memory only)
-        # — acceptable because dock_detector_node will republish a fresh
-        # target and the approach just restarts, rather than the whole
-        # process staying dead.
+        # respawn=True: boat_bt holds only transient per-tick state (latest
+        # obstacle snapshot, last bypass request), so a respawn simply resumes
+        # the reflex on the next /obstacles/global message.
         TimerAction(
             period=3.0,
             actions=[
@@ -547,119 +455,16 @@ def generate_launch_description():
                     respawn_delay=2.0,
                     parameters=[
                         sim_time,
-                        # YOLO class ids for yolo26n-seg-navier.onnx, read from
-                        # the model's own embedded metadata (names dict):
-                        # {0: 'green', 1: 'red', 2: 'north', 3: 'east',
-                        #  4: 'south', 5: 'west'}.
+                        # Buoy class ids for the currently loaded model
+                        # (yolo26n-seg-navier.onnx, embedded names dict:
+                        # {0: 'green', 1: 'red', ...}). Update these when the
+                        # model is retrained for Kelp farm demarcation buoys.
                         {
-                            "cardinal_north_class_id": "2",
-                            "cardinal_east_class_id": "3",
-                            "cardinal_south_class_id": "4",
-                            "cardinal_west_class_id": "5",
                             "buoy_green_class_id": "0",
                             "buoy_red_class_id": "1",
                             "buoy_min_standoff_m": 1.0,
                         },
                     ],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 9.1 mission sequencer — starts after competition_manager/boat_bt
-        # so /competition/set_task and /competition/start are already up.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_maneuvering_pathfinding",
-                    executable="maneuvering_pathfinding_mission",
-                    name="maneuvering_pathfinding_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_maneuvering_pathfinding_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 9.2 (Collision Avoidance) mission sequencer — same startup
-        # timing as the Task 9.1 sequencer above.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_collision_avoidance",
-                    executable="collision_avoidance_mission",
-                    name="collision_avoidance_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_collision_avoidance_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 3.1 (Normal Docking) mission sequencer — same startup timing
-        # as the Task 9.1 sequencer above; the two are mutually exclusive in
-        # practice (both default off) but there's no harm in sharing the
-        # delay since only one is normally enabled at a time.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_docking",
-                    executable="docking_mission",
-                    name="docking_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_docking_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 3.2 (Parallel Docking) mission sequencer — same startup
-        # timing as the other sequencers above. Its close-range manoeuvre
-        # (DockingParallelTask -> ExecuteDockingParallel in simple_boat.xml)
-        # is real now but UNVERIFIED against a real wall; the transit-leg
-        # orchestration is real and follows the same pattern as
-        # mission_docking's.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_docking_parallel",
-                    executable="docking_parallel_mission",
-                    name="docking_parallel_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_docking_parallel_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 9.4 (Surprise) mission sequencer — same startup timing as the
-        # other sequencers above. Chains TASK_DOCKING -> open-water transit
-        # (TASK_SURPRISE) -> TASK_DOCKING_PARALLEL into one run; see
-        # mission_surprise/surprise_mission.py's docstring. TEAM WORKING
-        # DRAFT, UNVERIFIED end to end — see enable_surprise_mission above.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_surprise",
-                    executable="surprise_mission",
-                    name="surprise_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_surprise_mission")
-                    ),
-                    parameters=[sim_time],
                     output="screen",
                 ),
             ],

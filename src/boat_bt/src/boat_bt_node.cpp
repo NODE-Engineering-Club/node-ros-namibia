@@ -8,59 +8,11 @@ BoatBTNode::BoatBTNode()
   odom_received_(false),
   mission_status_received_(false),
   mission_state_(njord_msgs::msg::MissionStatus::IDLE),
-  competition_status_received_(false),
-  competition_task_(njord_msgs::msg::CompetitionState::TASK_NONE),
-  competition_state_(njord_msgs::msg::CompetitionState::STATE_IDLE),
   tree_finished_(false),
-  cardinal_marker_detected_(false),
-  cardinal_target_ready_(false),
-  last_cardinal_request_id_(0),
-  dock_target_received_(false),
-  dock_target_available_(false),
-  docking_complete_(false),
-  competition_completion_request_sent_(false),
-  competition_completion_confirmed_(false),
-  docking_state_(DockingState::WAITING_FOR_TARGET),
-  wall_target_received_(false),
-  wall_target_available_(false),
-  docking_parallel_complete_(false),
-  docking_parallel_state_(DockingParallelState::WAITING_FOR_TARGET),
   collision_risk_detected_(false),
   avoidance_target_ready_(false),
   last_avoidance_request_id_(0)
 {
-  // -----------------------------------------------------------------------
-  // Task 1: cardinal-marker class mapping
-  // -----------------------------------------------------------------------
-
-  declare_parameter<std::string>(
-    "cardinal_north_class_id",
-    "");
-
-  declare_parameter<std::string>(
-    "cardinal_east_class_id",
-    "");
-
-  declare_parameter<std::string>(
-    "cardinal_south_class_id",
-    "");
-
-  declare_parameter<std::string>(
-    "cardinal_west_class_id",
-    "");
-
-  declare_parameter<double>(
-    "cardinal_min_confidence",
-    0.5);
-
-  declare_parameter<double>(
-    "cardinal_max_range_m",
-    50.0);
-
-  declare_parameter<double>(
-    "cardinal_bypass_offset_m",
-    8.0);
-
   // -----------------------------------------------------------------------
   // Collision Avoidance configuration
   //
@@ -91,7 +43,7 @@ BoatBTNode::BoatBTNode()
     5.0);
 
   // -----------------------------------------------------------------------
-  // Buoy minimum standoff (spec 9.1)
+  // Buoy minimum standoff
   // -----------------------------------------------------------------------
 
   declare_parameter<std::string>(
@@ -105,267 +57,6 @@ BoatBTNode::BoatBTNode()
   declare_parameter<double>(
     "buoy_min_standoff_m",
     1.0);
-
-  // -----------------------------------------------------------------------
-  // Task 9.4: individual buoy COLREG-side handling (Surprise)
-  //
-  // Fixed colour->side convention for the whole open-water leg (not a
-  // per-sub-leg seaward/shoreward detector): Surprise's transit is one
-  // continuous one-way leg from the normal-dock exit to the parallel-dock
-  // entrance, not an out-and-back course, so there is no "reversal" case to
-  // detect within a single run. red_buoy_side is the side a red buoy
-  // should end up on as the boat passes it; green buoys always take the
-  // opposite side. Flip this parameter on-site if the real course's
-  // orientation turns out reversed from this assumption -- see TODOS.md.
-  // -----------------------------------------------------------------------
-
-  declare_parameter<double>(
-    "buoy_colreg_max_range_m",
-    15.0);
-
-  declare_parameter<double>(
-    "buoy_bypass_offset_m",
-    2.0);
-
-  declare_parameter<std::string>(
-    "red_buoy_side",
-    "port");
-
-  // -----------------------------------------------------------------------
-  // Task 9.2: gate-crossing + marker-vessel COLREG give-way
-  // -----------------------------------------------------------------------
-
-  declare_parameter<double>(
-    "gate_pair_min_spacing_m",
-    3.0);
-
-  declare_parameter<double>(
-    "gate_pair_max_spacing_m",
-    7.0);
-
-  declare_parameter<double>(
-    "gate_min_separation_m",
-    15.0);
-
-  declare_parameter<double>(
-    "vessel_min_speed_mps",
-    0.3);
-
-  declare_parameter<double>(
-    "vessel_max_range_m",
-    25.0);
-
-  // Per spec 9.2 part 2: the marker vessel can approach from the ASV's
-  // starboard side at a bearing anywhere from 0 deg (near dead-ahead) to
-  // 90 deg (dead abeam) relative to the ASV's direction of travel. On a
-  // genuine collision course (constant-bearing, decreasing-range) that
-  // bearing stays roughly fixed as it closes, so the detector must see the
-  // full 0-90 deg range from first detection, not just a narrow forward
-  // cone. Full sector is +/- (this value / 2), so 200 deg covers +/-100
-  // deg -- 90 deg plus margin -- on both sides (kept symmetric so part 1's
-  // dead-ahead approach and any left-side test also stay covered). Old
-  // default of 100 deg (+/-50 deg) was too narrow and would miss a vessel
-  // approaching near dead abeam until it had already closed well past a
-  // safe reaction distance.
-  declare_parameter<double>(
-    "vessel_forward_sector_deg",
-    200.0);
-
-  declare_parameter<double>(
-    "vessel_centreline_deadband_deg",
-    5.0);
-
-  declare_parameter<double>(
-    "vessel_converging_deg_threshold",
-    90.0);
-
-  declare_parameter<double>(
-    "vessel_giveway_offset_m",
-    15.0);
-
-  // -----------------------------------------------------------------------
-  // Docking configuration
-  //
-  // All important values are ROS parameters so the competition team can
-  // tune the controller without editing or rebuilding the C++ source.
-  // -----------------------------------------------------------------------
-
-  declare_parameter<double>(
-    "docking_min_confidence",
-    0.45);
-
-  declare_parameter<double>(
-    "docking_target_timeout_sec",
-    1.0);
-
-  declare_parameter<double>(
-    "docking_reacquire_timeout_sec",
-    3.0);
-
-  declare_parameter<double>(
-    "docking_steering_hold_sec",
-    0.3);
-
-  declare_parameter<double>(
-    "docking_alignment_tolerance_rad",
-    0.20);
-
-  declare_parameter<double>(
-    "docking_entry_trigger_distance_m",
-    1.5);
-
-  declare_parameter<double>(
-    "docking_lateral_tolerance_m",
-    0.45);
-
-  declare_parameter<double>(
-    "docking_final_entry_duration_sec",
-    2.5);
-
-  declare_parameter<double>(
-    "docking_hold_duration_sec",
-    10.0);
-
-  declare_parameter<double>(
-    "docking_reverse_duration_sec",
-    4.0);
-
-  declare_parameter<double>(
-    "docking_alignment_speed_mps",
-    0.20);
-
-  declare_parameter<double>(
-    "docking_approach_speed_mps",
-    0.45);
-
-  declare_parameter<double>(
-    "docking_final_speed_mps",
-    0.20);
-
-  declare_parameter<double>(
-    "docking_reverse_speed_mps",
-    -0.25);
-
-  declare_parameter<double>(
-    "docking_max_yaw_rate_radps",
-    0.70);
-
-  declare_parameter<double>(
-    "docking_bearing_gain",
-    1.20);
-
-  declare_parameter<double>(
-    "docking_heading_gain",
-    0.40);
-
-  // -----------------------------------------------------------------------
-  // Parallel-docking configuration (Task 3.2)
-  //
-  // Same structure as the docking block above, retargeted at a wall-
-  // parallel standoff approach instead of U-opening entry — see
-  // parallel_docking_nodes.cpp's file header. UNVERIFIED defaults, not
-  // tuned against a real wall.
-  // -----------------------------------------------------------------------
-
-  declare_parameter<double>(
-    "docking_parallel_min_confidence",
-    0.45);
-
-  declare_parameter<double>(
-    "docking_parallel_target_timeout_sec",
-    1.0);
-
-  declare_parameter<double>(
-    "docking_parallel_reacquire_timeout_sec",
-    3.0);
-
-  declare_parameter<double>(
-    "docking_parallel_steering_hold_sec",
-    0.3);
-
-  declare_parameter<double>(
-    "docking_parallel_alignment_tolerance_rad",
-    0.20);
-
-  declare_parameter<double>(
-    "docking_parallel_approach_trigger_distance_m",
-    1.0);
-
-  declare_parameter<double>(
-    "docking_parallel_final_approach_duration_sec",
-    2.5);
-
-  declare_parameter<double>(
-    "docking_parallel_hold_duration_sec",
-    // Spec 9.3 (njord.gitbook.io/2026/9-task-descriptions/9.3-docking,
-    // read 2026-08-10): "stay stationary parallel to the dock for 5
-    // seconds" -- NOT 10s (that's Task 3.1's normal-docking hold time,
-    // this parameter previously just copied it by mistake).
-    5.0);
-
-  declare_parameter<double>(
-    "docking_parallel_reverse_duration_sec",
-    4.0);
-
-  declare_parameter<double>(
-    "docking_parallel_alignment_speed_mps",
-    0.20);
-
-  declare_parameter<double>(
-    "docking_parallel_approach_speed_mps",
-    0.35);
-
-  declare_parameter<double>(
-    "docking_parallel_final_speed_mps",
-    0.15);
-
-  declare_parameter<double>(
-    "docking_parallel_reverse_speed_mps",
-    -0.25);
-
-  declare_parameter<double>(
-    "docking_parallel_max_yaw_rate_radps",
-    0.70);
-
-  declare_parameter<double>(
-    "docking_parallel_bearing_gain",
-    1.20);
-
-  declare_parameter<double>(
-    "docking_parallel_heading_gain",
-    0.40);
-
-  // -----------------------------------------------------------------------
-  // Read cardinal-marker parameters
-  // -----------------------------------------------------------------------
-
-  cardinal_north_class_id_ =
-    get_parameter(
-    "cardinal_north_class_id").as_string();
-
-  cardinal_east_class_id_ =
-    get_parameter(
-    "cardinal_east_class_id").as_string();
-
-  cardinal_south_class_id_ =
-    get_parameter(
-    "cardinal_south_class_id").as_string();
-
-  cardinal_west_class_id_ =
-    get_parameter(
-    "cardinal_west_class_id").as_string();
-
-  cardinal_min_confidence_ =
-    get_parameter(
-    "cardinal_min_confidence").as_double();
-
-  cardinal_max_range_m_ =
-    get_parameter(
-    "cardinal_max_range_m").as_double();
-
-  cardinal_bypass_offset_m_ =
-    get_parameter(
-    "cardinal_bypass_offset_m").as_double();
 
   // -----------------------------------------------------------------------
   // Read collision-avoidance parameters
@@ -408,202 +99,6 @@ BoatBTNode::BoatBTNode()
     "buoy_min_standoff_m").as_double();
 
   // -----------------------------------------------------------------------
-  // Read Task 9.4 (individual buoy COLREG-side) parameters
-  // -----------------------------------------------------------------------
-
-  buoy_colreg_max_range_m_ =
-    get_parameter(
-    "buoy_colreg_max_range_m").as_double();
-
-  buoy_bypass_offset_m_ =
-    get_parameter(
-    "buoy_bypass_offset_m").as_double();
-
-  red_buoy_side_ =
-    get_parameter(
-    "red_buoy_side").as_string();
-
-  // -----------------------------------------------------------------------
-  // Read Task 9.2 (gate + marker-vessel) parameters
-  // -----------------------------------------------------------------------
-
-  gate_pair_min_spacing_m_ =
-    get_parameter(
-    "gate_pair_min_spacing_m").as_double();
-
-  gate_pair_max_spacing_m_ =
-    get_parameter(
-    "gate_pair_max_spacing_m").as_double();
-
-  gate_min_separation_m_ =
-    get_parameter(
-    "gate_min_separation_m").as_double();
-
-  vessel_min_speed_mps_ =
-    get_parameter(
-    "vessel_min_speed_mps").as_double();
-
-  vessel_max_range_m_ =
-    get_parameter(
-    "vessel_max_range_m").as_double();
-
-  vessel_forward_sector_deg_ =
-    get_parameter(
-    "vessel_forward_sector_deg").as_double();
-
-  vessel_centreline_deadband_deg_ =
-    get_parameter(
-    "vessel_centreline_deadband_deg").as_double();
-
-  vessel_converging_deg_threshold_ =
-    get_parameter(
-    "vessel_converging_deg_threshold").as_double();
-
-  vessel_giveway_offset_m_ =
-    get_parameter(
-    "vessel_giveway_offset_m").as_double();
-
-  // -----------------------------------------------------------------------
-  // Read docking parameters
-  // -----------------------------------------------------------------------
-
-  docking_min_confidence_ =
-    get_parameter(
-    "docking_min_confidence").as_double();
-
-  docking_target_timeout_sec_ =
-    get_parameter(
-    "docking_target_timeout_sec").as_double();
-
-  docking_reacquire_timeout_sec_ =
-    get_parameter(
-    "docking_reacquire_timeout_sec").as_double();
-
-  docking_steering_hold_sec_ =
-    get_parameter(
-    "docking_steering_hold_sec").as_double();
-
-  docking_alignment_tolerance_rad_ =
-    get_parameter(
-    "docking_alignment_tolerance_rad").as_double();
-
-  docking_entry_trigger_distance_m_ =
-    get_parameter(
-    "docking_entry_trigger_distance_m").as_double();
-
-  docking_lateral_tolerance_m_ =
-    get_parameter(
-    "docking_lateral_tolerance_m").as_double();
-
-  docking_final_entry_duration_sec_ =
-    get_parameter(
-    "docking_final_entry_duration_sec").as_double();
-
-  docking_hold_duration_sec_ =
-    get_parameter(
-    "docking_hold_duration_sec").as_double();
-
-  docking_reverse_duration_sec_ =
-    get_parameter(
-    "docking_reverse_duration_sec").as_double();
-
-  docking_alignment_speed_mps_ =
-    get_parameter(
-    "docking_alignment_speed_mps").as_double();
-
-  docking_approach_speed_mps_ =
-    get_parameter(
-    "docking_approach_speed_mps").as_double();
-
-  docking_final_speed_mps_ =
-    get_parameter(
-    "docking_final_speed_mps").as_double();
-
-  docking_reverse_speed_mps_ =
-    get_parameter(
-    "docking_reverse_speed_mps").as_double();
-
-  docking_max_yaw_rate_radps_ =
-    get_parameter(
-    "docking_max_yaw_rate_radps").as_double();
-
-  docking_bearing_gain_ =
-    get_parameter(
-    "docking_bearing_gain").as_double();
-
-  docking_heading_gain_ =
-    get_parameter(
-    "docking_heading_gain").as_double();
-
-  // -----------------------------------------------------------------------
-  // Read parallel-docking parameters
-  // -----------------------------------------------------------------------
-
-  docking_parallel_min_confidence_ =
-    get_parameter(
-    "docking_parallel_min_confidence").as_double();
-
-  docking_parallel_target_timeout_sec_ =
-    get_parameter(
-    "docking_parallel_target_timeout_sec").as_double();
-
-  docking_parallel_reacquire_timeout_sec_ =
-    get_parameter(
-    "docking_parallel_reacquire_timeout_sec").as_double();
-
-  docking_parallel_steering_hold_sec_ =
-    get_parameter(
-    "docking_parallel_steering_hold_sec").as_double();
-
-  docking_parallel_alignment_tolerance_rad_ =
-    get_parameter(
-    "docking_parallel_alignment_tolerance_rad").as_double();
-
-  docking_parallel_approach_trigger_distance_m_ =
-    get_parameter(
-    "docking_parallel_approach_trigger_distance_m").as_double();
-
-  docking_parallel_final_approach_duration_sec_ =
-    get_parameter(
-    "docking_parallel_final_approach_duration_sec").as_double();
-
-  docking_parallel_hold_duration_sec_ =
-    get_parameter(
-    "docking_parallel_hold_duration_sec").as_double();
-
-  docking_parallel_reverse_duration_sec_ =
-    get_parameter(
-    "docking_parallel_reverse_duration_sec").as_double();
-
-  docking_parallel_alignment_speed_mps_ =
-    get_parameter(
-    "docking_parallel_alignment_speed_mps").as_double();
-
-  docking_parallel_approach_speed_mps_ =
-    get_parameter(
-    "docking_parallel_approach_speed_mps").as_double();
-
-  docking_parallel_final_speed_mps_ =
-    get_parameter(
-    "docking_parallel_final_speed_mps").as_double();
-
-  docking_parallel_reverse_speed_mps_ =
-    get_parameter(
-    "docking_parallel_reverse_speed_mps").as_double();
-
-  docking_parallel_max_yaw_rate_radps_ =
-    get_parameter(
-    "docking_parallel_max_yaw_rate_radps").as_double();
-
-  docking_parallel_bearing_gain_ =
-    get_parameter(
-    "docking_parallel_bearing_gain").as_double();
-
-  docking_parallel_heading_gain_ =
-    get_parameter(
-    "docking_parallel_heading_gain").as_double();
-
-  // -----------------------------------------------------------------------
   // ROS interfaces
   // -----------------------------------------------------------------------
 
@@ -611,10 +106,8 @@ BoatBTNode::BoatBTNode()
    * Published on a dedicated topic, not /cmd_vel directly: Nav2's own
    * pipeline (controller_server, behavior_server's recovery behaviors,
    * collision_monitor's safety-stop heartbeat) also targets /cmd_vel
-   * whenever it's alive, even with no active goal. Publishing there
-   * directly caused boat_bt's docking commands to race against Nav2's
-   * idle-but-live output. twist_mux arbitrates the two into the real
-   * /cmd_vel (see bringup/config/twist_mux.yaml).
+   * whenever it's alive, even with no active goal. twist_mux arbitrates the
+   * two into the real /cmd_vel (see bringup/config/twist_mux.yaml).
    */
   cmd_pub_ =
     create_publisher<geometry_msgs::msg::Twist>(
@@ -624,15 +117,9 @@ BoatBTNode::BoatBTNode()
   // /odometry/gps is never published (see ekf.yaml: deliberately not
   // created, to avoid double-fusing GPS) -- WaitForOdom, the very first
   // node in MainTree's ReactiveSequence, gates the entire tree on
-  // odom_received_ becoming true, so subscribing to a topic nothing
-  // publishes meant the whole tree never ticked past that first node.
-  // Confirmed live: /boat_bt/cmd_vel received exactly one message
-  // (resetDockingController()'s own direct call, not from tree ticking)
-  // over an 8s window with TASK_DOCKING RUNNING -- if the tree were
-  // actually ticking, executeDockingController()'s WAITING_FOR_TARGET
-  // branch alone would publish (0,0) on every ~100ms tick. Every other
-  // consumer in this codebase (mission_manager.py, nav2_params.yaml) uses
-  // /odometry/filtered; this now matches them.
+  // odom_received_ becoming true, so this must be a topic that is actually
+  // published. Every other consumer in this codebase (mission_manager.py,
+  // nav2_params.yaml) uses /odometry/filtered; this matches them.
   odom_sub_ =
     create_subscription<nav_msgs::msg::Odometry>(
     "/odometry/filtered",
@@ -654,18 +141,6 @@ BoatBTNode::BoatBTNode()
       this,
       std::placeholders::_1));
 
-  rclcpp::QoS competition_status_qos(1);
-  competition_status_qos.transient_local();
-
-  competition_status_sub_ =
-    create_subscription<njord_msgs::msg::CompetitionState>(
-    "/competition/status",
-    competition_status_qos,
-    std::bind(
-      &BoatBTNode::competition_status_callback,
-      this,
-      std::placeholders::_1));
-
   obstacles_sub_ =
     create_subscription<njord_msgs::msg::ObstacleArray>(
     "/obstacles/global",
@@ -675,31 +150,9 @@ BoatBTNode::BoatBTNode()
       this,
       std::placeholders::_1));
 
-  dock_target_sub_ =
-    create_subscription<njord_msgs::msg::DockTarget>(
-    "/perception/dock_target",
-    10,
-    std::bind(
-      &BoatBTNode::dock_target_callback,
-      this,
-      std::placeholders::_1));
-
-  wall_target_sub_ =
-    create_subscription<njord_msgs::msg::WallTarget>(
-    "/perception/wall_target",
-    10,
-    std::bind(
-      &BoatBTNode::wall_target_callback,
-      this,
-      std::placeholders::_1));
-
   bypass_client_ =
     create_client<njord_msgs::srv::SetBypassTarget>(
     "/mission/set_bypass_target");
-
-  competition_complete_client_ =
-    create_client<std_srvs::srv::Trigger>(
-    "/competition/complete");
 
   // -----------------------------------------------------------------------
   // Behavior Tree
@@ -735,21 +188,11 @@ BoatBTNode::BoatBTNode()
     "boat_bt_node started with tree: %s",
     xml_path.c_str());
 
-  if (!cardinalMappingConfigured()) {
-    RCLCPP_WARN(
-      get_logger(),
-      "Cardinal marker class mapping is not configured. "
-      "Set cardinal_north_class_id, cardinal_east_class_id, "
-      "cardinal_south_class_id and cardinal_west_class_id "
-      "when the YOLO class mapping is known.");
-  }
-
   if (buoy_green_class_id_.empty() && buoy_red_class_id_.empty()) {
-    RCLCPP_WARN(
+    RCLCPP_INFO(
       get_logger(),
-      "Buoy class mapping is not configured. Set buoy_green_class_id "
-      "and buoy_red_class_id — the buoy_min_standoff_m_ hard standoff "
-      "check will never fire until at least one is set.");
+      "Buoy class mapping is not configured (buoy_green_class_id / "
+      "buoy_red_class_id); the buoy minimum-standoff check is disabled.");
   }
   else {
     RCLCPP_INFO(
@@ -767,21 +210,6 @@ BoatBTNode::BoatBTNode()
     "range=%.1f m, forward sector=+/-%.1f deg",
     collision_risk_range_m_,
     collision_forward_sector_deg_);
-
-  RCLCPP_INFO(
-    get_logger(),
-    "Docking controller enabled: confidence>=%.2f, "
-    "target timeout=%.2f s, reacquire timeout=%.2f s, "
-    "steering hold=%.2f s, "
-    "approach speed=%.2f m/s, final speed=%.2f m/s, "
-    "max yaw=%.2f rad/s",
-    docking_min_confidence_,
-    docking_target_timeout_sec_,
-    docking_reacquire_timeout_sec_,
-    docking_steering_hold_sec_,
-    docking_approach_speed_mps_,
-    docking_final_speed_mps_,
-    docking_max_yaw_rate_radps_);
 }
 
 
@@ -803,6 +231,9 @@ void BoatBTNode::odom_callback(
 void BoatBTNode::mission_status_callback(
   const njord_msgs::msg::MissionStatus::SharedPtr msg)
 {
+  const uint8_t previous_state =
+    mission_state_;
+
   mission_status_received_ = true;
   mission_state_ = msg->state;
 
@@ -814,224 +245,27 @@ void BoatBTNode::mission_status_callback(
     msg->message.c_str(),
     msg->current_waypoint,
     msg->total_waypoints);
-}
-
-
-void BoatBTNode::competition_status_callback(
-  const njord_msgs::msg::CompetitionState::SharedPtr msg)
-{
-  const uint8_t previous_task =
-    competition_task_;
-
-  const uint8_t previous_state =
-    competition_state_;
-
-  competition_status_received_ = true;
-  competition_task_ = msg->task;
-  competition_state_ = msg->state;
-
-  RCLCPP_INFO(
-    get_logger(),
-    "Competition status received: "
-    "task=%u, state=%u, message='%s'",
-    static_cast<unsigned int>(msg->task),
-    static_cast<unsigned int>(msg->state),
-    msg->message.c_str());
 
   /*
-   * tick_tree() latches tree_finished_ = true (and stops ticking the tree
-   * at all, permanently, for the rest of this process's life) whenever
-   * MainTree's ReactiveSequence resolves to either SUCCESS or FAILURE --
-   * which MissionMonitor causes on ANY waypoint-based task (maneuvering,
-   * path_finding, collision_avoidance) ending in FAILED/ABORTED, e.g. from
-   * a plain /mission/abort. Until this fix, only docking_task_started/
-   * docking_parallel_task_started below ever reset it back to false, so a
-   * single aborted attempt at any waypoint-based task would silently kill
-   * BT ticking (GlobalSafety's reflex included) for every task afterward,
-   * with no error beyond the one-time "Behavior Tree failed" log line --
-   * found live 2026-08-12 by cycling all six tasks through one long-running
-   * process and noticing task 2/3's tree never actually ticked after task
-   * 1's deliberate abort (competition_manager/mission_manager state still
-   * progressed normally throughout, since that's independent of tree
-   * ticking, which is exactly what made this easy to miss). Reset
-   * generically on ANY task starting, not just docking/docking_parallel.
+   * tick_tree() latches tree_finished_ = true (and stops ticking the tree,
+   * GlobalSafety included) whenever MainTree resolves to SUCCESS or FAILURE,
+   * which MissionMonitor causes on any mission ending SUCCEEDED, FAILED or
+   * ABORTED. Re-arm the tree whenever a new mission starts, so one finished
+   * or aborted mission cannot silently disable collision avoidance for every
+   * mission after it in the same process.
    */
-  const bool any_task_started =
-    competition_state_ ==
-    njord_msgs::msg::CompetitionState::STATE_RUNNING &&
-    (
-      previous_task != competition_task_ ||
-      previous_state !=
-      njord_msgs::msg::CompetitionState::STATE_RUNNING
-    );
+  const bool mission_started =
+    mission_state_ ==
+    njord_msgs::msg::MissionStatus::RUNNING &&
+    previous_state !=
+    njord_msgs::msg::MissionStatus::RUNNING;
 
-  if (any_task_started) {
+  if (mission_started && tree_finished_) {
     tree_finished_ = false;
-  }
-
-  /*
-   * Reset docking only when a new docking run begins.
-   *
-   * This allows the same node process to be reused for multiple competition
-   * attempts without retaining the previous DOCKED state.
-   */
-  const bool docking_task_started =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_DOCKING &&
-    competition_state_ ==
-    njord_msgs::msg::CompetitionState::STATE_RUNNING &&
-    (
-      previous_task !=
-      njord_msgs::msg::CompetitionState::TASK_DOCKING ||
-      previous_state !=
-      njord_msgs::msg::CompetitionState::STATE_RUNNING
-    );
-
-  if (docking_task_started) {
-    // tree_finished_ already reset above by any_task_started.
-    competition_completion_request_sent_ = false;
-    competition_completion_confirmed_ = false;
-    resetDockingController();
 
     RCLCPP_INFO(
       get_logger(),
-      "New docking competition run started");
-  }
-
-  const bool docking_task_succeeded =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_DOCKING &&
-    competition_state_ ==
-    njord_msgs::msg::CompetitionState::STATE_SUCCEEDED;
-
-  if (docking_task_succeeded) {
-    competition_completion_confirmed_ = true;
-    publishDockingCommand(0.0, 0.0);
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Docking completion confirmed through /competition/status");
-  }
-
-  /*
-   * Stop the boat when docking is externally aborted or failed.
-   */
-  const bool docking_stopped =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_DOCKING &&
-    (
-      competition_state_ ==
-      njord_msgs::msg::CompetitionState::STATE_FAILED ||
-      competition_state_ ==
-      njord_msgs::msg::CompetitionState::STATE_ABORTED
-    );
-
-  if (docking_stopped) {
-    publishDockingCommand(0.0, 0.0);
-
-    RCLCPP_WARN(
-      get_logger(),
-      "Docking task stopped externally");
-  }
-
-  /*
-   * Same reset/complete/stop handling as TASK_DOCKING above, mirrored for
-   * TASK_DOCKING_PARALLEL so the same node process can be reused across
-   * competition attempts of either task.
-   */
-  const bool docking_parallel_task_started =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_DOCKING_PARALLEL &&
-    competition_state_ ==
-    njord_msgs::msg::CompetitionState::STATE_RUNNING &&
-    (
-      previous_task !=
-      njord_msgs::msg::CompetitionState::TASK_DOCKING_PARALLEL ||
-      previous_state !=
-      njord_msgs::msg::CompetitionState::STATE_RUNNING
-    );
-
-  if (docking_parallel_task_started) {
-    // tree_finished_ already reset above by any_task_started.
-    competition_completion_request_sent_ = false;
-    competition_completion_confirmed_ = false;
-    resetDockingParallelController();
-
-    RCLCPP_INFO(
-      get_logger(),
-      "New parallel-docking competition run started");
-  }
-
-  const bool docking_parallel_task_succeeded =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_DOCKING_PARALLEL &&
-    competition_state_ ==
-    njord_msgs::msg::CompetitionState::STATE_SUCCEEDED;
-
-  if (docking_parallel_task_succeeded) {
-    competition_completion_confirmed_ = true;
-    publishDockingParallelCommand(0.0, 0.0);
-
-    RCLCPP_INFO(
-      get_logger(),
-      "Parallel-docking completion confirmed through /competition/status");
-  }
-
-  const bool docking_parallel_stopped =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_DOCKING_PARALLEL &&
-    (
-      competition_state_ ==
-      njord_msgs::msg::CompetitionState::STATE_FAILED ||
-      competition_state_ ==
-      njord_msgs::msg::CompetitionState::STATE_ABORTED
-    );
-
-  if (docking_parallel_stopped) {
-    publishDockingParallelCommand(0.0, 0.0);
-
-    RCLCPP_WARN(
-      get_logger(),
-      "Parallel-docking task stopped externally");
-  }
-
-  /*
-   * Task 9.2 (Collision Avoidance) is waypoint-based (unlike docking/
-   * docking_parallel above) -- it completes through mission_manager's own
-   * /mission/status, not a boat_bt-owned /competition/complete request, so
-   * there is no _succeeded/_stopped cmd_vel handling here to mirror. Only
-   * the gate/marker-vessel/give-way state needs resetting on a fresh
-   * attempt, so the same node process can be reused across attempts.
-   */
-  const bool collision_avoidance_task_started =
-    competition_task_ ==
-    njord_msgs::msg::CompetitionState::TASK_COLLISION_AVOIDANCE &&
-    competition_state_ ==
-    njord_msgs::msg::CompetitionState::STATE_RUNNING &&
-    (
-      previous_task !=
-      njord_msgs::msg::CompetitionState::TASK_COLLISION_AVOIDANCE ||
-      previous_state !=
-      njord_msgs::msg::CompetitionState::STATE_RUNNING
-    );
-
-  if (collision_avoidance_task_started) {
-    gate1_found_ = false;
-    gate2_found_ = false;
-    gate1_crossed_ = false;
-    gate2_crossed_ = false;
-    gate1_prev_side_valid_ = false;
-    gate2_prev_side_valid_ = false;
-
-    marker_vessel_detected_ = false;
-
-    give_way_side_.clear();
-    give_way_target_ready_ = false;
-    last_give_way_request_id_ = 0;
-
-    RCLCPP_INFO(
-      get_logger(),
-      "New collision-avoidance (Task 9.2) competition run started");
+      "New mission started; Behavior Tree re-armed");
   }
 }
 
@@ -1045,11 +279,14 @@ void BoatBTNode::obstacles_callback(
   current_boat_heading_ =
     msg->boat_heading;
 
-  updateCardinalMarkerState(*msg);
   updateCollisionRiskState(*msg);
-  updateGateState(*msg);
-  updateMarkerVesselState(*msg);
-  updateBuoyMarkerState(*msg);
+}
+
+
+void BoatBTNode::publishStopCommand()
+{
+  cmd_pub_->publish(
+    geometry_msgs::msg::Twist());
 }
 
 
@@ -1072,7 +309,7 @@ void BoatBTNode::tick_tree()
   {
     tree_finished_ = true;
 
-    publishDockingCommand(0.0, 0.0);
+    publishStopCommand();
 
     RCLCPP_INFO(
       get_logger(),
@@ -1087,7 +324,7 @@ void BoatBTNode::tick_tree()
   {
     tree_finished_ = true;
 
-    publishDockingCommand(0.0, 0.0);
+    publishStopCommand();
 
     RCLCPP_ERROR(
       get_logger(),
