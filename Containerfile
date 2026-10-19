@@ -49,6 +49,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-sklearn \
     python3-pip \
     git \
+    # asket_sensor_fusion (Kelp SAM2/fusion pipeline): PCL-based nodes.
+    # These are plain CPU C++ deps with no Jetson/CUDA requirement, so they
+    # live in the shared base stage and build on every platform CI already
+    # targets — only the TensorRT/CUDA runtime for sam2_vision is isolated
+    # to the "prod-jetson" stage below.
+    libpcl-dev \
+    libeigen3-dev \
+    ros-jazzy-pcl-conversions \
+    ros-jazzy-tf2-sensor-msgs \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
@@ -93,3 +102,43 @@ RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "bringup", "njord.launch.py"]
+
+# --- Jetson-only target: SAM2/TensorRT runtime for the Kelp perception -------
+#
+# NOT built by .github/workflows/build.yaml (which only ever builds
+# `target: prod`, on a generic QEMU-emulated arm64 runner with no NVIDIA apt
+# repo and no GPU). Building this stage is a manual, on/for-the-Jetson step:
+#
+#   docker build --target prod-jetson -t asket:prod-jetson .
+#
+# This FROM line assumes an x86_64/arm64 build host where pip can resolve
+# CUDA-enabled tensorrt/pycuda wheels (e.g. an actual Jetson with NVIDIA's
+# JetPack apt repo already configured, or NVIDIA's L4T/CUDA base image).
+# `docker.io/ros:jazzy-ros-base` alone does NOT provide that repo — if
+# `apt-get install libnvinfer10 ...` 404s on your build host, you are not
+# building this stage on top of an NVIDIA-repo-enabled base and need to
+# either add NVIDIA's apt source first or switch this FROM to an L4T image
+# (e.g. a dustynv/ros:jazzy-* or nvcr.io/nvidia/l4t-* base) — not verified
+# against a real Jetson in this change; see KELP_CAPABILITIES.md §0.5 for
+# the Jetson-vs-Pi platform decision this depends on.
+FROM prod AS prod-jetson
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnvinfer10 \
+    libnvinfer-plugin10 \
+    libnvonnxparsers10 \
+    libnvinfer-dev \
+    python3-libnvinfer \
+    cuda-nvtx-12-6 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Separate pip layer from the "prod" stage's CPU-only installs: pycuda's
+# build needs nvcc/the CUDA toolkit present (from the apt layer above), and
+# the sam2 package is a git checkout, not a PyPI release.
+RUN pip install --break-system-packages --no-cache-dir \
+     pycuda==2024.1 \
+     ultralytics>=8.3.0 \
+     git+https://github.com/facebookresearch/sam2.git
+
+CMD ["ros2", "launch", "bringup", "sam2_perception_fusion.launch.py"]

@@ -1,0 +1,30 @@
+# Parameters for sam2_prompt_node and sam2_inference_node.
+#
+# Frame names (lidar_frame, camera_optical_frame) must exist in the TF tree
+# before LiDAR-geometry prompts work — they are not in asket.urdf.xacro yet
+# (see TODOS.md: "Add the Kelp sensors to the URDF"). Until then,
+# sam2_prompt_node degrades to vision-only prompts and logs a one-time
+# warning rather than crashing or projecting through a stale guess.
+
+sam2_prompt_generator_node:
+  ros__parameters:
+    yolo_model_path: /opt/models/yolo11s-world.engine
+    camera_info_topic: /camera/front/camera_info
+    image_topic: /camera/front/image_raw
+    lidar_obstacles_topic: /lidar/filtered_obstacles
+    lidar_frame: livox_frame
+    camera_optical_frame: oak_rgb_camera_optical_frame
+    yolo_confidence: 0.35
+    sync_slop: 0.06
+    sync_queue: 10
+
+sam2_inference_node:
+  ros__parameters:
+    engine_path: /opt/models/sam2_hiera_tiny.engine
+    mask_threshold: 0.5
+    input_size: 1024
+    # Fixed-shape TensorRT contract: must match export_sam2_tensorrt.py's
+    # --max-prompts at build time exactly. Raising this after an engine is
+    # already built requires rebuilding the engine, not just this config.
+    max_prompts: 16
+    image_topic: /camera/front/image_raw

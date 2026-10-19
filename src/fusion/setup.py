@@ -19,6 +19,7 @@ setup(
     entry_points={
         "console_scripts": [
             "geo_fusion_node = fusion.geo_fusion_node:main",
+            "kelp_keepout_costmap_node = fusion.kelp_keepout_costmap_node:main",
         ],
     },
 )
