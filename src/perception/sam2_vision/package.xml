@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>sam2_vision</name>
+  <version>0.1.0</version>
+  <description>
+    Autonomous prompt-guided SAM 2 zero-shot segmentation for the ASKET ASV
+    (kelp canopy / buoy / rope / debris). Jetson-only: requires TensorRT,
+    PyCUDA and the Ultralytics YOLO-World weights described in
+    "Mission controls and documents/" and scripts/build_trt_engines.sh.
+  </description>
+  <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  <!--
+    NOT rosdep-resolvable (no apt/rosdep key exists for these): tensorrt,
+    pycuda, ultralytics, torch, the "sam2" package (facebookresearch/sam2)
+    and the opencv-python wheel. These are installed by pip in the
+    Jetson-only "prod-jetson" Containerfile stage (torch is pulled in
+    transitively by the sam2 package's own install), mirroring how the
+    existing "prod" stage already pip-installs onnxruntime/opencv-python for
+    the CPU vision node (see Containerfile). Do not add them here as
+    exec_depend: rosdep would fail to resolve them and break
+    `rosdep install` for every other package in the workspace, not just
+    this one. (scripts/export_sam2_tensorrt.py's `torch`/`argparse` imports
+    are a standalone Jetson-side script, not a ROS node — same reasoning.)
+  -->
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

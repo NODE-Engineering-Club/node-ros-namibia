@@ -1,0 +1,31 @@
+# PLACEHOLDER static extrinsics for the OAK-D-LR and Livox Mid-360S mounts,
+# consumed by sam2_perception_fusion.launch.py's static_transform_publisher
+# arguments (base_link -> each sensor frame).
+#
+# These are NOT measured — they exist so the TF tree has *something* and the
+# whole pipeline can be bench/sim-tested end to end (degraded, not crashing)
+# before real calibration. Every node in this feature that depends on these
+# frames (sam2_prompt_node, sensor_fusion_obstacle_node) fails SAFE if the
+# frame is simply missing (logs once, skips LiDAR/geometry work), but a
+# *wrong* placeholder number here is silently wrong — a confident-looking
+# obstacle position that just happens to be incorrect — which is worse than
+# a loud failure. Do not trust any geometry this pipeline produces until
+# these are replaced with values from an actual lidar_camera_extrinsic-style
+# calibration (see the main README's "Camera-LiDAR Extrinsic Calibration"
+# section for the method already used for the old USB-camera/RPLidar pair;
+# the same point-correspondence approach applies here).
+#
+# xyz in metres, rpy in radians, all base_link -> child.
+
+oak_rgb_camera_optical_frame:
+  xyz: [0.30, 0.0, 0.40]
+  # ROS optical convention (x-right, y-down, z-forward) relative to a
+  # forward-facing, level mount: roll=-pi/2, yaw=-pi/2 from base_link's
+  # (x-forward, y-left, z-up).
+  rpy: [-1.5707963, 0.0, -1.5707963]
+
+livox_frame:
+  xyz: [0.25, 0.0, 0.55]
+  # Mid-360S is mounted INVERTED per the design note (52 deg below / 7 deg
+  # above horizon coverage) — roll = pi, not 0.
+  rpy: [3.14159265, 0.0, 0.0]

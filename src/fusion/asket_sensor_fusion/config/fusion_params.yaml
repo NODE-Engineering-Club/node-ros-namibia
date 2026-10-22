@@ -1,0 +1,31 @@
+lidar_water_filter_node:
+  ros__parameters:
+    input_cloud_topic: /livox/lidar
+    output_cloud_topic: /lidar/filtered_obstacles
+    target_frame: base_link
+    water_plane_distance_thresh: 0.08
+    max_obstacle_height: 2.5
+    min_range: 0.3
+    max_range: 45.0
+    min_points_for_fit: 50
+
+sensor_fusion_obstacle_node:
+  ros__parameters:
+    base_frame: base_link
+    camera_optical_frame: oak_rgb_camera_optical_frame
+    camera_info_topic: /camera/front/camera_info
+    min_cluster_points: 5
+
+geo_fusion_tracker_node:
+  ros__parameters:
+    map_frame: map
+    track_gate_m: 2.0
+    track_process_var: 1.0
+    track_meas_var: 0.10
+    track_confirm_hits: 3
+    track_max_misses: 5
+    # Extra clearance added around a tracked kelp-canopy footprint before it
+    # is rasterized into the Nav2 keep-out mask (see
+    # fusion/fusion/kelp_keepout_costmap_node.py) — propeller-entanglement
+    # margin, not a measurement-noise margin.
+    canopy_safety_buffer_m: 1.0

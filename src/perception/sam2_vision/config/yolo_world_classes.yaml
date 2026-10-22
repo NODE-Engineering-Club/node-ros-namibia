@@ -1,0 +1,13 @@
+# Open-vocabulary classes for YOLO-World, loaded by sam2_prompt_node at
+# startup (self.yolo.set_classes(...)). Not currently read from this file —
+# the class list is also declared as a ROS parameter on
+# sam2_prompt_generator_node (see sam2_params.yaml / node default) so it can
+# be overridden per-launch without touching this file. Kept as the single
+# documented source of what the deployed model was prompted with; update
+# both places together.
+classes:
+  - "kelp canopy"
+  - "demarcation buoy"
+  - "floating object"
+  - "rope"
+  - "boat"

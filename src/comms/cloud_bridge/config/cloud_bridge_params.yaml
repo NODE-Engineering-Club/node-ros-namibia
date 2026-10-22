@@ -1,0 +1,16 @@
+cloud_telemetry_bridge_node:
+  ros__parameters:
+    # Must carry ?role=asv to match cloudflare/worker-telemetry-relay.js's
+    # routing — omitting it makes the Worker treat the boat as a browser
+    # listener and the pipeline relays nothing. See this node's own
+    # docstring for the full explanation.
+    cloud_ws_url: "wss://telemetry.asket-namibia.internal/api/v1/telemetry/stream?role=asv"
+    asv_id: "ASKET_02"
+    stream_rate_hz: 5.0
+    map_frame: map
+
+sonar_bridge_node:
+  ros__parameters:
+    sonarlink_ws_url: "ws://127.0.0.1:7077/connect_ws?session_id=1"
+    n_bins: 100
+    decimate_to_pps: 5.0

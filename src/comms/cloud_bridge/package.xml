@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cloud_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    Outbound-only cloud telemetry relay for the ASKET ASV (Kelp Blue,
+    Lüderitz). Decimates nav/LiDAR-hazard/SAM2-polygon/sonar/health state
+    into a thin WebSocket feed for the shore/cloud dashboard. See
+    "Mission controls and documents/asket_2_0_cloud_telemetry_remote_control_architecture.md".
+    Does not touch MAVROS/ArduPilot control at all — outbound telemetry only.
+  </description>
+  <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <!--
+    NOT rosdep-resolvable: `websockets` (pure-Python pip package, no apt/
+    rosdep key). Installed by pip in the Containerfile's shared "prod"
+    stage (lightweight, pure Python — unlike the Jetson-only TensorRT/CUDA
+    deps, this is safe on every platform CI already builds for).
+  -->
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

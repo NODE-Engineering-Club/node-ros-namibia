@@ -94,6 +94,8 @@ global_costmap:
 
       plugins:
         - obstacle_layer
+        - sam2_obstacle_layer
+        - kelp_keepout_layer
         - inflation_layer
 
       obstacle_layer:
@@ -116,6 +118,48 @@ global_costmap:
           obstacle_min_range: 0.5
           raytrace_max_range: 12.0
           raytrace_min_range: 0.0
+
+      # Separate from obstacle_layer above (new pipeline, independent
+      # enable flag) so the Kelp SAM2/fusion obstacles can be brought up
+      # without being coupled to the existing, currently-disabled, bow/hull
+      # false-positive issue tracked on obstacle_layer. Nav2's ObstacleLayer
+      # doesn't natively consume vision_msgs/Detection3DArray, so
+      # geo_fusion_tracker_node also republishes each confirmed track's
+      # footprint corners + centroid as a plain PointCloud2 on this topic
+      # (see that node's publishTrackedPointCloud()) specifically for this
+      # layer to mark/clear from.
+      sam2_obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: fused_tracked_obstacles
+        fused_tracked_obstacles:
+          topic: /obstacles/fused_tracked_points
+          data_type: "PointCloud2"
+          clearing: true
+          marking: true
+          max_obstacle_height: 2.5
+          min_obstacle_height: 0.0
+          obstacle_max_range: 35.0
+          obstacle_min_range: 0.5
+          raytrace_max_range: 40.0
+          raytrace_min_range: 0.0
+
+      # Dynamic kelp-canopy keep-out, fed by fusion/kelp_keepout_costmap_node
+      # (see that file's docstring for why this is NOT wired to
+      # /fusion/canopy_polygon directly — KeepOutFilter needs an
+      # OccupancyGrid mask + CostmapFilterInfo, not a PolygonStamped).
+      # CAVEAT: filter_info_topic is this layer's only declared param here,
+      # matching the documented Costmap Filters pattern as best known, but
+      # was not verified against the live Nav2 Jazzy nav2_costmap_2d source
+      # in this change (no network/source access) — confirm
+      # KeepOutFilter's actual declared parameter names before trusting
+      # this zone in the water (see T-equivalent bench test in
+      # KELP_CAPABILITIES.md's style, e.g. float a kelp mat and confirm the
+      # planner actually diverts, per the design note's G-06).
+      kelp_keepout_layer:
+        plugin: "nav2_costmap_2d::KeepOutFilter"
+        enabled: true
+        filter_info_topic: "/costmap_filter_info"
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -142,6 +186,8 @@ local_costmap:
 
       plugins:
         - obstacle_layer
+        - sam2_obstacle_layer
+        - kelp_keepout_layer
         - inflation_layer
 
       obstacle_layer:
@@ -158,6 +204,29 @@ local_costmap:
           data_type: "PointCloud2"
           clearing: true
           marking: true
+
+      # Same source and reasoning as global_costmap's sam2_obstacle_layer
+      # above — kept independently enabled from the existing, disabled
+      # obstacle_layer, and independently reactive at local_costmap's
+      # tighter update rate for close-range avoidance.
+      sam2_obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: fused_tracked_obstacles
+        fused_tracked_obstacles:
+          topic: /obstacles/fused_tracked_points
+          data_type: "PointCloud2"
+          clearing: true
+          marking: true
+
+      # local_costmap's global_frame is odom while the keep-out mask is
+      # published in map — this is the same cross-frame pattern Nav2's own
+      # Costmap Filters tutorial uses (filter layers resolve mask<->costmap
+      # frame via TF internally), not an oversight.
+      kelp_keepout_layer:
+        plugin: "nav2_costmap_2d::KeepOutFilter"
+        enabled: true
+        filter_info_topic: "/costmap_filter_info"
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -205,6 +274,8 @@ collision_monitor:
 
     polygons:
       - FootprintApproach
+      - FootprintStop
+      - SafetySlow
 
     FootprintApproach:
       type: "polygon"
@@ -216,12 +287,49 @@ collision_monitor:
       visualize: false
       enabled: false
 
+    # Defect C3 fix: a hard-stop reflex polygon, independent of
+    # FootprintApproach above (left disabled pending its own tuning — see
+    # that block's comment history) and independent of whatever Nav2
+    # planning/control is doing. Tune the point list against a real
+    # measured d_stop (KELP_MISSIONS.md M2's detection-horizon rule) before
+    # trusting these numbers in the water; the values here are a
+    # conservative starting point, not a validated stopping distance.
+    FootprintStop:
+      type: "polygon"
+      points: [[0.75, 0.40], [0.75, -0.40], [-0.75, -0.40], [-0.75, 0.40]]
+      action_type: "stop"
+      min_points: 3
+      visualize: true
+      enabled: true
+
+    SafetySlow:
+      type: "polygon"
+      points: [[3.5, 1.2], [3.5, -1.2], [-0.5, -1.2], [-0.5, 1.2]]
+      action_type: "slowdown"
+      slowdown_ratio: 0.35
+      min_points: 4
+      visualize: true
+      enabled: true
+
     observation_sources:
       - lidar
+      - sam2_pointcloud
 
     lidar:
       type: "scan"
       topic: /lidar_driver/scan_raw
       min_height: 0.0
+      max_height: 2.0
+      enabled: true
+
+    # Added alongside the existing 2D lidar source, not instead of it —
+    # defense in depth while the new water-filtered 3D pipeline is unproven
+    # on real water. Disable "lidar" only once sam2_pointcloud has its own
+    # bench/water validation (KELP_CAPABILITIES.md T17-equivalent for this
+    # pipeline).
+    sam2_pointcloud:
+      type: "pointcloud"
+      topic: /lidar/filtered_obstacles
+      min_height: 0.05
       max_height: 2.0
       enabled: true

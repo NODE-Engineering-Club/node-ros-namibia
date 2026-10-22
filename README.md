@@ -145,6 +145,21 @@ src/
 ├── calibration/    # scan_to_cloud, collect_data, calibrate, extrinsic_tf_publisher
 ├── sim/            # 2D Python simulator + sim_nav2.launch.py
 ├── foxglove/       # Foxglove layout + GUI helper scripts
+├── fusion/
+│   └── asket_sensor_fusion/  # Kelp Blue, JETSON-ONLY: dynamic sea-surface LiDAR filter,
+│                              # SAM2-mask 3D obstacle extraction, RTK-georeferenced EKF
+│                              # tracking. See its package.xml and bringup/launch/
+│                              # sam2_perception_fusion.launch.py (separate from njord.launch.py).
+├── perception/
+│   └── sam2_vision/   # Kelp Blue, JETSON-ONLY: YOLO-World + LiDAR prompt generation and
+│                        # TensorRT SAM 2 segmentation. Needs scripts/build_trt_engines.sh
+│                        # run first (see that package's README/docstrings) — not built by
+│                        # CI (.github/workflows/build.yaml only builds Containerfile's
+│                        # `prod` target; the TensorRT/CUDA runtime lives in `prod-jetson`).
+├── comms/
+│   └── cloud_bridge/  # Outbound-only cloud telemetry relay (nav/LiDAR-hazard/SAM2-polygon/
+│                        # sonar/health -> Cloudflare Worker -> browser dashboard). See
+│                        # cloudflare/ and src/frontend/index.html.
 └── bringup/        # njord.launch.py + config/
     └── config/
         ├── ekf.yaml                      # robot_localization EKF params
@@ -160,6 +175,13 @@ scripts/            # init.sh (Pi provisioning), deploy-pi.sh
 docs/               # session notes from hardware tests
 Mission controls and documents/  # Kelp Blue mission and capability design documents
 ```
+
+**Kelp Blue perception/fusion (Jetson-only):** `ros2 launch bringup sam2_perception_fusion.launch.py`
+brings up the dynamic water-surface filter, SAM2 prompt+inference nodes, 3D obstacle fusion,
+the EKF tracker, and the kelp-canopy keep-out rasterizer, each behind its own `enable_*` arg.
+Build the TensorRT engines first (`src/perception/sam2_vision/scripts/build_trt_engines.sh`,
+run on the Jetson) and read `src/fusion/asket_sensor_fusion/config/extrinsics.yaml`'s warning —
+the LiDAR/camera mount transforms it ships are **placeholders**, not a real calibration.
 
 ## Architecture
 

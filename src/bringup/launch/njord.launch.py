@@ -69,6 +69,14 @@ def generate_launch_description():
         DeclareLaunchArgument("pico_port",            default_value="/dev/ttyACM0"),
         DeclareLaunchArgument("enable_bms",           default_value="false"),
         DeclareLaunchArgument("bms_port",             default_value="/dev/ttyACM3"),
+        DeclareLaunchArgument("enable_cloud_bridge",  default_value="false",
+                              description="Outbound-only cloud telemetry relay (src/comms/cloud_bridge). "
+                                          "Off by default — needs cloud_ws_url configured for a real "
+                                          "deployment, see config/cloud_bridge_params.yaml."),
+        DeclareLaunchArgument("enable_sonar_bridge",  default_value="false",
+                              description="SonarLink -> /sonar/decimated bridge (src/comms/cloud_bridge). "
+                                          "Independent of enable_cloud_bridge so it can be bench-tested "
+                                          "against a real Omniscan without the cloud link up."),
         DeclareLaunchArgument("lidar_camera_extrinsic", default_value="",
                               description="Path to lidar_camera_extrinsic.yaml; "
                                           "empty = use URDF nominal TF for lidar→front_camera"),
@@ -416,6 +424,42 @@ def generate_launch_description():
             name="bms_reader",
             condition=IfCondition(LaunchConfiguration("enable_bms")),
             parameters=[{"port": LaunchConfiguration("bms_port")}, sim_time],
+        ),
+        # Cloud telemetry relay — outbound-only, never touches MAVROS/
+        # ArduPilot control (see src/comms/cloud_bridge's module docstring
+        # for the fixes applied relative to the original design note,
+        # notably: the default cloud_ws_url must carry ?role=asv or the
+        # paired Cloudflare Worker treats the boat as a browser listener
+        # and relays nothing).
+        Node(
+            package="cloud_bridge",
+            executable="cloud_telemetry_node",
+            name="cloud_telemetry_bridge_node",
+            condition=IfCondition(LaunchConfiguration("enable_cloud_bridge")),
+            parameters=[
+                get_package_share_directory("cloud_bridge") + "/config/cloud_bridge_params.yaml",
+                sim_time,
+            ],
+            respawn=True,
+            respawn_delay=2.0,
+            output="screen",
+        ),
+        # SonarLink -> /sonar/decimated. Independently enabled: useful to
+        # bench-test against a real Omniscan without the cloud link up, and
+        # cloud_telemetry_node degrades gracefully (omits "sonar" from the
+        # payload) if this isn't running.
+        Node(
+            package="cloud_bridge",
+            executable="sonar_bridge_node",
+            name="sonar_bridge_node",
+            condition=IfCondition(LaunchConfiguration("enable_sonar_bridge")),
+            parameters=[
+                get_package_share_directory("cloud_bridge") + "/config/cloud_bridge_params.yaml",
+                sim_time,
+            ],
+            respawn=True,
+            respawn_delay=2.0,
+            output="screen",
         ),
         # Mission
         #
