@@ -153,14 +153,6 @@ private:
     for (const auto & tr : tracks) {
       vision_msgs::msg::Detection3D det;
       det.header = global_detections.header;
-      // NOTE: vision_msgs::msg::Detection3D's exact field set (whether it
-      // carries a `string id` on this installed vision_msgs version) was
-      // not verified against the live Jazzy source in this environment —
-      // not used here to avoid a hard compile-time risk for something
-      // purely informational. tr.id (the persistent EKF track id) is
-      // otherwise unused outside this loop; surface it once vision_msgs'
-      // exact field is confirmed, e.g. via det.id or a results[].hypothesis
-      // extension, rather than guessing at a field name here.
       det.bbox.center.position.x = tr.x(0);
       det.bbox.center.position.y = tr.x(1);
       det.bbox.size.x = std::max(0.2, tr.radius * 2.0);
@@ -168,7 +160,19 @@ private:
       det.bbox.size.z = 0.3;  // unknown from a 2D-tracked centroid; conservative placeholder
 
       vision_msgs::msg::ObjectHypothesisWithPose hyp;
-      hyp.hypothesis.class_id = tr.class_id;
+      // Carry the persistent EKF track id (tr.id) in class_id as
+      // "<CLASS>:<id>" rather than vision_msgs::msg::Detection3D's own
+      // `id` field: whether that field exists on the installed vision_msgs
+      // version was never verified against the live Jazzy source in this
+      // environment (see the cleanup-era note this replaces), and now that
+      // cloud_bridge (src/comms/cloud_bridge) genuinely needs a stable
+      // numeric id per object, guessing at an unverified field name would
+      // risk a hard compile failure for something load-bearing, not just
+      // informational. class_id is a plain string field already proven to
+      // exist and work (every consumer in this repo reads it). Consumers
+      // split on the last ':' — see cloud_telemetry_node.py's
+      // _parse_class_and_id().
+      hyp.hypothesis.class_id = tr.class_id + ":" + std::to_string(tr.id);
       hyp.hypothesis.score = tr.confidence;
       det.results.push_back(hyp);
       global_detections.detections.push_back(det);

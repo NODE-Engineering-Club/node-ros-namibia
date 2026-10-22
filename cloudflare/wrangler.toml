@@ -1,0 +1,35 @@
+# Durable Object binding this Worker needs to deploy at all. The design
+# note this was built from (ASKET-SPEC-COMMS-CLOUD-v1.0 §7) showed
+# worker-telemetry-relay.js referencing `env.TELEMETRY_RELAY` but never
+# provided this binding config — without it, `env.TELEMETRY_RELAY` is
+# undefined and the Worker throws on its very first request.
+#
+# Not deployed or tested in this change (no Cloudflare account/wrangler
+# CLI available in the environment this was written in). Before deploying:
+#   1. `wrangler login`
+#   2. Set `name` below to your actual Worker name.
+#   3. `wrangler deploy` from this directory.
+#   4. First deploy only: `migrations` below runs the Durable Object class
+#      binding migration automatically.
+
+name = "asket-telemetry-relay"
+main = "worker-telemetry-relay.js"
+compatibility_date = "2026-01-01"
+
+[[durable_objects.bindings]]
+name = "TELEMETRY_RELAY"
+class_name = "TelemetryRelay"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["TelemetryRelay"]
+
+# R2 bucket for the design note's §1 "R2 Object Store (1Hz JPEGs)" —
+# declared here since the Worker references it in spirit (the live
+# dashboard path doesn't currently write to it; this is a placeholder for
+# the historical-snapshot archive path mentioned in §1's topology diagram,
+# not yet implemented in worker-telemetry-relay.js). Uncomment once that
+# code exists:
+# [[r2_buckets]]
+# binding = "TELEMETRY_SNAPSHOTS"
+# bucket_name = "asket-telemetry-snapshots"

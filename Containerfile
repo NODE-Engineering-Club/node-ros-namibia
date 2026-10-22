@@ -84,7 +84,8 @@ RUN pip install --break-system-packages --no-cache-dir \
      onnxruntime \
      opencv-python \
      transforms3d \
-     simple-pid
+     simple-pid \
+     websockets
 
 # Requires the src/sllidar_ros2 submodule to be checked out on the host
 # (git submodule update --init --recursive) before building — COPY only

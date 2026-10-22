@@ -1,0 +1,215 @@
+<!-- File: src/frontend/index.html
+     ASKET 2.0 live mission console (ASKET-SPEC-COMMS-CLOUD-v1.0 §8).
+
+     Fixes applied relative to the design note's version, found by actually
+     running the failure case in Node before shipping this (see
+     scratchpad notes / the fmt() helper below):
+
+       * health.* fields (battery_voltage, battery_soc, jetson_temp_c,
+         wifi_rssi_dbm) can legitimately be `null` now — cloud_telemetry_node
+         sends null rather than a fabricated-looking number for a sensor
+         that was never wired (see that node's own docstring). The design
+         note's dashboard called `.toFixed(1)` directly on these fields,
+         which throws on null and — because the throw happens early in
+         ws.onmessage — would have silently aborted the REST of that
+         message's handling too (map marker, hazards, sonar, camera all
+         skipped for that tick, not just the battery readout). Every
+         numeric readout now goes through fmt(), which renders "—" for
+         null/undefined instead of throwing.
+       * Hazard markers are colored per the full BUOY/VESSEL/FLOTSAM/
+         KELP_CANOPY schema enum, not a binary kelp-vs-not-kelp split.
+       * asv_id is displayed in the header (the payload carries it; the
+         original dashboard never showed it).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ASKET 2.0 ASV — Live Mission Console</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body { margin: 0; background: #0f172a; color: #f8fafc; font-family: monospace; overflow: hidden; }
+    .grid { display: grid; grid-template-columns: 1fr 450px; grid-template-rows: 60px 1fr 280px; height: 100vh; }
+    header { grid-column: span 2; background: #1e293b; display: flex; align-items: center; padding: 0 20px; gap: 24px; border-bottom: 1px solid #334155; flex-wrap: wrap; }
+    header .asv-id { color: #94a3b8; font-size: 12px; }
+    #map { grid-column: 1; grid-row: 2 / span 2; width: 100%; height: 100%; }
+    .side-panel { grid-column: 2; grid-row: 2; background: #1e293b; padding: 15px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid #334155; }
+    .bottom-panel { grid-column: 2; grid-row: 3; background: #0b1120; border-left: 1px solid #334155; border-top: 1px solid #334155; display: flex; flex-direction: column; }
+    canvas { width: 100%; background: #000; border-radius: 4px; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+    .bg-green { background: #059669; } .bg-blue { background: #2563eb; } .bg-red { background: #dc2626; } .bg-amber { background: #b45309; }
+  </style>
+</head>
+<body>
+
+<div class="grid">
+  <header>
+    <h2 style="margin:0;">ASKET 2.0 // SHEARWATER BAY</h2>
+    <div class="asv-id">ASV: <span id="val-asv-id">—</span></div>
+    <div>STATUS: <span id="conn-badge" class="badge bg-red">CONNECTING</span></div>
+    <div>RTK: <span id="rtk-badge" class="badge bg-blue">SEARCHING</span></div>
+    <div>HEADING: <span id="val-hdg">—</span></div>
+    <div>SPEED: <span id="val-sog">—</span></div>
+    <div>BATT: <span id="val-batt">—</span></div>
+  </header>
+
+  <div id="map"></div>
+
+  <div class="side-panel">
+    <div style="font-weight: bold; font-size: 12px;">SAM 2 REAL-TIME HAZARD CONTOUR OVERLAY</div>
+    <div style="position: relative; width: 420px; height: 260px;">
+      <canvas id="camera-canvas" width="640" height="400" style="position: absolute; width: 420px; height: 260px;"></canvas>
+    </div>
+    <div id="hazard-list" style="font-size: 11px; overflow-y: auto; max-height: 120px;"></div>
+  </div>
+
+  <div class="bottom-panel">
+    <div style="padding: 5px 10px; font-size: 11px; background: #1e293b;">OMNISCAN 450 SS REAL-TIME WATERFALL</div>
+    <canvas id="sonar-canvas" width="400" height="240"></canvas>
+  </div>
+</div>
+
+<script>
+  // Null-safe numeric formatting: cloud_telemetry_node legitimately sends
+  // `null` for a health field with no wired sensor yet (see that node's
+  // docstring) — calling .toFixed() directly on null throws and, because
+  // it happens early in ws.onmessage, silently aborts rendering the REST
+  // of that message (map, hazards, sonar, camera) too. Every readout below
+  // goes through this instead of a bare .toFixed() call.
+  function fmt(value, decimals, suffix) {
+    if (value === null || value === undefined || Number.isNaN(value)) return "—";
+    return value.toFixed(decimals) + (suffix || "");
+  }
+
+  const HAZARD_COLORS = {
+    KELP_CANOPY: "#eab308",
+    BUOY: "#38bdf8",
+    VESSEL: "#f97316",
+    FLOTSAM: "#ef4444",
+  };
+
+  // 1. Leaflet map centred at Shearwater Bay, Namibia.
+  const map = L.map('map').setView([-26.6385, 15.1528], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+  const asvIcon = L.divIcon({
+    html: '<div id="asv-marker" style="width:16px;height:16px;background:#38bdf8;border:2px solid #fff;border-radius:50%;"></div>',
+    iconSize: [16, 16], iconAnchor: [8, 8]
+  });
+  const marker = L.marker([-26.6385, 15.1528], { icon: asvIcon }).addTo(map);
+  const hazardGroup = L.layerGroup().addTo(map);
+
+  // 2. Sonar waterfall canvas.
+  const sonarCanvas = document.getElementById('sonar-canvas');
+  const sCtx = sonarCanvas.getContext('2d');
+  const imgData = sCtx.createImageData(sonarCanvas.width, 1);
+
+  // 3. Camera + SAM 2 polygon canvas.
+  const camCanvas = document.getElementById('camera-canvas');
+  const cCtx = camCanvas.getContext('2d');
+  const camImg = new Image();
+
+  // 4. Connect to the Cloudflare relay as a browser listener.
+  const wsUrl = "wss://telemetry.asket-namibia.internal/api/v1/telemetry/stream?role=browser";
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    document.getElementById('conn-badge').textContent = "ONLINE (QoS 0)";
+    document.getElementById('conn-badge').className = "badge bg-green";
+  };
+
+  ws.onclose = () => {
+    document.getElementById('conn-badge').textContent = "DISCONNECTED";
+    document.getElementById('conn-badge').className = "badge bg-red";
+  };
+
+  ws.onerror = () => {
+    document.getElementById('conn-badge').textContent = "ERROR";
+    document.getElementById('conn-badge').className = "badge bg-red";
+  };
+
+  ws.onmessage = (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch (e) {
+      console.warn("Malformed telemetry packet, dropped:", e);
+      return;
+    }
+
+    document.getElementById('val-asv-id').textContent = data.asv_id || "—";
+    document.getElementById('val-hdg').textContent = fmt(data.nav?.heading, 1, "°");
+    document.getElementById('val-sog').textContent = fmt(data.nav?.sog, 2, " m/s");
+    document.getElementById('val-batt').textContent = fmt(data.health?.battery_voltage, 1, " V");
+
+    const rtk = data.nav?.rtk_mode;
+    const rtkBadge = document.getElementById('rtk-badge');
+    if (rtk === 3) { rtkBadge.textContent = "RTK FIXED"; rtkBadge.className = "badge bg-green"; }
+    else if (rtk === 2) { rtkBadge.textContent = "RTK FLOAT"; rtkBadge.className = "badge bg-amber"; }
+    else if (rtk === 1) { rtkBadge.textContent = "SINGLE/DGPS"; rtkBadge.className = "badge bg-blue"; }
+    else { rtkBadge.textContent = "NO FIX"; rtkBadge.className = "badge bg-red"; }
+
+    if (data.nav && data.nav.lat != null && data.nav.lon != null) {
+      marker.setLatLng([data.nav.lat, data.nav.lon]);
+    }
+
+    // Render LiDAR hazards.
+    hazardGroup.clearLayers();
+    const hazardListEl = document.getElementById('hazard-list');
+    hazardListEl.innerHTML = "";
+    (data.lidar_clusters || []).forEach(obs => {
+      const color = HAZARD_COLORS[obs.class] || HAZARD_COLORS.FLOTSAM;
+      if (Array.isArray(obs.centroid_global) && obs.centroid_global.length === 2) {
+        L.circleMarker(obs.centroid_global, { radius: 7, color, fillOpacity: 0.8 })
+          .bindTooltip(`#${obs.id} ${obs.class} [${fmt(obs.size_m?.[0], 1)}x${fmt(obs.size_m?.[1], 1)}m]`)
+          .addTo(hazardGroup);
+      }
+      const row = document.createElement('div');
+      row.style.color = color;
+      row.textContent = `#${obs.id} ${obs.class}`;
+      hazardListEl.appendChild(row);
+    });
+
+    // Render sonar waterfall (scroll down 1 row, draw new row on top).
+    if (data.sonar && data.sonar.port_intensity_u8) {
+      sCtx.drawImage(sonarCanvas, 0, 0, sonarCanvas.width, sonarCanvas.height - 1, 0, 1, sonarCanvas.width, sonarCanvas.height - 1);
+      const pData = data.sonar.port_intensity_u8;
+      const n = Math.min(pData.length, sonarCanvas.width);
+      for (let i = 0; i < n; i++) {
+        const val = pData[i];
+        imgData.data[i * 4 + 0] = val;
+        imgData.data[i * 4 + 1] = val * 0.8;
+        imgData.data[i * 4 + 2] = val * 0.2;
+        imgData.data[i * 4 + 3] = 255;
+      }
+      sCtx.putImageData(imgData, 0, 0);
+    }
+
+    // Render video thumbnail + SAM 2 polygon overlays.
+    if (data.image_jpeg_b64) {
+      camImg.onload = () => {
+        cCtx.drawImage(camImg, 0, 0, 640, 400);
+        (data.sam2_polygons || []).forEach(poly => {
+          if (!poly.vertices_norm || poly.vertices_norm.length < 3) return;
+          const color = HAZARD_COLORS[poly.class] || HAZARD_COLORS.FLOTSAM;
+          cCtx.beginPath();
+          cCtx.strokeStyle = color;
+          cCtx.fillStyle = color + "4D"; // ~30% alpha
+          cCtx.lineWidth = 2;
+          poly.vertices_norm.forEach((pt, idx) => {
+            const x = pt[0] * 640;
+            const y = pt[1] * 400;
+            if (idx === 0) cCtx.moveTo(x, y); else cCtx.lineTo(x, y);
+          });
+          cCtx.closePath();
+          cCtx.fill();
+          cCtx.stroke();
+        });
+      };
+      camImg.src = "data:image/jpeg;base64," + data.image_jpeg_b64;
+    }
+  };
+</script>
+</body>
+</html>
