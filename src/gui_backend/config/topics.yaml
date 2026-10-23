@@ -9,6 +9,19 @@
 # they already publish.
 #
 # `adapter` names a function in gui_backend.core.adapters.
+#
+# node-ros-namibia (ported from node-ros-2026 1606eb7): every topic below was
+# checked against namibia's sources and already has the same name and type
+# here, so no entry was renamed. Two namibia-specific notes:
+#
+#   * /pico/status and /pico/mode_request exist only when the stack is
+#     launched with use_pico_bridge:=true (default false: the Pixhawk path,
+#     actuator_driver). Without it the vessel panel reads "not sent".
+#   * There is deliberately NO battery source yet. namibia's bms_reader
+#     publishes /battery/state but never fills BatteryState.percentage, and
+#     adapters.battery_from_ros reads that field as the state of charge: wiring
+#     it as-is would show 0 % and a permanent "battery critical" alarm. Add it
+#     once a real percentage is computed. See docs/gui/PORTING_NOTES.md.
 
 sources:
   gnss_fix:
