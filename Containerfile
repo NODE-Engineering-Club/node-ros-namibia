@@ -1,3 +1,21 @@
+# --- Mission GUI frontend (src/asket_gui), built once, copied into prod ------
+#
+# The React frontend must be built BEFORE colcon: gui_backend/setup.py collects
+# gui_backend/gui_backend/static/ while it runs, and an empty directory there
+# installs a backend that answers 503. Node is only needed for this step, so it
+# lives in its own stage and never reaches the runtime image.
+#
+# --platform=$BUILDPLATFORM: the output is plain HTML/JS/CSS, identical on every
+# architecture, so it is built natively rather than under QEMU arm64 emulation.
+# Ported from node-ros-2026 1606eb7 (where Node was installed in the dev stage).
+FROM --platform=$BUILDPLATFORM docker.io/library/node:20-bookworm-slim AS gui-frontend
+WORKDIR /ws/src/asket_gui
+COPY src/asket_gui/package.json src/asket_gui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY src/asket_gui/ ./
+# vite.config.js writes to ../gui_backend/gui_backend/static
+RUN npm run build && test -f /ws/src/gui_backend/gui_backend/static/index.html
+
 FROM docker.io/ros:jazzy-ros-base AS base
 
 RUN apt-get update && apt-get install -y \
@@ -85,12 +103,18 @@ RUN pip install --break-system-packages --no-cache-dir \
      opencv-python \
      transforms3d \
      simple-pid \
-     websockets
+     websockets \
+     fastapi \
+     "uvicorn[standard]"
 
 # Requires the src/sllidar_ros2 submodule to be checked out on the host
 # (git submodule update --init --recursive) before building — COPY only
 # copies what's already on disk in the build context.
 COPY src/ /ros2_ws/src/
+
+# The built mission GUI frontend, before colcon so gui_backend installs it.
+# prod-jetson inherits it from this stage.
+COPY --from=gui-frontend /ws/src/gui_backend/gui_backend/static/ /ros2_ws/src/gui_backend/gui_backend/static/
 
 RUN . /opt/ros/jazzy/setup.sh && \
     colcon build \
