@@ -6,6 +6,10 @@
 **/build/
 **/install/
 **/log/
+# Mission GUI: dependencies and build output are produced inside the image
+# (Containerfile stage gui-frontend), never taken from the host.
+**/node_modules/
+src/gui_backend/gui_backend/static/
 .git/
 models/
 vision_detector/*.pt

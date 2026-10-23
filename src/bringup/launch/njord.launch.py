@@ -7,6 +7,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node, SetParameter
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
@@ -80,6 +81,14 @@ def generate_launch_description():
         DeclareLaunchArgument("lidar_camera_extrinsic", default_value="",
                               description="Path to lidar_camera_extrinsic.yaml; "
                                           "empty = use URDF nominal TF for lidar→front_camera"),
+        # Mission GUI (ported from node-ros-2026 1606eb7). OFF by default:
+        # launching without options behaves exactly as before. See
+        # src/gui_backend/launch/gui.launch.py and docs/gui/PORTING_NOTES.md.
+        DeclareLaunchArgument("enable_gui",           default_value="false",
+                              description="Start the mission GUI backend on http://<host>:<gui_port> "
+                                          "(also starts system_test and mission_recorder)"),
+        DeclareLaunchArgument("gui_port",             default_value="8090",
+                              description="Mission GUI HTTP/WebSocket port. Clear of foxglove_bridge (8765)."),
     ]
     # fmt: on
 
@@ -650,6 +659,24 @@ def generate_launch_description():
                 ),
             ],
             condition=IfCondition(LaunchConfiguration("use_sim")),
+        ),
+        # Mission GUI — its own launch file, included rather than inlined, so it
+        # stays runnable on its own (ros2 launch gui_backend gui.launch.py).
+        # It is a separate process from pico_bridge: nothing in the GUI can
+        # block or starve the Pico's serial heartbeat. Only included when
+        # enable_gui:=true. The sonar bridge it can start (omniscan_bridge) is
+        # off unless enable_sonar:=true is also given.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("gui_backend"), "launch", "gui.launch.py"]
+                )
+            ),
+            launch_arguments={
+                "gui_port": LaunchConfiguration("gui_port"),
+                "use_sim": LaunchConfiguration("use_sim"),
+            }.items(),
+            condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),
     ]
 

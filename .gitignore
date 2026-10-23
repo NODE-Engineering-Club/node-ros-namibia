@@ -27,3 +27,13 @@ frames_*.pdf
 # Generated reports and stray launch logs
 reports/
 *.log
+# --- Mission GUI (asket_gui / gui_backend), ported from node-ros-2026 1606eb7 ---
+*.py[cod]
+.pytest_cache/
+node_modules/
+src/asket_gui/dist/
+src/asket_gui/dist-mock/
+src/gui_backend/gui_backend/static/
+/data/
+*.mbtiles
+*.bin.gz
