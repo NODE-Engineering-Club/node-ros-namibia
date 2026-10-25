@@ -22,6 +22,7 @@ setup(
         "console_scripts": [
             "cloud_telemetry_node = cloud_bridge.cloud_telemetry_node:main",
             "sonar_bridge_node = cloud_bridge.sonar_bridge_node:main",
+            "fake_sensors_node = cloud_bridge.fake_sensors_node:main",
         ],
     },
 )
