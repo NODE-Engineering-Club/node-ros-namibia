@@ -57,3 +57,16 @@ def test_launch_files_default_to_not_fitted():
     assert '"camera_fitted": LaunchConfiguration("enable_usb_camera")' in njord
     for arg in ("lidar_fitted", "camera_fitted"):
         assert f'"{arg}",\n            default_value="false"' in gui
+
+
+def test_shipped_config_shows_the_sonar_as_health_only():
+    config = yaml.safe_load((PACKAGE / "config" / "topics.yaml").read_text())
+    assert _source(config).describe()["sonar_panel"] == "health"
+    assert _source({}).describe()["sonar_panel"] == "full"
+
+
+def test_health_panel_offers_no_sonar_controls():
+    panel = (GUI_SRC / "panels" / "SonarPanel.jsx").read_text()
+    health = panel.split("function SonarHealth", 1)[1].split("function SonarControls", 1)[0]
+    assert "set_ping_parameters" not in health
+    assert "ConfirmButton" not in health

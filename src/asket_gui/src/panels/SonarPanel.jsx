@@ -22,6 +22,72 @@ import { bytes, int, num, pct } from '../lib/format.js';
  * read as applied.
  */
 export function SonarPanel({ state, connection }) {
+  // A separate component per mode, not an early return: `hello` arrives after
+  // the first render, and a hook count that changes between renders throws.
+  return state.hello?.source?.sonar_panel === 'health'
+    ? <SonarHealth state={state} />
+    : <SonarControls state={state} connection={connection} />;
+}
+
+/**
+ * The sonar when SonarView runs it (`sonar_panel: health` in topics.yaml).
+ *
+ * The Omniscan is operated from SonarView, on its own screen: that is where
+ * its range, gain and ping rate are set and where its data is recorded. A
+ * second set of controls here would fight SonarView over the same device, so
+ * this shows only whether the sonar is alive, from omniscan_bridge when it is
+ * started (enable_sonar:=true), and says plainly when nothing is monitoring it.
+ */
+function SonarHealth({ state }) {
+  const sonar = streamPayload(state, 'sonar');
+  const ageMs = streamAgeMs(state, 'sonar');
+  const rateHz = state.subscriptions.sonar?.rate_hz;
+
+  if (!sonar) {
+    return (
+      <Panel
+        title="Sonar"
+        id="sonar"
+        aside={<Chip title="Nothing in this stack is reading the sonar.">not monitored</Chip>}
+        summary={
+          <p className="hint" style={{ margin: 0 }}>
+            The sonar is operated and recorded in SonarView, on its own screen.
+            Start the stack with enable_sonar:=true for a health line here.
+          </p>
+        }
+      />
+    );
+  }
+
+  const connected = sonar.connected;
+  return (
+    <Panel
+      title="Sonar"
+      id="sonar"
+      aside={
+        <>
+          <Chip level={connected ? 'ok' : 'alarm'}>
+            {connected ? 'connected' : 'no data'}
+          </Chip>
+          <PanelAge ageMs={ageMs} rateHz={rateHz} />
+        </>
+      }
+      summary={
+        <>
+          <Rows>
+            <Row label="Ping rate">{num(sonar.actual_ping_rate_hz, 1, ' Hz')}</Row>
+          </Rows>
+          <p className="hint" style={{ marginBottom: 0, marginTop: 6 }}>
+            Settings and recording are in SonarView.
+          </p>
+        </>
+      }
+    />
+  );
+}
+
+/** The full panel, with controls: `sonar_panel: full`, the simulator and the mock. */
+function SonarControls({ state, connection }) {
   const sonar = streamPayload(state, 'sonar');
   const ageMs = streamAgeMs(state, 'sonar');
   const rateHz = state.subscriptions.sonar?.rate_hz;

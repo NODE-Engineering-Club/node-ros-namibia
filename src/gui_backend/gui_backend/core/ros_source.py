@@ -651,6 +651,9 @@ class RosSource:
                 sensor: bool((self.config.get("fitted") or {}).get(sensor, True))
                 for sensor in ("lidar", "camera")
             },
+            # "health" when SonarView runs the sonar; "full" (the default,
+            # for an older topics.yaml) when this stack drives it.
+            "sonar_panel": self.config.get("sonar_panel") or "full",
             "estop": {
                 "available": bool(estop.get("mode")),
                 "label": estop.get("label") or "Cut propulsion",

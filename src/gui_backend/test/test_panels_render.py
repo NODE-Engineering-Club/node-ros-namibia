@@ -102,7 +102,21 @@ def _entry_source() -> str:
         const live = connection.getSnapshot();
 
         const out = {{ streams: Object.keys(live.streams || {{}}), errors: [], rows: 0 }};
-        for (const [label, state] of [['live', live], ['empty', initialState()]]) {{
+        // The boat as it is fitted out: no lidar, no camera, sonar run by
+        // SonarView. Both with data and without, for the health-only panels.
+        const boatHello = (h) => ({{
+          ...(h || {{}}),
+          source: {{
+            ...((h && h.source) || {{}}),
+            sonar_panel: 'health',
+            fitted: {{ lidar: false, camera: false }},
+          }},
+        }});
+        const boat = {{ ...live, hello: boatHello(live.hello) }};
+        const boatEmpty = {{ ...initialState(), hello: boatHello(null) }};
+        for (const [label, state] of [
+          ['live', live], ['empty', initialState()], ['boat', boat], ['boat-empty', boatEmpty],
+        ]) {{
           for (const [name, Panel] of PANELS) {{
             try {{
               renderToStaticMarkup(

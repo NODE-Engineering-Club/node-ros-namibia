@@ -130,6 +130,13 @@ fitted:
   lidar: false
   camera: false
 
+# How the Sonar panel behaves. `health`: SonarView operates and records the
+# Omniscan on its own screen, so the panel shows only whether the sonar is
+# alive (from omniscan_bridge, when started with enable_sonar:=true) and offers
+# no controls that would fight SonarView. `full`: the panel with range, gain
+# and ping-rate controls, for when this stack drives the sonar itself.
+sonar_panel: health
+
 # Where commands go. Mode requests reach the Pico through pico_bridge, which
 # this repository does not modify, so the interface is named here.
 commands:
