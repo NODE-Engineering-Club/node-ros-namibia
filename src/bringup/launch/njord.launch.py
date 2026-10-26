@@ -54,6 +54,16 @@ def generate_launch_description():
         DeclareLaunchArgument("vision_confidence",    default_value="0.5"),
         DeclareLaunchArgument("camera_device",        default_value="/dev/video0"),
         DeclareLaunchArgument("lidar_device",         default_value="/dev/ttyUSB0"),
+        # Off by default: no lidar (RPLidar/Livox) is aboard and the USB camera
+        # was replaced by the OAK-D-LR, which has no driver here yet
+        # (docs/HARDWARE_DECISIONS.md). Starting a driver for a device that is
+        # not there only produces a crash-looping node and an empty panel.
+        DeclareLaunchArgument("enable_lidar",         default_value="false",
+                              description="Start the RPLIDAR driver (sllidar_node) on lidar_device. "
+                                          "No lidar is fitted on the current boat."),
+        DeclareLaunchArgument("enable_usb_camera",    default_value="false",
+                              description="Start camera_driver on camera_device (USB/V4L2). "
+                                          "The boat now carries an OAK-D-LR (PoE), not a USB camera."),
         DeclareLaunchArgument("use_sim",         default_value="false"),
         DeclareLaunchArgument(
             "headless",
@@ -264,6 +274,7 @@ def generate_launch_description():
             name="camera_driver",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_sensors"), "' == 'true' and '",
+                LaunchConfiguration("enable_usb_camera"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
             parameters=[{
@@ -283,6 +294,7 @@ def generate_launch_description():
             name="lidar_driver",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_sensors"), "' == 'true' and '",
+                LaunchConfiguration("enable_lidar"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
             remappings=[("scan", "/lidar_driver/scan_raw")],
@@ -722,6 +734,10 @@ def generate_launch_description():
             launch_arguments={
                 "gui_port": LaunchConfiguration("gui_port"),
                 "use_sim": LaunchConfiguration("use_sim"),
+                # The GUI shows the lidar and camera panels as "not fitted"
+                # rather than empty when their driver is not started.
+                "lidar_fitted": LaunchConfiguration("enable_lidar"),
+                "camera_fitted": LaunchConfiguration("enable_usb_camera"),
             }.items(),
             condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),

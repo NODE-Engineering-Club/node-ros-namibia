@@ -61,6 +61,7 @@ PANELS = (
     ("SonarPanel", "panels/SonarPanel.jsx"),
     ("VesselState", "panels/VesselState.jsx"),
     ("StatusStrip", "components/StatusStrip.jsx"),
+    ("NotFitted", "components/NotFitted.jsx"),
     # Not a cockpit panel, but the largest surface here and the one most worth
     # rendering: it is read by somebody standing on a beach with a tape
     # measure, and every state it shows is a state nobody had looked at.

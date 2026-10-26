@@ -119,6 +119,17 @@ sources:
     type: diagnostic_msgs/msg/DiagnosticArray
     optional: true
 
+# Which optional sensors this boat carries. A sensor that is not fitted is
+# shown as "not fitted" and never subscribed to, rather than as an empty plot
+# ("nothing in range" with no lidar is a lie) or a blank camera.
+#
+# No lidar is aboard, and the OAK-D-LR that replaced the USB camera has no
+# driver in this stack yet (docs/HARDWARE_DECISIONS.md). gui.launch.py
+# overrides both from its lidar_fitted / camera_fitted arguments.
+fitted:
+  lidar: false
+  camera: false
+
 # Where commands go. Mode requests reach the Pico through pico_bridge, which
 # this repository does not modify, so the interface is named here.
 commands:

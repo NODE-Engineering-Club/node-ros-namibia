@@ -5,6 +5,8 @@ import { DiagnosticsPanel } from './panels/DiagnosticsPanel.jsx';
 import { HeadingPanel } from './panels/HeadingPanel.jsx';
 import { CameraPanel } from './panels/CameraPanel.jsx';
 import { LidarPanel } from './panels/LidarPanel.jsx';
+import { NotFitted } from './components/NotFitted.jsx';
+import { isFitted } from './lib/fitted.js';
 import { LinkStatus } from './panels/LinkStatus.jsx';
 import { MissionMap } from './panels/MissionMap.jsx';
 import { MissionPanel } from './panels/MissionPanel.jsx';
@@ -86,9 +88,18 @@ export function App({ connection }) {
   // to be what an operator actually sees, not the review rig around it.
   const [mockOpen, setMockOpen] = useState(false);
 
+  // A sensor the boat does not carry is never asked for: its stream would
+  // only ever be empty, and empty reads as "nothing there".
+  const lidarFitted = isFitted(state, 'lidar');
+  const cameraFitted = isFitted(state, 'camera');
+
   useEffect(() => {
-    connection.subscribe(SUBSCRIPTIONS);
-  }, [connection]);
+    const absent = [!lidarFitted && 'lidar', !cameraFitted && 'camera'].filter(Boolean);
+    connection.subscribe(SUBSCRIPTIONS.filter((s) => !absent.includes(s.name)));
+    // Subscriptions are additive on the server, so one made before `hello`
+    // said the sensor is absent has to be withdrawn explicitly.
+    if (absent.length) connection.unsubscribe(absent);
+  }, [connection, lidarFitted, cameraFitted]);
 
   useEffect(() => {
     const onHash = () => setView(viewFromHash());
@@ -249,16 +260,30 @@ export function App({ connection }) {
           {/* Above the sonar and lidar on purpose: this is the panel somebody
               turns to when the lidar says there is something there and they
               need to know what it is. */}
-          <CameraPanel
-            state={state}
-            subscribed={Boolean(state.subscriptions.camera?.granted)}
-          />
+          {cameraFitted ? (
+            <CameraPanel
+              state={state}
+              subscribed={Boolean(state.subscriptions.camera?.granted)}
+            />
+          ) : (
+            <NotFitted title="Camera" id="camera">
+              No camera is shown here. The OAK-D-LR is aboard but has no driver
+              in this stack yet.
+            </NotFitted>
+          )}
           <SonarPanel state={state} connection={connection} />
-          <LidarPanel
-            state={state}
-            showRaw={showRawLidar}
-            onShowRawChange={setShowRawLidar}
-          />
+          {lidarFitted ? (
+            <LidarPanel
+              state={state}
+              showRaw={showRawLidar}
+              onShowRawChange={setShowRawLidar}
+            />
+          ) : (
+            <NotFitted title="Obstacles" id="obstacles">
+              No lidar is fitted, so nothing aboard detects obstacles. Keep the
+              boat in sight and the RC transmitter in hand.
+            </NotFitted>
+          )}
           <MissionPanel state={state} connection={connection} />
           <LinkStatus state={state} connection={connection} />
         </div>

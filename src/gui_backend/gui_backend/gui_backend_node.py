@@ -54,6 +54,15 @@ class GuiBackendNode(Node):
         self.declare_parameter("tick_hz", 20.0)
 
         topics = _load_yaml(self.get_parameter("topics_config").value)
+
+        # Which optional sensors are aboard. topics.yaml holds the default;
+        # the launch file overrides it from enable_lidar / enable_usb_camera
+        # so the GUI and the drivers cannot disagree.
+        fitted = dict(topics.get("fitted") or {})
+        for sensor in ("lidar", "camera"):
+            self.declare_parameter(f"{sensor}_fitted", bool(fitted.get(sensor, True)))
+            fitted[sensor] = bool(self.get_parameter(f"{sensor}_fitted").value)
+        topics["fitted"] = fitted
         profiles = _load_yaml(self.get_parameter("link_profiles_config").value)
 
         self.source = RosSource(self, topics)

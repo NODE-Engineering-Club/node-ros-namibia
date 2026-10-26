@@ -70,6 +70,20 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument("use_sim", default_value="false"),
+        # Whether the boat carries the sensor. False shows the panel as "not
+        # fitted" instead of an empty plot or a blank picture, which would
+        # read as "clear water" / "camera broken". njord.launch.py passes
+        # enable_lidar / enable_usb_camera through.
+        DeclareLaunchArgument(
+            "lidar_fitted",
+            default_value="false",
+            description="A lidar is aboard and its driver is running.",
+        ),
+        DeclareLaunchArgument(
+            "camera_fitted",
+            default_value="false",
+            description="A camera the GUI can show is aboard and running.",
+        ),
         DeclareLaunchArgument(
             "enable_sonar",
             default_value="false",
@@ -99,6 +113,8 @@ def generate_launch_description():
                     "tile_cache_path": LaunchConfiguration("tile_cache_path"),
                     "online_tiles": LaunchConfiguration("online_tiles"),
                     "static_dir": static_dir,
+                    "lidar_fitted": LaunchConfiguration("lidar_fitted"),
+                    "camera_fitted": LaunchConfiguration("camera_fitted"),
                 },
                 sim_time,
             ],

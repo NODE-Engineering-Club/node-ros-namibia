@@ -338,6 +338,8 @@ class RosSource:
             return Sample(stream, self.now_utc_ms(), payloads.sonar_payload(record, detail))
 
         if stream == "lidar":
+            if not self.describe()["fitted"]["lidar"]:
+                return None
             return self._lidar_sample(detail)
 
         if stream == "link":
@@ -643,6 +645,12 @@ class RosSource:
             # labels the button from this rather than assuming a capability the
             # vessel may not have: on this stack there is no software ESTOP, and
             # a button claiming otherwise is the worst thing on the screen.
+            # Optional sensors that are aboard. Absent = fitted, so an older
+            # topics.yaml keeps every panel.
+            "fitted": {
+                sensor: bool((self.config.get("fitted") or {}).get(sensor, True))
+                for sensor in ("lidar", "camera")
+            },
             "estop": {
                 "available": bool(estop.get("mode")),
                 "label": estop.get("label") or "Cut propulsion",
