@@ -32,7 +32,7 @@ HEALTHY = dict(
     # asking whether the NTP daemon says it is locked.
     gps_time_offset_ms=40, gps_time_age_s=1.0,
     disk_free_bytes=200 * 1024**3, disk_write_mbps=120.0,
-    state_of_charge=0.9, battery_voltage=28.0,
+    state_of_charge=0.9, battery_voltage=16.2,
     link_rtt_ms=25.0, link_active="wifi",
     expected_nodes=["omniscan_bridge"], present_nodes=["omniscan_bridge"],
     pico_state_format_verified=True, pico_state_parsed=True, pico_state_unknown_keys=[],
@@ -64,7 +64,7 @@ def test_every_failing_check_says_what_to_do_about_it():
     """A red word is not an instruction. 'GPS: ERROR' costs an hour."""
     broken = dict(
         HEALTHY, num_sats=2, gnss_fix_type=1, sonar_connected=False, clock_offset_ms=5000,
-        disk_free_bytes=1024**3, disk_write_mbps=3.0, battery_voltage=19.0,
+        disk_free_bytes=1024**3, disk_write_mbps=3.0, battery_voltage=13.2,
         rc_link_ok=False, lidar_rotation_hz=0.0, heading_valid=False,
         present_nodes=[], pico_age_s=30.0,
     )
@@ -163,7 +163,7 @@ def test_a_low_battery_warns_and_points_at_the_endurance_estimate():
 
 
 def test_a_flat_battery_fails_outright():
-    result = item(run_checks(dict(HEALTHY, battery_voltage=19.0)), "battery.charge")
+    result = item(run_checks(dict(HEALTHY, battery_voltage=13.2)), "battery.charge")
     assert result.status == FAIL
     assert "Do not launch" in result.remedy
 

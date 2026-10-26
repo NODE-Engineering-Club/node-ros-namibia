@@ -34,13 +34,17 @@ from asket_interfaces.msg import (
 from asket_interfaces.srv import RunSystemTest
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from rclpy.node import Node
+from nav_msgs.msg import Odometry
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import BatteryState, Imu, LaserScan, NavSatFix
+from sensor_msgs.msg import BatteryState, Imu, LaserScan, NavSatFix, TimeReference
+from std_msgs.msg import String, UInt32
 
+from asket_common.heading import compass_deg_from_enu_quaternion, heading_from_odometry
 from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
 from system_test.core.checks import FAIL, PASS, SKIPPED, WARN, Thresholds, run_checks
 from system_test.core.history import PreflightHistory
+from system_test.core.live_inputs import gps_time_facts, heading_facts, pico_facts
 
 SENSOR_QOS = QoSProfile(depth=5, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 #: Latched, so a client connecting later still gets the boot-time verdict.
@@ -87,6 +91,20 @@ class SystemTestNode(Node):
             "expected_nodes",
             ["omniscan_bridge", "mission_recorder", "gui_backend"],
         )
+        # What the real boat publishes (docs/HARDWARE_DECISIONS.md). The
+        # previous fixed names were the simulator's: /scan, /mavros/battery,
+        # /pico/status as PicoStatus. On the boat the Pico line is a raw
+        # std_msgs/String, the battery is the BMS aggregate and the lidar
+        # scan, when there is one, is /lidar_driver/scan_raw.
+        self.declare_parameter("battery_topic", "/battery/state")
+        self.declare_parameter("scan_topic", "/lidar_driver/scan_raw")
+        # "state_line": std_msgs/String from pico_bridge (the boat).
+        # "pico_status": asket_interfaces/PicoStatus (asket_sim's sim_node).
+        self.declare_parameter("pico_status_format", "state_line")
+        # Equipment that is not aboard or not watched by this stack. Its
+        # checks are listed as "not checked" and do not ground the boat.
+        self.declare_parameter("lidar_fitted", False)
+        self.declare_parameter("sonar_monitored", False)
 
         self.history = PreflightHistory(self.get_parameter("history_path").value)
         self.thresholds = Thresholds()
@@ -98,7 +116,14 @@ class SystemTestNode(Node):
         self._heading: HeadingStatus | None = None
         self._sonar: SonarStatus | None = None
         self._pico: PicoStatus | None = None
+        self._pico_line: str | None = None
         self._pico_at: float = 0.0
+        self._heading_at: float = 0.0
+        self._odom: Odometry | None = None
+        self._odom_at: float = 0.0
+        self._sats: int | None = None
+        self._time_ref: TimeReference | None = None
+        self._time_ref_at: float = 0.0
         self._link: LinkStatus | None = None
         self._mission: MissionState | None = None
         self._disk_write_mbps: float | None = None
@@ -106,14 +131,25 @@ class SystemTestNode(Node):
         self.create_subscription(NavSatFix, "/mavros/global_position/global",
                                  self._set("_fix"), SENSOR_QOS)
         self.create_subscription(Imu, "/mavros/imu/data", self._set("_imu"), SENSOR_QOS)
-        self.create_subscription(BatteryState, "/mavros/battery",
+        self.create_subscription(BatteryState, self.get_parameter("battery_topic").value,
                                  self._set("_battery"), SENSOR_QOS)
-        self.create_subscription(LaserScan, "/scan", self._set("_scan"), SENSOR_QOS)
-        self.create_subscription(HeadingStatus, "/asket/heading", self._set("_heading"), 10)
+        self.create_subscription(LaserScan, self.get_parameter("scan_topic").value,
+                                 self._set("_scan"), SENSOR_QOS)
+        # The simulator's heading; on the boat nothing publishes it and the
+        # EKF odometry below is the heading.
+        self.create_subscription(HeadingStatus, "/asket/heading", self._on_heading, 10)
+        self.create_subscription(Odometry, "/odometry/filtered", self._on_odom, SENSOR_QOS)
+        self.create_subscription(UInt32, "/mavros/global_position/raw/satellites",
+                                 self._on_sats, SENSOR_QOS)
+        self.create_subscription(TimeReference, "/mavros/time_reference",
+                                 self._on_time_ref, SENSOR_QOS)
         self.create_subscription(SonarStatus, "/sonar/status", self._set("_sonar"), 10)
         self.create_subscription(LinkStatus, "/gui/link_status", self._set("_link"), 10)
         self.create_subscription(MissionState, "/mission/state", self._set("_mission"), 10)
-        self.create_subscription(PicoStatus, "/pico/status", self._on_pico, 10)
+        if self.get_parameter("pico_status_format").value == "pico_status":
+            self.create_subscription(PicoStatus, "/pico/status", self._on_pico, 10)
+        else:
+            self.create_subscription(String, "/pico/status", self._on_pico_line, 10)
         self.create_subscription(DiagnosticArray, "/diagnostics", self._on_diagnostics, 10)
 
         self.pub_report = self.create_publisher(SystemTestReport, "/system_test/report",
@@ -146,6 +182,62 @@ class SystemTestNode(Node):
     def _on_pico(self, msg: PicoStatus) -> None:
         self._pico = msg
         self._pico_at = time.monotonic()
+
+    def _on_pico_line(self, msg: String) -> None:
+        self._pico_line = str(msg.data)
+        self._pico_at = time.monotonic()
+
+    def _on_heading(self, msg: HeadingStatus) -> None:
+        self._heading = msg
+        self._heading_at = time.monotonic()
+
+    def _on_odom(self, msg: Odometry) -> None:
+        self._odom = msg
+        self._odom_at = time.monotonic()
+
+    def _on_sats(self, msg: UInt32) -> None:
+        self._sats = int(msg.data)
+
+    def _on_time_ref(self, msg: TimeReference) -> None:
+        self._time_ref = msg
+        self._time_ref_at = time.monotonic()
+
+    def _absent(self) -> set[str]:
+        absent = set()
+        if not self.get_parameter("lidar_fitted").value:
+            absent.add("lidar")
+        if not self.get_parameter("sonar_monitored").value:
+            absent.add("sonar_bridge")
+        return absent
+
+    def _real_vessel_facts(self) -> dict:
+        """Keys from the boat's own topics, laid over the simulator's.
+
+        Only what actually arrived: a key that is absent stays as the
+        simulator path left it (None), so its check reports unknown.
+        """
+        now = time.monotonic()
+        facts: dict = {}
+        if self._pico_line is not None:
+            facts.update(pico_facts(self._pico_line, now - self._pico_at))
+        sim_heading_fresh = self._heading is not None and now - self._heading_at < 2.0
+        if self._odom is not None and not sim_heading_fresh:
+            q = self._odom.pose.pose.orientation
+            twist = self._odom.twist.twist.linear
+            facts.update(heading_facts(heading_from_odometry(
+                compass_deg_from_enu_quaternion(q.x, q.y, q.z, q.w),
+                now - self._odom_at, twist.x, twist.y,
+            )))
+        if self._sats is not None:
+            facts["num_sats"] = self._sats
+        if self._time_ref is not None:
+            ref = self._time_ref
+            facts.update(gps_time_facts(
+                ref.header.stamp.sec + ref.header.stamp.nanosec * 1e-9,
+                ref.time_ref.sec + ref.time_ref.nanosec * 1e-9,
+                now - self._time_ref_at,
+            ))
+        return facts
 
     def _on_diagnostics(self, msg: DiagnosticArray) -> None:
         for status in msg.status:
@@ -246,6 +338,7 @@ class SystemTestNode(Node):
             "expected_nodes": expected,
             "present_nodes": present,
             "mounting": self._mounting(),
+            **self._real_vessel_facts(),
         }
 
     def _mounting(self) -> dict | None:
@@ -285,6 +378,7 @@ class SystemTestNode(Node):
         report = run_checks(
             self._state(), self.thresholds, only=only,
             run_utc_ms=self.get_clock().now().nanoseconds // 1_000_000,
+            absent=self._absent(),
         )
         report.duration_s = time.monotonic() - started
         self.history.append(report)

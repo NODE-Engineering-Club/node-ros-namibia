@@ -133,6 +133,11 @@ def generate_launch_description():
                     # The competition stack's own nodes, so a missing one is
                     # reported rather than silently absent from the verdict.
                     "expected_nodes": ["pico_bridge", "gui_backend"],
+                    # Equipment absent on purpose is "not checked", not a
+                    # NO-GO: no lidar unless lidar_fitted, and the sonar is
+                    # watched only when omniscan_bridge is started.
+                    "lidar_fitted": LaunchConfiguration("lidar_fitted"),
+                    "sonar_monitored": LaunchConfiguration("enable_sonar"),
                 },
                 sim_time,
             ],

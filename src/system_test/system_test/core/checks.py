@@ -86,7 +86,11 @@ class Thresholds:
     min_satellites: int = 6
     max_hdop: float = 2.5
     min_battery_soc: float = 0.4
-    min_battery_voltage: float = 22.0
+    #: Two 4S LiPo packs in parallel (docs/HARDWARE_DECISIONS.md): 3.5 V a
+    #: cell under load is the usual floor before the curve falls away. This
+    #: was 22.0, a 6S figure, which failed a full 4S pack (16.8 V) every time.
+    #: PROVISIONAL until checked against the packs' own datasheet.
+    min_battery_voltage: float = 14.0
     max_heading_accuracy_deg: float = 12.0
     max_heading_divergence_deg: float = 15.0
     max_roll_at_rest_deg: float = 8.0
@@ -923,26 +927,74 @@ class Report:
         return max((i.status for i in self.items), key=lambda s: _SEVERITY[s], default=PASS)
 
 
+#: Checks that only mean something when a piece of optional equipment is
+#: aboard *and* watched by this stack, keyed by check id.
+#:
+#: On the current boat there is no lidar, and the sonar is run by SonarView on
+#: its own screen with omniscan_bridge off (docs/HARDWARE_DECISIONS.md). Without
+#: this, ``sonar.link`` and ``sonar.clock`` — both critical — would make every
+#: pre-flight NO-GO over equipment that is absent on purpose.
+REQUIRES = {
+    "lidar.spin": "lidar",
+    "sonar.link": "sonar_bridge",
+    "sonar.clock": "sonar_bridge",
+    "sonar.mounting": "sonar_bridge",
+}
+
+#: What the operator is told for each kind of absent equipment.
+ABSENT_REASON = {
+    "lidar": "no lidar is fitted on this boat",
+    "sonar_bridge": (
+        "the sonar is run from SonarView, and omniscan_bridge is not started, "
+        "so this stack does not watch it"
+    ),
+}
+
+
+def _not_fitted(check: Registered, equipment: str) -> CheckResult:
+    return CheckResult(
+        check.id, check.name, SKIPPED,
+        f"Not checked: {ABSENT_REASON.get(equipment, equipment + ' is not fitted')}",
+        "Nothing to do here. If the equipment is fitted, start the stack with "
+        "it enabled (enable_lidar:=true, enable_sonar:=true) and re-run.",
+    )
+
+
 def run_checks(
     state: dict,
     thresholds: Thresholds | None = None,
     only: list[str] | None = None,
     run_utc_ms: int = 0,
+    absent: frozenset[str] | set[str] = frozenset(),
 ) -> Report:
     """Run every passive check and produce a GO / NO-GO verdict.
 
     A ``FAIL`` anywhere is NO-GO. ``WARN`` and ``SKIPPED`` do not block launch —
     a check that could not run must not ground the vessel, but it must be
     visible, which is why it is listed rather than omitted.
+
+    ``absent`` names equipment that is deliberately not aboard or not watched
+    (see :data:`REQUIRES`). Its checks are listed as not checked, say why, and
+    neither block the verdict nor count as "could not run". Everything else
+    is unchanged: a critical check whose equipment *is* expected and is silent
+    still makes the verdict NO-GO.
     """
     thresholds = thresholds or Thresholds()
     selected = [c for c in CHECKS if only is None or c.id in only]
-    items = [c.fn(state, thresholds) for c in selected]
-    critical_ids = {c.id for c in selected if c.critical}
+    items = []
+    not_fitted: set[str] = set()
+    for c in selected:
+        equipment = REQUIRES.get(c.id)
+        if equipment in absent:
+            items.append(_not_fitted(c, equipment))
+            not_fitted.add(c.id)
+        else:
+            items.append(c.fn(state, thresholds))
+    critical_ids = {c.id for c in selected if c.critical and c.id not in not_fitted}
 
     failures = [i for i in items if i.status == FAIL]
     warnings = [i for i in items if i.status == WARN]
-    skipped = [i for i in items if i.status == SKIPPED]
+    skipped = [i for i in items if i.status == SKIPPED and i.id not in not_fitted]
     blocked = [i for i in skipped if i.id in critical_ids]
 
     go = not failures and not blocked
