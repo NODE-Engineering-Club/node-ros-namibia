@@ -162,6 +162,10 @@ export function picoPayload(world, detail) {
     sbus_frames_bad: 0,
     sbus_failsafe: !world.rcLinkOk,
     sbus_frame_lost: false,
+    // v5. The mock's RC link is never "lost" in the firmware's sense, and its
+    // serial link never backs up.
+    rc_lost_latched: false,
+    serial_tx_dropped: 0,
     arming_block: armingBlockReason(
       world.armed,
       world.rcChannel7 > CH7_ARM_MIN,

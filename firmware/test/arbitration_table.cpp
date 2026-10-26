@@ -16,7 +16,11 @@
 //   make -C firmware/test table
 //
 // Output columns, space separated:
-//   ch8 ch7 wantauto link failsafe latch_in  mode armed latch_out
+//   ch8 ch7 wantauto link failsafe latch_in silent rclatch_in
+//   mode armed latch_out rclatch_out
+//
+// silent = no valid SBUS frame for longer than SBUS_FAILSAFE_TIMEOUT_MS, and
+// rclatch = the v5 RC-loss latch (rc_lost_latched).
 //
 // mode is the firmware's OperationMode enum: 1 ESTOP, 2 MANUAL, 3 AUTONOMOUS.
 
@@ -31,8 +35,8 @@ TinyUSBDeviceStub TinyUSBDevice;
 #include "sketch.inc"
 
 // A fixed clock. update_state() consults millis() only through
-// serial_link_live(), so freezing it makes "heartbeat fresh" an input we set
-// rather than a race we hope for.
+// serial_link_live() and the SBUS silence test, so freezing it makes "heartbeat
+// fresh" and "SBUS silent" inputs we set rather than races we hope for.
 static const unsigned long NOW = 100000;
 
 int main() {
@@ -50,6 +54,8 @@ int main() {
         for (int link = 0; link < 2; link++) {
           for (int fs = 0; fs < 2; fs++) {
             for (int latch = 0; latch < 2; latch++) {
+             for (int silent = 0; silent < 2; silent++) {
+              for (int rclatch = 0; rclatch < 2; rclatch++) {
               // Start from a known state. ESTOP/disarmed is the firmware's own
               // power-on state, and it means that when the decision *is*
               // ESTOP/disarmed no transition fires and the values already read
@@ -64,16 +70,24 @@ int main() {
               serial_wants_auto = (wants == 1);
               sbus_failsafe_flag = (fs == 1);
               estop_latched = (latch == 1);
+              rc_lost_latched = (rclatch == 1);
               last_heartbeat_ms = link ? NOW : NOW - (HEARTBEAT_TIMEOUT_MS + 1);
+              last_sbus_read_ms = silent ? NOW - (SBUS_FAILSAFE_TIMEOUT_MS + 1) : NOW;
 
               update_state();
 
-              printf("%u %u %d %d %d %d %d %d %d\n",
+              printf("%u %u %d %d %d %d %d %d %d %d %d %d\n",
                      (unsigned)ch8_values[a], (unsigned)ch7_values[b],
-                     wants, link, fs, latch,
-                     (int)current_mode, armed ? 1 : 0, estop_latched ? 1 : 0);
+                     wants, link, fs, latch, silent, rclatch,
+                     (int)current_mode, armed ? 1 : 0, estop_latched ? 1 : 0,
+                     rc_lost_latched ? 1 : 0);
 
-              Serial.out.clear();   // transitions log; we only want the table
+              // Transitions log; we only want the table. The ring is drained
+              // too, or it fills and the sketch starts counting drops.
+              tx_ring_used = 0; tx_ring_head = tx_ring_tail = 0;
+              Serial.out.clear();
+              }
+             }
             }
           }
         }

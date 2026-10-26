@@ -19,7 +19,7 @@ from system_test.core.checks import (
 HEALTHY = dict(
     pico_age_s=0.1, rc_link_ok=True,
     # Raw SBUS counts, 172..1811. The firmware's thresholds are on this scale.
-    rc_channel8_raw=1811, rc_channel7_raw=1811, pico_firmware_version=4,
+    rc_channel8_raw=1811, rc_channel7_raw=1811, pico_firmware_version=5,
     num_sats=14, gnss_fix_type=3, hdop=0.8,
     heading_valid=True, heading_source="gnss_compass", heading_accuracy_deg=0.2,
     heading_divergence_deg=2.0, heading_divergence_meaningful=True,
@@ -213,7 +213,7 @@ def test_a_firmware_version_mismatch_grounds_the_vessel():
     result = item(report, "pico.firmware_version")
     assert result.status == FAIL
     assert "v3" in result.message
-    assert "pico-node_v4" in result.remedy
+    assert "pico-node_v5" in result.remedy
     assert not report.go
 
 
@@ -469,3 +469,12 @@ def test_the_shipped_default_is_off_so_the_warning_is_the_normal_case():
     from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
 
     assert ESTOP_FEEDBACK_ENABLED is False
+
+
+def test_a_pico_still_on_v4_grounds_the_vessel():
+    """v4 stays armed when SBUS goes silent in AUTONOMOUS and re-arms by itself
+    after a failsafe (firmware/pico-node_v5/). The pre-flight must say so
+    rather than let the boat out on it."""
+    result = item(run_checks(dict(HEALTHY, pico_firmware_version=4)), "pico.firmware_version")
+    assert result.status == FAIL
+    assert "v4" in result.message

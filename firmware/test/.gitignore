@@ -2,5 +2,6 @@
 # fwtest is the compiled harness — both are one `make` away and neither should
 # be reviewed as source.
 fwtest
+fwtest_feedback
 sketch.inc
 fwtable

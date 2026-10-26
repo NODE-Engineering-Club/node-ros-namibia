@@ -180,8 +180,10 @@ def _pico_link(state: dict, t: Thresholds) -> CheckResult:
 
 #: The firmware protocol this stack is built to read. Kept in step with
 #: ``gui_backend.core.pico_state.PROTOCOL_VERSION`` and with ``FW_VERSION`` in
-#: ``firmware/pico-node_v4/``; a test asserts all three agree.
-EXPECTED_FIRMWARE_VERSION = 4
+#: ``firmware/pico-node_v5/``; a test asserts all three agree. A Pico still on
+#: pico-node_v4 fails this check: v4 stays armed when SBUS goes silent in
+#: AUTONOMOUS (docs/HARDWARE_DECISIONS.md).
+EXPECTED_FIRMWARE_VERSION = 5
 
 
 @check("pico.firmware_version", "Pico firmware version", critical=True)
@@ -210,7 +212,7 @@ def _firmware_version(state: dict, t: Thresholds) -> CheckResult:
             "pico.firmware_version", "Pico firmware version", FAIL,
             f"The Pico is running firmware v{int(reported)}; this software "
             f"reads v{EXPECTED_FIRMWARE_VERSION}",
-            "Flash firmware/pico-node_v4/ to the Pico, or check out the "
+            "Flash firmware/pico-node_v5/ to the Pico, or check out the "
             "Jetson software that matches what is flashed. Do not fly on a "
             "mismatch: the fields will be read against the wrong layout and "
             "the vessel panel will be confidently wrong.",
@@ -232,7 +234,7 @@ def _state_format(state: dict, t: Thresholds) -> CheckResult:
     text.
 
     The format is now transcribed field by field from
-    ``firmware/pico-node_v4/pico-node_v4.ino`` rather than guessed — but
+    ``firmware/pico-node_v5/pico-node_v5.ino`` rather than guessed — but
     reading a firmware's source is not the same as reading its output, and no
     line has yet been captured off real hardware. A parser reading the wrong
     format does not look broken; it looks like a vessel that is not reporting
@@ -307,9 +309,9 @@ def _estop_feedback(state: dict, t: Thresholds) -> CheckResult:
             "pico.estop_feedback", "E-stop power feedback", WARN,
             "Not verified: nothing confirms the ESC rail actually collapsed "
             "when the relay was commanded open",
-            "ESTOP_FEEDBACK_ENABLED is 0 in firmware/pico-node_v4 and the "
+            "ESTOP_FEEDBACK_ENABLED is 0 in firmware/pico-node_v5 and the "
             "GPIO20 divider trace is cut for bench testing. Set it to 1, and "
-            "ESTOP_FEEDBACK_ENABLED in gui_backend/core/pico_state.py to True "
+            "ESTOP_FEEDBACK_ENABLED in asket_common/mode_arbitration.py to True "
             "in the same change, once the hardware is ready. Until then the "
             "hardware killswitch and RC channel 8 are the only propulsion cuts "
             "with any confirmation behind them.",

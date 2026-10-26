@@ -31,10 +31,10 @@ MODE_VALUES = {v: k for k, v in MODE_NAMES.items()}
 FIRMWARE_MODE = {MODE_ESTOP: 1, MODE_MANUAL: 2, MODE_AUTONOMOUS: 3}
 
 #: The firmware version this simulator pretends to be. Must track
-#: ``FW_VERSION`` in ``firmware/pico-node_v4/pico-node_v4.ino``; a test asserts
+#: ``FW_VERSION`` in ``firmware/pico-node_v5/pico-node_v5.ino``; a test asserts
 #: it matches what ``gui_backend`` is willing to parse, so the three cannot
 #: drift apart silently.
-FIRMWARE_VERSION = 4
+FIRMWARE_VERSION = 5
 
 #: Raw SBUS counts, as the firmware reports them: 11 bits clamped to this
 #: range, 991 at centre. **Not** percentages.
@@ -210,7 +210,7 @@ class PicoSim:
     # -- the wire ---------------------------------------------------------
 
     def state_line(self) -> str:
-        """One ``STATE`` line, exactly as ``pico-node_v4`` would write it.
+        """One ``STATE`` line, exactly as ``pico-node_v5`` would write it.
 
         This is the whole point of the text layer. The simulator used to hand
         ``gui_backend`` a structured message directly, which meant the format,
@@ -238,4 +238,8 @@ class PicoSim:
             f" sbusbad={self.sbus_frames_bad}"
             f" sbusfs={int(not self.rc_link_ok)}"
             f" sbuslost={int(self.sbus_frame_lost)}"
+            # v5. The simulated RC link is never "lost" in the firmware's
+            # sense, and its serial link never backs up.
+            " rclatch=0"
+            " txdrop=0"
         )

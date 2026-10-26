@@ -8,7 +8,7 @@ function of its inputs so the whole decision table can be checked without a
 boat.
 
 This is the Python mirror of ``update_state()`` in
-``firmware/pico-node_v4/pico-node_v4.ino``. The firmware is the authority — it
+``firmware/pico-node_v5/pico-node_v5.ino``. The firmware is the authority — it
 is what actually drives the relay — but the two implement the same table, and
 ``test_firmware_arbitration_matches.py`` compiles the real sketch and drives
 **every** combination through both, so a change on one side that is not
@@ -32,8 +32,13 @@ switch says "you may", the Jetson says "I am", and the heartbeat says "I still
 am". Losing any one of the three drops the vessel back to MANUAL, which is why
 :func:`arbitrate` reports which one it was — see :func:`autonomy_block_reason`.
 
-A receiver-declared failsafe (``sbus_failsafe``) forces ESTOP from any zone, and
-is applied last so that no branch above it can bypass it.
+A lost RC link forces ESTOP from any zone, and is applied last so that no
+branch above it can bypass it. Since v5 "lost" means either the receiver's own
+failsafe bit (``sbus_failsafe``) or no valid frame for ``SBUS_FAILSAFE_TIMEOUT_MS``
+(``sbus_silent``) — v4 ignored the second in AUTONOMOUS, where the frozen
+channels kept the boat armed. The loss is latched (``rc_lost_latched``): the
+vessel does not arm again until channel 7 has been seen low on a live link,
+however the switches sit when the link returns.
 
 There is no software ESTOP verb, and that is on purpose
 -------------------------------------------------------
@@ -89,6 +94,11 @@ ARM_THRESHOLD = 1000
 #: Mirrors ``HEARTBEAT_TIMEOUT_MS`` in the firmware.
 HEARTBEAT_TIMEOUT_S = 0.6
 
+#: Seconds without a valid SBUS frame before the RC link counts as lost, in
+#: every mode. Mirrors ``SBUS_FAILSAFE_TIMEOUT_MS`` (v5: 300 ms; v4 used 500 ms
+#: and only outside AUTONOMOUS).
+SBUS_FAILSAFE_TIMEOUT_S = 0.3
+
 #: After closing the relay, the firmware holds both thrusters at neutral for
 #: this long while the ESCs boot. Mirrors ``ESC_ARM_DELAY_MS``.
 #:
@@ -118,6 +128,7 @@ ESTOP_FEEDBACK_ENABLED = False
 REASON_RC_ESTOP = "rc_estop"
 REASON_RC_MANUAL = "rc_manual"
 REASON_SBUS_FAILSAFE = "sbus_failsafe"
+REASON_SBUS_SILENT = "sbus_silent"
 REASON_NOT_REQUESTED = "not_requested"
 REASON_LINK_STALE = "link_stale"
 
@@ -135,6 +146,10 @@ REASON_TEXT = {
     REASON_SBUS_FAILSAFE: (
         "the receiver is reporting failsafe, which forces E-stop from any switch "
         "position"
+    ),
+    REASON_SBUS_SILENT: (
+        "no SBUS frame has arrived from the receiver recently, which forces "
+        "E-stop from any switch position"
     ),
     REASON_NOT_REQUESTED: (
         "autonomy is permitted by the transmitter but has not been requested"
@@ -176,6 +191,9 @@ class Arbitration:
     estop_latched: bool
     autonomy_permitted: bool = False
     autonomy_blocked_by: str = ""
+    #: v5: the RC-loss latch *after* this evaluation. Set by any loss, cleared
+    #: only by channel 7 low on a live link.
+    rc_lost_latched: bool = False
 
 
 def rc_zone(mode_ch: int) -> str:
@@ -198,6 +216,8 @@ def arbitrate(
     link_live: bool = False,
     sbus_failsafe: bool = False,
     estop_latched: bool = False,
+    sbus_silent: bool = False,
+    rc_lost_latched: bool = False,
 ) -> Arbitration:
     """Decide mode and arming from the RC channels and the Jetson's request.
 
@@ -214,8 +234,12 @@ def arbitrate(
         :data:`HEARTBEAT_TIMEOUT_S`.
     :param sbus_failsafe: the receiver declared failsafe in the frame footer.
     :param estop_latched: the latch state going in.
+    :param sbus_silent: no valid frame for :data:`SBUS_FAILSAFE_TIMEOUT_S`; the
+        channel values are then stale copies of the last frame.
+    :param rc_lost_latched: the RC-loss latch going in.
     """
-    permitted = mode_ch >= MODE_MID_MAX and not sbus_failsafe
+    rc_lost = sbus_silent or sbus_failsafe
+    permitted = mode_ch >= MODE_MID_MAX and not rc_lost
 
     # --- Resolve the channel 8 zone ---
     if mode_ch < MODE_LOW_MAX:
@@ -232,19 +256,26 @@ def arbitrate(
             mode = MODE_MANUAL
             blocked = REASON_NOT_REQUESTED if not serial_wants_auto else REASON_LINK_STALE
 
-    # The receiver's own failsafe overrides everything, and is applied last so
-    # that no branch above can bypass it.
-    if sbus_failsafe:
+    # A lost RC link overrides everything, and is applied last so that no
+    # branch above can bypass it.
+    if rc_lost:
         mode = MODE_ESTOP
-        blocked = REASON_SBUS_FAILSAFE
+        blocked = REASON_SBUS_SILENT if sbus_silent else REASON_SBUS_FAILSAFE
 
     arm_high = arm_ch > ARM_THRESHOLD
+
+    # The loss is latched; only channel 7 low on a live link clears it.
+    if rc_lost:
+        rc_lost_latched = True
+    elif not arm_high:
+        rc_lost_latched = False
+
     want_armed = arm_high and mode != MODE_ESTOP
 
     # The operator disarming, or selecting ESTOP, is what clears the latch.
     if not arm_high or mode == MODE_ESTOP:
         estop_latched = False
-    if estop_latched:
+    if estop_latched or rc_lost_latched:
         want_armed = False
 
     return Arbitration(
@@ -253,6 +284,7 @@ def arbitrate(
         estop_latched=estop_latched,
         autonomy_permitted=permitted,
         autonomy_blocked_by=blocked,
+        rc_lost_latched=rc_lost_latched,
     )
 
 
@@ -288,6 +320,10 @@ ARM_BLOCKED_RC_LOW = "RC channel 7 disarmed, propulsion cannot start"
 ARM_BLOCKED_LATCHED = (
     "e-stop latched, propulsion cannot start until the arm switch is cycled"
 )
+ARM_BLOCKED_RC_LOST = (
+    "the RC link was lost, propulsion cannot start until channel 7 is put low "
+    "and then high again"
+)
 ARM_BLOCKED_UNKNOWN = "the vessel reports disarmed, so propulsion cannot start"
 ARM_BLOCKED_CONTRADICTORY = (
     "the vessel reports disarmed although channel 7 is up — propulsion cannot "
@@ -299,6 +335,7 @@ def arming_block_reason(
     armed: bool | None,
     rc_arm_high: bool | None = None,
     estop_latched: bool | None = None,
+    rc_lost_latched: bool | None = None,
 ) -> str | None:
     """Why propulsion cannot start, or ``None`` if nothing is blocking it.
 
@@ -316,6 +353,8 @@ def arming_block_reason(
             return None
         if rc_arm_high is False:
             return ARM_BLOCKED_RC_LOW
+        if rc_lost_latched is True:
+            return ARM_BLOCKED_RC_LOST
         if estop_latched is True:
             return ARM_BLOCKED_LATCHED
         if rc_arm_high is True:

@@ -9,8 +9,8 @@ One format, on purpose
 ======================
 
 This parser accepts ``STATE key=value`` and nothing else. That is the format
-``pico-node_v4`` emits (``firmware/pico-node_v4/``), and earlier firmwares are
-not supported.
+``pico-node_v5`` emits (``firmware/pico-node_v5/``), and earlier firmwares are
+not supported: a v4 line parses, but is reported as a version mismatch.
 
 Accepting several formats was considered and rejected. Two accepted formats
 means one of them is rarely exercised, and a parser branch nobody runs is a
@@ -52,8 +52,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 #: The firmware protocol version this parser understands. Must match
-#: ``FW_VERSION`` in ``firmware/pico-node_v4/pico-node_v4.ino``.
-PROTOCOL_VERSION = 4
+#: ``FW_VERSION`` in ``firmware/pico-node_v5/pico-node_v5.ino``.
+#:
+#: 5 since hw-alignment Phase B: v5 adds ``rclatch`` and ``txdrop`` at the end
+#: of the line. A v4 Pico is reported as a version mismatch and fails the
+#: pre-flight; that is the point of the number.
+PROTOCOL_VERSION = 5
 
 #: Set to True only when a real line off real hardware has been captured and
 #: checked against this parser. Reading the firmware source is not the same as
@@ -102,7 +106,7 @@ CH7_ARM_MIN = 1000
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
-#: Every key ``pico-node_v4`` emits, and the attribute it lands on. A key that
+#: Every key ``pico-node_v5`` emits, and the attribute it lands on. A key that
 #: is not here goes to ``unknown_keys`` and the pre-flight reports it: an
 #: unrecognised key usually means the firmware moved and this file did not.
 _FIELDS = {
@@ -121,15 +125,18 @@ _FIELDS = {
     "sbusbad": "sbus_frames_bad",
     "sbusfs": "sbus_failsafe",
     "sbuslost": "sbus_frame_lost",
+    # v5
+    "rclatch": "rc_lost_latched",
+    "txdrop": "serial_tx_dropped",
 }
 
 _BOOL_FIELDS = {
     "armed", "relay_closed", "mode_requested_auto", "link_live",
-    "estop_latched", "sbus_failsafe", "sbus_frame_lost",
+    "estop_latched", "sbus_failsafe", "sbus_frame_lost", "rc_lost_latched",
 }
 _INT_FIELDS = {
     "firmware_version", "rc_throttle_raw", "rc_yaw_raw", "rc_channel7_raw",
-    "rc_channel8_raw", "sbus_frames_ok", "sbus_frames_bad",
+    "rc_channel8_raw", "sbus_frames_ok", "sbus_frames_bad", "serial_tx_dropped",
 }
 
 #: A line is only called parsed when these are present. One understood field is
@@ -180,6 +187,14 @@ class PicoState:
     sbus_frames_bad: int | None = None
     sbus_failsafe: bool | None = None
     sbus_frame_lost: bool | None = None
+
+    #: v5: the RC link was lost (SBUS silent or receiver failsafe) and the
+    #: firmware will not arm again until channel 7 has been put low on a live
+    #: link. The usual answer to "the link is back, why will it not arm".
+    rc_lost_latched: bool | None = None
+    #: v5: lines the Pico dropped because the host was not reading. Non-zero
+    #: means some STATE lines never reached the Jetson.
+    serial_tx_dropped: int | None = None
 
     #: Keys seen in the line that this parser does not recognise. Reported
     #: rather than dropped: an unknown key is usually the field that matters.

@@ -203,6 +203,8 @@ def pico_payload(sample, detail: str = DETAIL_FULL) -> dict:
             "sbus_frames_bad": _opt_int(getattr(sample, "sbus_frames_bad", None)),
             "sbus_failsafe": _opt_bool(getattr(sample, "sbus_failsafe", None)),
             "sbus_frame_lost": _opt_bool(getattr(sample, "sbus_frame_lost", None)),
+            "rc_lost_latched": _opt_bool(getattr(sample, "rc_lost_latched", None)),
+            "serial_tx_dropped": _opt_int(getattr(sample, "serial_tx_dropped", None)),
             # Why the propellers cannot turn, in one sentence, or absent when
             # nothing is blocking them.
             #
@@ -218,6 +220,7 @@ def pico_payload(sample, detail: str = DETAIL_FULL) -> dict:
                 _opt_bool(sample.armed),
                 rc_arm_high=_opt_bool(getattr(sample, "ch7_arm_high", None)),
                 estop_latched=_opt_bool(sample.estop_latched),
+                rc_lost_latched=_opt_bool(getattr(sample, "rc_lost_latched", None)),
             ),
         }
     )

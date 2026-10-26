@@ -11,10 +11,11 @@ from asket_common.heading import compass_deg_from_enu_quaternion, heading_from_o
 from system_test.core.checks import FAIL, PASS, SKIPPED, WARN, Thresholds, run_checks
 from system_test.core.live_inputs import gps_time_facts, heading_facts, pico_facts
 
-#: A line as pico-node_v4 emits it (field order from the sketch).
-V4_LINE = (
-    "STATE ver=4 mode=2 armed=1 relay=1 wantauto=0 link=1 estoplatch=0 "
-    "thr=991 yaw=991 ch7=1500 ch8=1200 sbusok=1000 sbusbad=0 sbusfs=0 sbuslost=0"
+#: A line as pico-node_v5 emits it (field order from the sketch).
+V5_LINE = (
+    "STATE ver=5 mode=2 armed=1 relay=1 wantauto=0 link=1 estoplatch=0 "
+    "thr=991 yaw=991 ch7=1500 ch8=1200 sbusok=1000 sbusbad=0 sbusfs=0 sbuslost=0 "
+    "rclatch=0 txdrop=0"
 )
 
 
@@ -23,8 +24,8 @@ def _one(state, check_id):
 
 
 def test_a_v4_state_line_feeds_the_pico_checks():
-    facts = pico_facts(V4_LINE, age_s=0.3)
-    assert facts["pico_firmware_version"] == 4
+    facts = pico_facts(V5_LINE, age_s=0.3)
+    assert facts["pico_firmware_version"] == 5
     assert facts["rc_link_ok"] is True
     assert facts["rc_channel8_raw"] == 1200
     assert facts["pico_state_parsed"] is True
@@ -85,7 +86,7 @@ def test_no_gps_time_is_no_key():
 def _healthy_boat():
     """Everything the real boat reports when all is well — no lidar, no sonar."""
     return {
-        **pico_facts(V4_LINE, age_s=0.2),
+        **pico_facts(V5_LINE, age_s=0.2),
         **heading_facts(heading_from_odometry(10.0, age_s=0.1)),
         **gps_time_facts(1000.05, 1000.0, 1.0),
         "gnss_fix_type": 3, "num_sats": 14, "hdop": 0.8,

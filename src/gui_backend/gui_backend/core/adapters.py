@@ -112,7 +112,7 @@ def pico_from_ros(msg, received_utc_ms: int = 0):
     * ``std_msgs/String`` — what the real ``pico_bridge`` publishes. It reads
       lines off the serial link and republishes any ``STATE ...`` line verbatim,
       unparsed, so the text is parsed here through
-      :mod:`gui_backend.core.pico_state`. The format is ``pico-node_v4``'s, and
+      :mod:`gui_backend.core.pico_state`. The format is ``pico-node_v5``'s, and
       only that one.
     * ``asket_interfaces/PicoStatus`` — what ``asket_sim`` publishes, a proper
       structured message.
@@ -195,6 +195,8 @@ def _pico_from_state_line(line: str, received_utc_ms: int):
         sbus_frames_bad=state.sbus_frames_bad,
         sbus_failsafe=state.sbus_failsafe,
         sbus_frame_lost=state.sbus_frame_lost,
+        rc_lost_latched=state.rc_lost_latched,
+        serial_tx_dropped=state.serial_tx_dropped,
         state_line=state.raw,
         state_parsed=state.parsed,
         state_unknown_keys=state.unknown_keys,

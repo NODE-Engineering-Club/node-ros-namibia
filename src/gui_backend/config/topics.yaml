@@ -68,7 +68,7 @@ sources:
     # core/pico_state.py.
     #
     # The format is transcribed field by field from
-    # firmware/pico-node_v4/pico-node_v4.ino, and the parser reads THAT VERSION
+    # firmware/pico-node_v5/pico-node_v5.ino, and the parser reads THAT VERSION
     # ONLY. Every line carries ver= first; anything else fails the pre-flight
     # rather than being half-read. Accepting several formats was considered and
     # rejected — a parser branch nobody exercises is a parser branch nobody

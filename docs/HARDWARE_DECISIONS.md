@@ -133,10 +133,12 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
   Nav2's only enabled obstacle layer (`sam2_obstacle_layer`) reads the SAM2
   pipeline, which is not running. Autonomous operation needs a human watch and
   a clear area. The pre-flight reports this as a warning on every run.
-* **Safety chain not complete:** relay and E-stop feedback are not wired; the
-  RC failsafe behaviour with ExpressLRS-over-SBUS is not verified; the
-  firmware does not trigger ESTOP if SBUS frames simply stop while in
-  AUTONOMOUS (see Phase B in the PR description).
+* **Safety chain not complete:** relay and E-stop feedback (GPIO20) are not
+  wired; the RC failsafe behaviour with ExpressLRS-over-SBUS is not verified.
+  `pico-node_v5` (Phase B c) now stops the boat when SBUS frames stop in any
+  mode, including AUTONOMOUS, and does not re-arm on its own after a
+  failsafe — **once flashed**: until then the Pico runs whatever is on it, and
+  the pre-flight fails on anything but `ver=5`. See `firmware/README.md`.
 * **Default motor path is now the Pico** (`use_pico_bridge:=true`, Phase B a),
   on `/dev/pico`. `actuator_driver` (Pixhawk RC override) runs only with
   `use_pico_bridge:=false`. A simulation (`use_sim:=true`) no longer starts the

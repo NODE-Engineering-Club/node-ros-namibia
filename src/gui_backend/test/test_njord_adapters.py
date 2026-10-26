@@ -116,7 +116,7 @@ def test_heading_is_absent_without_the_ekf_rather_than_defaulting_to_north():
 def test_a_string_status_is_parsed_and_stamped_with_our_receipt_time():
     """std_msgs/String has no header, so there is no sample time to use. The
     receipt time is honest about being ours."""
-    msg = SimpleNamespace(data="STATE ver=4 mode=2 armed=0 ch8=1811 sbusfs=0")
+    msg = SimpleNamespace(data="STATE ver=5 mode=2 armed=0 ch8=1811 sbusfs=0")
     record = adapters.pico_from_ros(msg, received_utc_ms=1_800_000_000_000)
     assert record.utc_ms == 1_800_000_000_000
     # mode=2 on the wire is the firmware's MANUAL; 1 is the GUI's. The two
@@ -131,7 +131,7 @@ def test_a_string_status_is_parsed_and_stamped_with_our_receipt_time():
 def test_fields_the_line_does_not_carry_stay_absent():
     """None says "not reported". False would be a claim about something never
     sent — and for the killswitch that claim is the dangerous direction."""
-    record = adapters.pico_from_ros(SimpleNamespace(data="STATE ver=4 mode=3 armed=1"), 0)
+    record = adapters.pico_from_ros(SimpleNamespace(data="STATE ver=5 mode=3 armed=1"), 0)
     assert record.estop_latched is None
     assert record.hardware_killswitch_engaged is None
     assert record.rc_channel8_raw is None
@@ -146,7 +146,7 @@ def test_the_pico_does_report_an_estop_latch_when_it_has_one():
     """``estoplatch`` is a real field in pico-node_v4, and it explains the most
     common "why will it not arm"."""
     record = adapters.pico_from_ros(
-        SimpleNamespace(data="STATE ver=4 mode=1 armed=0 estoplatch=1"), 0)
+        SimpleNamespace(data="STATE ver=5 mode=1 armed=0 estoplatch=1"), 0)
     assert record.estop_latched is True
 
 
@@ -161,7 +161,7 @@ def test_a_structured_picostatus_still_works():
     msg = SimpleNamespace(
         header=header(), mode=2, armed=True, estop_latched=False,
         relay_states=[True, True], esc_status=[0, 0], rc_link_ok=True,
-        rc_channel8_raw=1811, rc_channel7_raw=1811, firmware_version=4,
+        rc_channel8_raw=1811, rc_channel7_raw=1811, firmware_version=5,
         hardware_killswitch_engaged=False,
     )
     record = adapters.pico_from_ros(msg)
