@@ -5,6 +5,13 @@ simulation, container/CI, launch. **Nothing new runs unless asked for:**
 `ros2 launch bringup njord.launch.py` with no options starts exactly the same
 nodes as before this branch.
 
+> **Hardware reference:** `docs/HARDWARE_DECISIONS.md` (team decisions of
+> 2026-10-26: one sonar run by SonarView, no lidar on board, OAK-D-LR instead
+> of the USB camera, IP plan, udev names, wiring diagram). Where the notes
+> below assume other hardware, that file wins. The `hw-alignment` branch
+> (after this port) aligns the code with it; see the "Status after
+> hw-alignment" column added to §4.
+
 ## 1. What was copied, and from where
 
 Source: `NODE-Engineering-Club/node-ros-2026` at **`1606eb7`** (merge of PR #20,
