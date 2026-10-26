@@ -127,6 +127,49 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
  Cloudflare relay ◄─(outbound, read-only)── Jetson (when enable_cloud_bridge:=true)
 ```
 
+## 4b. Nav2 survey profile (Phase B f) — no obstacle sensors
+
+`njord.launch.py nav2_profile:=survey` (default) loads
+`src/bringup/config/nav2_params_survey.yaml`. `nav2_profile:=full` keeps
+`nav2_params.yaml`, built for the SAM2/fusion obstacle pipeline (Livox +
+OAK-D-LR, not fitted). The survey profile knows two things: where the boat may
+go, and how fast. **It does not know about anything in the water.**
+
+| What | Value | Where | Why |
+|---|---|---|---|
+| Obstacle layers | none, in both costmaps | `global_costmap`, `local_costmap` `plugins` | nothing aboard detects obstacles |
+| Geofence | `geofence_layer`: `nav2_costmap_2d::KeepoutFilter`, `filter_info_topic: /geofence/filter_info` | both costmaps | outside the polygon is lethal: nothing is planned or followed out of it |
+| Geofence polygon | `/data/setup/geofence.yaml` (`geofence_file`), lat/lon corners | `sensors/geofence_mask_node`, example `src/bringup/config/geofence.example.yaml` | site-specific; the mask is placed in the `map` frame once the Pixhawk home position is known (the same origin `datum_sync` uses) |
+| Lethal ring around the fence | 30 m (`margin_m`), mask 1 m cells (`resolution_m`) | `geofence_mask_node` parameters | beyond the mask Nav2 applies no keep-out; the ring is what blocks a path that would leave and come back |
+| Inflation | 5 m global, 2 m local, `cost_scaling_factor` 3 | `inflation_layer` | keeps the path off the fence line |
+| Cruise speed | `desired_linear_vel: 0.8` m/s | `controller_server.FollowPath` (Regulated Pure Pursuit) | survey pace with nobody aboard and no obstacle detection |
+| Speed cap (hard) | `max_velocity: [0.8, 0.0, 0.6]`, `min_velocity: [0.0, 0.0, -0.6]` | `velocity_smoother` | after the controller: ≤ 0.8 m/s, no reverse, ≤ 0.6 rad/s |
+| Acceleration | `max_accel: [0.3, 0.0, 0.5]`, `max_decel: [-0.5, 0.0, -0.5]` | `velocity_smoother` | gentle on the props and the ESCs |
+| Slow in turns / near the fence | `use_regulated_linear_velocity_scaling` (min radius 3 m, min 0.25 m/s), `use_cost_regulated_linear_velocity_scaling` | `FollowPath` | |
+| Reverse | `allow_reversing: false` | `FollowPath` | |
+| collision_monitor | in the chain, every polygon and source **disabled** | `collision_monitor` | passes commands through; it is **not** a safety layer in this profile |
+
+Measured in a Nav2 Jazzy (1.3.13) image with a fence edge 60 m east of the
+home: all nine Nav2 nodes active; a cell 70 m east is lethal; a plan to 30 m
+east succeeds, a plan to 100 m east is refused (no valid path); 2 m/s and
+2 rad/s in come out as 0.80 m/s and 0.60 rad/s.
+
+Pre-flight: `nav.geofence` is **critical** when the survey profile runs — no
+fence (or no home position yet) is NO-GO, because Nav2 would then have no area
+limit at all. It reads "Not checked" with `enable_nav2:=false` or
+`nav2_profile:=full`.
+
+Operating rules this profile assumes: draw the fence around open water only
+(not over moorings, jetties or the shore); start every mission inside it; keep
+the boat in sight with the transmitter in hand — Ch8 low, or a lost RC link,
+stops it in firmware (`pico-node_v5`).
+
+Two faults in `nav2_params.yaml`, found while testing this and fixed in both
+files, had kept Nav2 from starting at all: collision_monitor polygon `points`
+written as a nested YAML list (Jazzy wants a string — the generated params file
+was unparseable and every Nav2 node exited), and a `KeepOutFilter` class that
+does not exist (`KeepoutFilter`).
+
 ## 5. Risks to keep in front of everybody
 
 * **No obstacle detection at all.** No lidar, no working camera pipeline.
@@ -139,6 +182,9 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
   mode, including AUTONOMOUS, and does not re-arm on its own after a
   failsafe — **once flashed**: until then the Pico runs whatever is on it, and
   the pre-flight fails on anything but `ver=5`. See `firmware/README.md`.
+* **No obstacle detection.** The Nav2 survey profile (§4b) is contained by a
+  geofence and a speed limit only; anything in the water inside the fence is
+  invisible to the stack.
 * **Default motor path is now the Pico** (`use_pico_bridge:=true`, Phase B a),
   on `/dev/pico`. `actuator_driver` (Pixhawk RC override) runs only with
   `use_pico_bridge:=false`. A simulation (`use_sim:=true`) no longer starts the

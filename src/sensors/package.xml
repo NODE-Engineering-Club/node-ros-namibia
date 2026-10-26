@@ -20,6 +20,10 @@
   <!-- bms_reader / battery_aggregator: LiPo state of charge (ROS-free) -->
   <exec_depend>asket_common</exec_depend>
   <exec_depend>python3-serial</exec_depend>
+  <!-- geofence_mask_node -->
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

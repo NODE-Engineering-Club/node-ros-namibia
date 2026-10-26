@@ -93,6 +93,7 @@ def _healthy_boat():
         "roll_deg": 0.5, "pitch_deg": 0.3,
         "disk_free_bytes": 200 * 1024**3, "disk_write_mbps": 80.0,
         "state_of_charge": 0.9, "battery_voltage": 16.2,
+        "geofence_level": "OK", "geofence_message": "'test block', 72.0 ha",
     }
 
 
@@ -117,3 +118,27 @@ def test_absent_equipment_does_not_excuse_a_silent_critical_check():
     report = run_checks(state, absent={"lidar", "sonar_bridge"})
     assert not report.go
     assert "Battery" in report.summary
+
+
+# -- the geofence (Nav2 survey profile) --------------------------------------
+
+
+@pytest.mark.parametrize("level,status", [("OK", PASS), ("WARN", FAIL), ("ERROR", FAIL)])
+def test_the_geofence_check_follows_the_node(level, status):
+    state = {"geofence_level": level, "geofence_message": "test"}
+    assert _one(state, "nav.geofence").status == status
+
+
+def test_no_geofence_report_with_the_survey_profile_is_no_go():
+    state = _healthy_boat()
+    del state["geofence_level"]
+    report = run_checks(state, absent={"lidar", "sonar_bridge"})
+    assert not report.go
+    assert "Geofence" in report.summary
+
+
+def test_without_the_survey_profile_the_geofence_is_not_checked():
+    report = run_checks(_healthy_boat(), absent={"lidar", "sonar_bridge", "survey_nav"})
+    by_id = {i.id: i for i in report.items}
+    assert by_id["nav.geofence"].message.startswith("Not checked:")
+    assert report.go, report.summary

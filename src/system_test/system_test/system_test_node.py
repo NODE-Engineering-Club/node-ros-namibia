@@ -105,6 +105,8 @@ class SystemTestNode(Node):
         # checks are listed as "not checked" and do not ground the boat.
         self.declare_parameter("lidar_fitted", False)
         self.declare_parameter("sonar_monitored", False)
+        # The Nav2 survey profile is running, so its geofence must be active.
+        self.declare_parameter("geofence_expected", False)
 
         self.history = PreflightHistory(self.get_parameter("history_path").value)
         self.thresholds = Thresholds()
@@ -208,6 +210,8 @@ class SystemTestNode(Node):
             absent.add("lidar")
         if not self.get_parameter("sonar_monitored").value:
             absent.add("sonar_bridge")
+        if not self.get_parameter("geofence_expected").value:
+            absent.add("survey_nav")
         return absent
 
     def _real_vessel_facts(self) -> dict:
@@ -345,7 +349,20 @@ class SystemTestNode(Node):
             "expected_nodes": expected,
             "present_nodes": present,
             "mounting": self._mounting(),
+            **self._geofence(),
             **self._real_vessel_facts(),
+        }
+
+    def _geofence(self) -> dict:
+        """geofence_mask_node's own report, from /diagnostics."""
+        status = self._node_diagnostics.get("geofence")
+        if status is None:
+            return {}
+        # DiagnosticStatus.level is a one-byte `bytes` in rclpy, not an int.
+        level = status.level[0] if isinstance(status.level, bytes) else int(status.level)
+        return {
+            "geofence_level": {0: "OK", 1: "WARN"}.get(level, "ERROR"),
+            "geofence_message": status.message,
         }
 
     def _mounting(self) -> dict | None:

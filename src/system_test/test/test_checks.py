@@ -31,6 +31,8 @@ HEALTHY = dict(
     # disciplined; the check that reads this measures drift rather than
     # asking whether the NTP daemon says it is locked.
     gps_time_offset_ms=40, gps_time_age_s=1.0,
+    # The Nav2 survey profile's fence, as geofence_mask_node reports it.
+    geofence_level="OK", geofence_message="'test block', 72.0 ha",
     disk_free_bytes=200 * 1024**3, disk_write_mbps=120.0,
     state_of_charge=0.9, battery_voltage=16.2,
     link_rtt_ms=25.0, link_active="wifi",

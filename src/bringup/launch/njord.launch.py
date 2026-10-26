@@ -14,8 +14,16 @@ from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description():
     cfg = get_package_share_directory("bringup") + "/config"
+    # nav2_profile picks the Nav2 parameter file. An unknown profile is a
+    # KeyError at launch rather than a silent fallback.
     nav2_params = ParameterFile(
-        RewrittenYaml(source_file=cfg + "/nav2_params.yaml", param_rewrites={}, convert_types=True),
+        RewrittenYaml(
+            source_file=PythonExpression([
+                "{'survey': '", cfg, "/nav2_params_survey.yaml', 'full': '", cfg,
+                "/nav2_params.yaml'}['", LaunchConfiguration("nav2_profile"), "']",
+            ]),
+            param_rewrites={}, convert_types=True,
+        ),
         allow_substs=True,
     )
     desc_share = get_package_share_directory("description")
@@ -44,6 +52,16 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_mavros",       default_value="true"),
         DeclareLaunchArgument("enable_localization",  default_value="true"),
         DeclareLaunchArgument("enable_nav2",          default_value="true"),
+        # Phase B (f). survey: no obstacle layer (nothing aboard detects
+        # obstacles), a geofence keep-out and a speed limit
+        # (config/nav2_params_survey.yaml). full: config/nav2_params.yaml, for
+        # the SAM2/fusion obstacle pipeline, which needs sensors not fitted.
+        DeclareLaunchArgument("nav2_profile",         default_value="survey",
+                              description="Nav2 parameters: 'survey' (geofence + speed limit, no "
+                                          "obstacle layer) or 'full' (SAM2/fusion obstacles)."),
+        DeclareLaunchArgument("geofence_file",        default_value="/data/setup/geofence.yaml",
+                              description="Survey-area polygon (lat/lon) for the survey profile. "
+                                          "Example: config/geofence.example.yaml."),
         DeclareLaunchArgument("enable_sensors",       default_value="true"),
         DeclareLaunchArgument("enable_perception",    default_value="true"),
         DeclareLaunchArgument("enable_geo_fusion",    default_value="true"),
@@ -240,6 +258,18 @@ def generate_launch_description():
             executable="datum_sync",
             name="datum_sync",
             condition=IfCondition(LaunchConfiguration("enable_localization")),
+        ),
+        # The geofence keep-out mask for the survey profile, in the map frame
+        # anchored by datum_sync (same home position).
+        Node(
+            package="sensors",
+            executable="geofence_mask_node",
+            name="geofence_mask_node",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
+                LaunchConfiguration("nav2_profile"), "' == 'survey'"
+            ])),
+            parameters=[{"geofence_file": LaunchConfiguration("geofence_file")}, sim_time],
         ),
         # Nav2 — individual nodes so we can omit opennav_docking (unsupported on USV)
         GroupAction(
@@ -757,6 +787,10 @@ def generate_launch_description():
                 # rather than empty when their driver is not started.
                 "lidar_fitted": LaunchConfiguration("enable_lidar"),
                 "camera_fitted": LaunchConfiguration("enable_usb_camera"),
+                "geofence_expected": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
+                    LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",
+                ]),
             }.items(),
             condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),

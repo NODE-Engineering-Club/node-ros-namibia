@@ -80,6 +80,11 @@ def generate_launch_description():
             description="A lidar is aboard and its driver is running.",
         ),
         DeclareLaunchArgument(
+            "geofence_expected",
+            default_value="false",
+            description="The Nav2 survey profile runs, so the pre-flight requires its geofence.",
+        ),
+        DeclareLaunchArgument(
             "camera_fitted",
             default_value="false",
             description="A camera the GUI can show is aboard and running.",
@@ -145,6 +150,7 @@ def generate_launch_description():
                     # watched only when omniscan_bridge is started.
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "sonar_monitored": LaunchConfiguration("enable_sonar"),
+                    "geofence_expected": LaunchConfiguration("geofence_expected"),
                 },
                 sim_time,
             ],

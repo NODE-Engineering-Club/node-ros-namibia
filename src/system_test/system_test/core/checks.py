@@ -783,6 +783,40 @@ def _mounting(state: dict, t: Thresholds) -> CheckResult:
 # -- resources ------------------------------------------------------------
 
 
+# -- navigation limits ------------------------------------------------------
+
+
+@check("nav.geofence", "Geofence", critical=True)
+def _geofence(state: dict, t: Thresholds) -> CheckResult:
+    """Is the survey area fenced? In the survey profile it is the only limit.
+
+    Nothing aboard detects obstacles, so Nav2's survey profile knows one thing
+    about the world: the polygon it may not leave. Without it Nav2 has no area
+    limit at all, which is a reason not to start autonomous lines — hence
+    critical. Reported by ``sensors/geofence_mask_node`` on /diagnostics.
+    """
+    level = state.get("geofence_level")
+    message = state.get("geofence_message") or ""
+    if level is None:
+        return _missing("nav.geofence", "Geofence", "geofence_mask_node is not reporting")
+    if level == "OK":
+        return CheckResult("nav.geofence", "Geofence", PASS, f"Active: {message}", "")
+    if level == "WARN":
+        return CheckResult(
+            "nav.geofence", "Geofence", FAIL,
+            f"Not active yet: {message}",
+            "The fence is loaded but the mask is placed only once the Pixhawk's "
+            "home position is known. Check MAVROS and the GNSS fix, then re-run.",
+        )
+    return CheckResult(
+        "nav.geofence", "Geofence", FAIL,
+        f"No geofence: {message}",
+        "Without it Nav2 has no area limit, and nothing aboard detects "
+        "obstacles. Put the day's survey polygon in /data/setup/geofence.yaml "
+        "(example: src/bringup/config/geofence.example.yaml) and restart.",
+    )
+
+
 @check("disk.space", "Disk space", critical=True)
 def _disk(state: dict, t: Thresholds) -> CheckResult:
     """Hours of *recording*, which is not hours of survey.
@@ -941,6 +975,7 @@ REQUIRES = {
     "sonar.link": "sonar_bridge",
     "sonar.clock": "sonar_bridge",
     "sonar.mounting": "sonar_bridge",
+    "nav.geofence": "survey_nav",
 }
 
 #: What the operator is told for each kind of absent equipment.
@@ -950,11 +985,19 @@ ABSENT_REASON = {
         "the sonar is run from SonarView, and omniscan_bridge is not started, "
         "so this stack does not watch it"
     ),
+    "survey_nav": (
+        "the Nav2 survey profile is not running (enable_nav2:=false or "
+        "nav2_profile:=full), so there is no fence to check"
+    ),
 }
 
 
 #: The launch argument that brings each kind of equipment back into the checks.
-ENABLE_ARG = {"lidar": "enable_lidar:=true", "sonar_bridge": "enable_sonar:=true"}
+ENABLE_ARG = {
+    "lidar": "enable_lidar:=true",
+    "sonar_bridge": "enable_sonar:=true",
+    "survey_nav": "enable_nav2:=true nav2_profile:=survey",
+}
 
 
 def _not_fitted(check: Registered, equipment: str) -> CheckResult:
