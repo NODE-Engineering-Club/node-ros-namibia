@@ -36,6 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-tf2-geometry-msgs \
     # Sensors
     v4l-utils \
+    # pyserial: bms_reader and pico_bridge both `import serial`, and nothing
+    # installed it, so both exited at import in this image.
+    python3-serial \
     ros-jazzy-cv-bridge \
     # Vision / Perception
     libgl1 \

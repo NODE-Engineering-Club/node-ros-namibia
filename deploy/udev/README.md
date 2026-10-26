@@ -38,8 +38,10 @@ While the Pixhawk is plugged in, note `ID_VENDOR_ID:ID_MODEL_ID` too:
 That is one of the ways to answer "PX4 or ArduPilot?"
 (docs/HARDWARE_DECISIONS.md, V1).
 
-If two devices report the **same** serial (some cheap USB-serial adapters
-do), match them by hub port instead: replace `ENV{ID_SERIAL_SHORT}=="…"` with
+If two devices report the **same** serial, or none — likely for the two BMS
+readers: they go through MCP2221 USB-UART bridges (`ID_VENDOR_ID=04d8`,
+`ID_MODEL_ID=00dd`), which only carry a serial number if one was programmed
+into them — match them by hub port instead: replace `ENV{ID_SERIAL_SHORT}=="…"` with
 `ENV{ID_PATH}=="…"`, taken from the same `udevadm info` output. That then
 depends on which hub socket the cable is in, so label the sockets.
 

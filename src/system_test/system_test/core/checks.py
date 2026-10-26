@@ -951,12 +951,16 @@ ABSENT_REASON = {
 }
 
 
+#: The launch argument that brings each kind of equipment back into the checks.
+ENABLE_ARG = {"lidar": "enable_lidar:=true", "sonar_bridge": "enable_sonar:=true"}
+
+
 def _not_fitted(check: Registered, equipment: str) -> CheckResult:
     return CheckResult(
         check.id, check.name, SKIPPED,
         f"Not checked: {ABSENT_REASON.get(equipment, equipment + ' is not fitted')}",
-        "Nothing to do here. If the equipment is fitted, start the stack with "
-        "it enabled (enable_lidar:=true, enable_sonar:=true) and re-run.",
+        "Nothing to do. If it is fitted after all, start the stack with "
+        f"{ENABLE_ARG.get(equipment, 'it enabled')} and re-run.",
     )
 
 

@@ -293,7 +293,14 @@ class SystemTestNode(Node):
             disk_free = None
 
         expected = list(self.get_parameter("expected_nodes").value)
-        present = [n for n in expected if any(n in name for name in self._node_diagnostics)]
+        # The ROS graph first: a node that publishes no /diagnostics of its
+        # own (gui_backend, for one) is running all the same, and reporting
+        # it missing turned a working stack NO-GO.
+        graph = set(self.get_node_names())
+        present = [
+            n for n in expected
+            if n in graph or any(n in name for name in self._node_diagnostics)
+        ]
 
         return {
             "pico_age_s": (time.monotonic() - self._pico_at) if self._pico_at else None,
