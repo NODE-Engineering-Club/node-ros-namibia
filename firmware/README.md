@@ -1,8 +1,10 @@
 # Pico firmware
 
 > **Current firmware: `pico-node_v5/`** (hw-alignment Phase B c). The stack
-> expects it: the GUI reports any other version as a mismatch and the
-> pre-flight fails on it.
+> expects it: `pico_bridge` forwards motor commands and `MODE AUTO` only to a
+> Pico that reports `ver=5` (anything else gets `PING` and `MODE MANUAL`
+> only), the GUI reports any other version as a mismatch and the pre-flight
+> fails on it.
 >
 > | Directory | Origin | Status line |
 > |---|---|---|
