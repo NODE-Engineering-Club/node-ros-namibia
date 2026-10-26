@@ -87,7 +87,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | ESC relay (A3KM) | Pico GPIO21 | firmware | firmware | — | Vessel ("ESC power") | ❌ not wired |
 | E-stop button feedback | Pico GPIO20 (divider) | `ESTOP_FEEDBACK_ENABLED 0` | firmware | — | "not sent" | ❌ not wired |
 | 3 lights + buzzer | Pico GPIO10/11/12, GPIO13 | firmware | firmware | always | — | ✅ (firmware) |
-| BMS pack 1, pack 2 (BQ76920 via MCP2221) | USB-UART 115200 (via hub) | `bms_port` `/dev/bms_pack1`, `bms2_port` `/dev/bms_pack2` (udev) | `bms_reader` ×2 → `/battery/pack1`, `/battery/pack2`; `battery_aggregator` → `/battery/state` | no (`enable_bms:=false`) | Power, status strip | ⚠️ state of charge estimated from cell voltage |
+| BMS pack 1, pack 2 (BQ76920 via MCP2221) | USB-UART 115200 (via hub) | `bms_port` `/dev/bms_pack1`, `bms2_port` `/dev/bms_pack2` (udev) | `bms_reader` → `/battery/pack1` (+ `/battery/pack2` with `enable_bms2:=true`); `battery_aggregator` → `/battery/state` | no (`enable_bms:=false`); only one BMS wired, so `enable_bms2` defaults to false | Power, status strip | ⚠️ state of charge estimated from cell voltage; with one BMS the second pack is not measured |
 | 2× LiPo 4S 8000 mAh (parallel) | — | GUI capacity 237 Wh (`src/gui_backend/config/topics.yaml`) | — | — | Power | ✅ config |
 | Omniscan 3D 450 SS Modular | Ethernet | 10.10.20.31 (`src/omniscan_bridge/config/omniscan.yaml`), UDP 62312 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
 | SonarView | Docker on the Jetson (OPEN) | SonarLink `ws://127.0.0.1:7077` (`src/comms/cloud_bridge/config/cloud_bridge_params.yaml`) | `sonar_bridge_node` → `/sonar/decimated` (cloud) | no | — | ⚠️ |

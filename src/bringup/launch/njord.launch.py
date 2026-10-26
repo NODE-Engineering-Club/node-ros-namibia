@@ -114,12 +114,16 @@ def generate_launch_description():
                                           "real thrusters follow the simulated mission)."),
         DeclareLaunchArgument("enable_bms",           default_value="false",
                               description="BMS readers (one per pack) + battery_aggregator -> /battery/state"),
-        # Stable names from deploy/udev/99-asket-usb-serial.rules (the BMS
-        # boards sit behind a USB hub, so ttyACMn numbers are not stable).
+        # Stable names from deploy/udev/99-asket.rules (the BMS boards sit
+        # behind a USB hub, so ttyACMn numbers are not stable).
         DeclareLaunchArgument("bms_port",             default_value="/dev/bms_pack1",
                               description="Serial port of the pack 1 BMS (MCP2221)"),
-        DeclareLaunchArgument("enable_bms2",          default_value="true",
-                              description="Second BMS (pack 2). Only read when enable_bms:=true."),
+        # false while only one BMS is wired (team decision, Phase B). With one
+        # reader the aggregator combines one pack; set true once the second
+        # BMS is fitted and /dev/bms_pack2 exists.
+        DeclareLaunchArgument("enable_bms2",          default_value="false",
+                              description="Second BMS (pack 2). Only read when enable_bms:=true. "
+                                          "false while only one BMS is wired."),
         DeclareLaunchArgument("bms2_port",            default_value="/dev/bms_pack2",
                               description="Serial port of the pack 2 BMS (MCP2221)"),
         DeclareLaunchArgument("enable_cloud_bridge",  default_value="false",
@@ -498,9 +502,10 @@ def generate_launch_description():
         #
         # Two packs in parallel, one BMS each (docs/HARDWARE_DECISIONS.md): one
         # reader per BMS on its own topic, and battery_aggregator combining
-        # them into the single /battery/state everything else reads. If only
-        # one BMS is fitted, set enable_bms2:=false; the aggregator also leaves
-        # out (and names in /diagnostics) a pack that stops reporting.
+        # them into the single /battery/state everything else reads. Only one
+        # BMS is wired today, so enable_bms2 defaults to false; the aggregator
+        # also leaves out (and names in /diagnostics) a pack that stops
+        # reporting.
         Node(
             package="sensors",
             executable="bms_reader",

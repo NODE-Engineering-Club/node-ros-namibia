@@ -123,8 +123,10 @@ source install/setup.bash
 | `use_pico_bridge` | `true` | Drive thrusters through the Pico 2 (`pico_bridge`); `false` = MAVROS RC override (`actuator_driver`) |
 | `pico_port` | `/dev/pico` | Pico serial port (udev link, `deploy/udev/`) |
 | `pico_bridge_in_sim` | `false` | Also start `pico_bridge` with `use_sim:=true` (bench only: real thrusters follow the simulation) |
-| `enable_bms` | `false` | BMS reader (`sensors/bms_reader`) |
-| `bms_port` | `/dev/ttyACM3` | BMS serial port |
+| `enable_bms` | `false` | BMS reader(s) (`sensors/bms_reader`) + `battery_aggregator` → `/battery/state` |
+| `bms_port` | `/dev/bms_pack1` | Pack 1 BMS serial port (udev link) |
+| `enable_bms2` | `false` | Second BMS (pack 2); false while only one BMS is wired |
+| `bms2_port` | `/dev/bms_pack2` | Pack 2 BMS serial port (udev link) |
 | `enable_mission` | `true` | GPS waypoint sequencer (`mission_manager`) |
 | `enable_boat_bt` | `true` | Safety Behavior Tree (`boat_bt_node`) |
 | `enable_foxglove` | `true` | Foxglove WebSocket bridge (port 8765, **no authentication — boat LAN only**) |
