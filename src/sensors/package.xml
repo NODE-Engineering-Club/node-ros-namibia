@@ -17,6 +17,8 @@
   <exec_depend>camera_info_manager_py</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
   <exec_depend>robot_localization</exec_depend>
+  <!-- bms_reader / battery_aggregator: LiPo state of charge (ROS-free) -->
+  <exec_depend>asket_common</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

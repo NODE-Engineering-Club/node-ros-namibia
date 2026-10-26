@@ -17,11 +17,10 @@
 #   * /pico/status and /pico/mode_request exist only when the stack is
 #     launched with use_pico_bridge:=true (default false: the Pixhawk path,
 #     actuator_driver). Without it the vessel panel reads "not sent".
-#   * There is deliberately NO battery source yet. namibia's bms_reader
-#     publishes /battery/state but never fills BatteryState.percentage, and
-#     adapters.battery_from_ros reads that field as the state of charge: wiring
-#     it as-is would show 0 % and a permanent "battery critical" alarm. Add it
-#     once a real percentage is computed. See docs/gui/PORTING_NOTES.md.
+#   * The battery is /battery/state, produced by sensors/battery_aggregator
+#     from the two BMS readers (launched with enable_bms:=true). Its
+#     `percentage` is estimated from cell voltages (asket_common/battery.py)
+#     and is NaN — "not sent" in the GUI — when unknown, never 0.
 
 sources:
   gnss_fix:
@@ -87,6 +86,12 @@ sources:
   mission_state:
     topic: /mission/state
     type: asket_interfaces/msg/MissionState
+    optional: true
+  # Two 4S packs in parallel, combined by sensors/battery_aggregator. Optional:
+  # absent unless the stack runs with enable_bms:=true.
+  battery:
+    topic: /battery/state
+    type: sensor_msgs/msg/BatteryState
     optional: true
   # The pre-flight report, as system_test_node publishes it.
   #
@@ -222,7 +227,9 @@ shore_station:
 # Battery capacity, needed to turn a percentage into an endurance estimate.
 # PROVISIONAL (Q5).
 vessel:
-  battery_capacity_wh: 1200.0
+  # 2x Gens ace LiPo 4S 8000 mAh in parallel: 2 x 14.8 V x 8 Ah = 236.8 Wh
+  # (docs/HARDWARE_DECISIONS.md). Nominal; usable energy is lower.
+  battery_capacity_wh: 237.0
   hotel_load_w: 85.0
 
 # The GUI's own server. 8090 stays clear of foxglove_bridge (8765) and of the

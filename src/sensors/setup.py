@@ -22,6 +22,7 @@ setup(
             "imu_gps_driver = sensors.imu_gps_driver:main",
             "datum_sync = sensors.datum_sync:main",
             "bms_reader = sensors.bms_reader:main",
+            "battery_aggregator = sensors.battery_aggregator:main",
             "sensors_all = sensors.launch_all:main",
         ],
     },

@@ -319,7 +319,7 @@ class RosSource:
             vessel_cfg = self.config.get("vessel") or {}
             record = adapters.battery_from_ros(
                 msg,
-                capacity_wh=vessel_cfg.get("battery_capacity_wh", 1200.0),
+                capacity_wh=vessel_cfg.get("battery_capacity_wh", 237.0),
                 hotel_load_w=vessel_cfg.get("hotel_load_w", 85.0),
             )
             vessel = self._vessel_record()

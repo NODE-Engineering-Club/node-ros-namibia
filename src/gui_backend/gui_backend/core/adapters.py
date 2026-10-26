@@ -330,8 +330,13 @@ def battery_from_ros(msg, capacity_wh: float, hotel_load_w: float = 85.0):
     """
     voltage = float(msg.voltage)
     current = abs(float(msg.current))
-    soc = float(msg.percentage) if msg.percentage == msg.percentage else 0.0
-    power_w = max(voltage * current, hotel_load_w)
+    # Unknown stays unknown (NaN, sent as null). It used to become 0.0, which
+    # the GUI shows as an empty battery and the alarms as "battery critical".
+    # namibia's bms_reader estimates `percentage` from cell voltages and sends
+    # NaN when it cannot (sensors/bms_reader.py, asket_common/battery.py).
+    soc = float(msg.percentage) if math.isfinite(float(msg.percentage)) else float("nan")
+    measured_w = voltage * current
+    power_w = max(measured_w, hotel_load_w) if math.isfinite(measured_w) else hotel_load_w
     remaining_wh = capacity_wh * soc
     return SimpleNamespace(
         utc_ms=_stamp_to_utc_ms(msg.header),
