@@ -1,8 +1,12 @@
 omniscan_bridge:
   ros__parameters:
-    # The sonar's address. Overridden to 127.0.0.1 when sim:=true, where
-    # asket_sim serves real Ping Protocol frames on a real socket.
-    host: "192.168.2.92"
+    # The sonar's address on the boat LAN 10.10.20.0/24
+    # (docs/HARDWARE_DECISIONS.md, IP plan). The Omniscan ships as
+    # 192.168.2.92 and must be re-addressed once, with SonarView's discovery,
+    # from a machine on the same wired segment (discovery is broadcast; Wi-Fi
+    # usually drops it). Overridden to 127.0.0.1 when sim:=true, where asket_sim
+    # serves real Ping Protocol frames on a real socket.
+    host: "10.10.20.31"
     port: 62312
     transport: "udp"
 

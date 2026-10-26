@@ -48,6 +48,20 @@ Mission GUI: `http://10.10.20.10:8090`. Foxglove: `ws://10.10.20.10:8765`
 (firewalled to loopback by `scripts/harden-network.sh`). SonarView/SonarLink:
 port 7077 on the host running SonarView.
 
+Where the plan is written into the configuration (hw-alignment step 7):
+
+| Value | File |
+|---|---|
+| Sonar `10.10.20.31` | `src/omniscan_bridge/config/omniscan.yaml` (`host`), `src/omniscan_bridge/omniscan_bridge/omniscan_bridge_node.py` (parameter default), `src/gui_backend/launch/gui.launch.py` (`sonar_host`) |
+| Whole plan, for reference | `src/gui_backend/config/topics.yaml` (`network:`; nothing connects to it) |
+| Shore sector mANTBox ax 15s (confirmed), boat NetMetal 5 ax | `src/gui_backend/config/topics.yaml` (`shore_station.antenna`, `vessel_radio`) — the link budget |
+
+Re-addressing the sonar (once, on the bench): connect a laptop **by cable** to
+the CSS610, run SonarView, let its discovery find the Omniscan at
+192.168.2.92 and set it to 10.10.20.31 / 255.255.255.0. Discovery is a
+broadcast, and WiFi bridges usually drop it — do not try it over the link.
+Then check from the Jetson: `ping 10.10.20.31`.
+
 Note: `scripts/harden-network.sh` comments describe a *routed* shore subnet
 (10.10.10.0/24 via 10.10.99.0/30) from an earlier design note. The plan above
 is a single bridged subnet. The script's actual rule (Foxglove reachable from

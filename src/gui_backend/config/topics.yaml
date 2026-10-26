@@ -230,7 +230,8 @@ shore_station:
   # Compass bearing the sector faces.
   boresight_deg: 0.0
   antenna:
-    # MikroTik mANTBox ax 15s: 15 dBi, 120 deg azimuth (checked against
+    # MikroTik mANTBox ax 15s — CONFIRMED as the shore sector
+    # (docs/HARDWARE_DECISIONS.md): 15 dBi, 120 deg azimuth (checked against
     # MikroTik's own product pages). The elevation figure is a guess — they
     # publish the pattern as a plot and state no number — and it only matters
     # very close in, under the tripod.
@@ -238,6 +239,9 @@ shore_station:
     azimuth_beamwidth_deg: 120.0
     elevation_beamwidth_deg: 10.0
   vessel_radio:
+    # MikroTik NetMetal 5 ax on the boat. It is a connectorised radio and its
+    # antenna is not chosen yet, so the link budget keeps the 6.7 dBi omni it
+    # assumes for the vessel end (asket_common/link_budget.py). PROVISIONAL.
     # Omnidirectional on the boat: the gain lives ashore where the tripod does
     # not move during a line. Height is a guess and it is the term that
     # dominates useful range — the two-ray null structure goes as the product
@@ -252,6 +256,22 @@ shore_station:
   # exist: the Atlantic off Walvis Bay rarely does, a calm morning inshore
   # does, and that is when somebody is testing at the ramp.
   wave_height_m: 0.5
+
+# The boat LAN, 10.10.20.0/24 (docs/HARDWARE_DECISIONS.md, IP plan). For
+# reference here, beside the link budget it belongs with: nothing in the GUI
+# connects to these. The sonar address the bridge uses is in
+# omniscan_bridge/config/omniscan.yaml and gui.launch.py (sonar_host).
+network:
+  subnet: 10.10.20.0/24
+  switch: 10.10.20.2          # MikroTik CSS610
+  vessel_radio: 10.10.20.3    # NetMetal 5 ax (boat)
+  shore_radio: 10.10.20.4     # mANTBox ax 15s (tripod)
+  jetson: 10.10.20.10         # this GUI: http://10.10.20.10:8090
+  camera: 10.10.20.21         # OAK-D-LR (PoE)
+  lidar_reserved: 10.10.20.22 # Livox, not fitted
+  sonar: 10.10.20.31          # Omniscan 3D 450 SS (factory 192.168.2.92)
+  sonar_reserved: 10.10.20.32
+  laptops_dhcp: 10.10.20.100-10.10.20.199
 
 # Battery capacity, needed to turn a percentage into an endurance estimate.
 # PROVISIONAL (Q5).

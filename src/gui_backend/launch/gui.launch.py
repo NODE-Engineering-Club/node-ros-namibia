@@ -92,7 +92,14 @@ def generate_launch_description():
                 "hardware and is not on the boat for competition work."
             ),
         ),
-        DeclareLaunchArgument("sonar_host", default_value="192.168.2.92"),
+        DeclareLaunchArgument(
+            "sonar_host",
+            default_value="10.10.20.31",
+            description=(
+                "Omniscan address on the boat LAN 10.10.20.0/24 "
+                "(docs/HARDWARE_DECISIONS.md). Factory default 192.168.2.92."
+            ),
+        ),
     ]
 
     sim_time = {"use_sim_time": LaunchConfiguration("use_sim")}
