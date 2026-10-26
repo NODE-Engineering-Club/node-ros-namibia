@@ -104,6 +104,9 @@ checks fail with SBUS silence ignored). They do **not** replace the bench.
 Rollback: the same with `firmware/pico-node_v4/pico-node_v4.ino`, plus the
 Jetson software from before Phase B c.
 
+Then run the bench test, ESC unpowered and then powered with the props out of
+the water: `docs/BENCH_TEST_PHASE_B.md`.
+
 ---
 
 The notes below are `firmware/README.md` from node-ros-2026 (`1606eb7`) and
