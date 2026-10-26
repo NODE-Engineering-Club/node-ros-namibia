@@ -14,9 +14,10 @@
 # checked against namibia's sources and already has the same name and type
 # here, so no entry was renamed. Two namibia-specific notes:
 #
-#   * /pico/status and /pico/mode_request exist only when the stack is
-#     launched with use_pico_bridge:=true (default false: the Pixhawk path,
-#     actuator_driver). Without it the vessel panel reads "not sent".
+#   * /pico/status and /pico/mode_request exist only while pico_bridge runs
+#     (use_pico_bridge, default true since hw-alignment Phase B). With
+#     use_pico_bridge:=false (actuator_driver, the Pixhawk path) the vessel
+#     panel reads "not sent".
 #   * The battery is /battery/state, produced by sensors/battery_aggregator
 #     from the two BMS readers (launched with enable_bms:=true). Its
 #     `percentage` is estimated from cell voltages (asket_common/battery.py)

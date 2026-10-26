@@ -76,8 +76,24 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_foxglove",      default_value="true"),
         DeclareLaunchArgument("fcu_url",              default_value="tcp://localhost:5777"),
         DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
-        DeclareLaunchArgument("use_pico_bridge",      default_value="false"),
-        DeclareLaunchArgument("pico_port",            default_value="/dev/ttyACM0"),
+        # Phase B (a): the ESCs are wired to the Pico, so the Pico is the motor
+        # path by default. false selects actuator_driver (MAVROS RC override
+        # through the Pixhawk) instead; the two never run together
+        # (system_test/test/test_motor_path_exclusive.py).
+        DeclareLaunchArgument("use_pico_bridge",      default_value="true",
+                              description="Drive the thrusters through the Pico (pico_bridge). "
+                                          "false = actuator_driver via MAVROS/Pixhawk."),
+        # /dev/pico is the udev link (deploy/udev/). /dev/ttyACM0 was the old
+        # default: behind the hub that number belongs to whichever device woke
+        # first, which can be a BMS bridge.
+        DeclareLaunchArgument("pico_port",            default_value="/dev/pico"),
+        # pico_bridge drives REAL thrusters. With use_sim:=true it used to start
+        # anyway (bench rig: simulated mission, real Pico). Now that the bridge
+        # is on by default, a plain simulation must not reach real hardware, so
+        # that rig needs this argument on purpose. Boat on a stand, props off.
+        DeclareLaunchArgument("pico_bridge_in_sim",   default_value="false",
+                              description="Also start pico_bridge when use_sim:=true (bench only: "
+                                          "real thrusters follow the simulated mission)."),
         DeclareLaunchArgument("enable_bms",           default_value="false",
                               description="BMS readers (one per pack) + battery_aggregator -> /battery/state"),
         # Stable names from deploy/udev/99-asket-usb-serial.rules (the BMS
@@ -419,9 +435,10 @@ def generate_launch_description():
         # to a Raspberry Pi Pico, bypassing MAVROS/the Pixhawk for motor control.
         # mavros is still used for GPS/IMU sensing in this mode.
         #
-        # Deliberately allowed to run even when use_sim:=true (unlike
-        # actuator_driver above, which stays sim-excluded since it targets
-        # mavros/the Pixhawk): this lets a bench test drive REAL motors via
+        # Allowed to run with use_sim:=true only when pico_bridge_in_sim:=true
+        # is also given (unlike actuator_driver above, which stays
+        # sim-excluded since it targets mavros/the Pixhawk): this lets a bench
+        # test drive REAL motors via
         # the real Pico off of Gazebo-simulated perception/mission logic —
         # the boat physically can't move (elevated/on a stand), but the
         # thrusters WILL spin in response to real /control/effort commands.
@@ -432,7 +449,9 @@ def generate_launch_description():
             name="pico_bridge",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_control"), "' == 'true' and '",
-                LaunchConfiguration("use_pico_bridge"), "' == 'true'"
+                LaunchConfiguration("use_pico_bridge"), "' == 'true' and ('",
+                LaunchConfiguration("use_sim"), "' != 'true' or '",
+                LaunchConfiguration("pico_bridge_in_sim"), "' == 'true')"
             ])),
             parameters=[{"port": LaunchConfiguration("pico_port")}, sim_time],
         ),

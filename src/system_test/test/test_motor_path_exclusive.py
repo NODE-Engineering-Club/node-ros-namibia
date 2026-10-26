@@ -12,8 +12,9 @@ node by hand to make the GUI work — which is exactly what deploying this
 requires.
 
 In node-ros-2026 this is one ``motor_path`` argument. In node-ros-namibia it is
-one ``use_pico_bridge`` argument (default ``false``: ``actuator_driver``, the
-Pixhawk path). This test was adapted to namibia's argument when the mission GUI
+one ``use_pico_bridge`` argument (default ``true`` since hw-alignment Phase B:
+``pico_bridge``, the Pico path; ``false`` is ``actuator_driver``, the Pixhawk
+path). This test was adapted to namibia's argument when the mission GUI
 was ported (from node-ros-2026 ``1606eb7``); the launch file was not changed.
 It checks the property that makes it a guarantee rather than a convention: **no
 combination of launch arguments starts both nodes**.
@@ -186,6 +187,7 @@ def test_no_assignment_of_the_arguments_starts_both(nodes):
         SELECTOR: ["true", "false"],
         "enable_control": ["true", "false"],
         "use_sim": ["true", "false"],
+        "pico_bridge_in_sim": ["true", "false"],
     }
     for name in arguments:
         assert name in values, (
@@ -222,27 +224,45 @@ def _evaluate(tokens, settings):
     return bool(eval(expression, {"__builtins__": {}}, {}))  # noqa: S307
 
 
-def test_the_default_motor_path_is_unchanged(nodes):
-    """namibia's default is the Pixhawk path (``use_pico_bridge:=false``).
-
-    Porting the GUI must not change which organ drives the motors when the
-    stack is launched without options. Switching the default to the Pico is a
-    team decision (see docs/gui/PORTING_NOTES.md); when it is made, change the
-    expected value here on purpose."""
-    tree = _tree()
-    for call in ast.walk(tree):
+def _default(name):
+    for call in ast.walk(_tree()):
         if (
             isinstance(call, ast.Call)
             and isinstance(call.func, ast.Name)
             and call.func.id == "DeclareLaunchArgument"
             and call.args
             and isinstance(call.args[0], ast.Constant)
-            and call.args[0].value == SELECTOR
+            and call.args[0].value == name
         ):
-            defaults = [
+            return [
                 kw.value.value for kw in call.keywords
                 if kw.arg == "default_value" and isinstance(kw.value, ast.Constant)
             ]
-            assert defaults == ["false"], defaults
-            return
-    pytest.fail(f"{SELECTOR} is not declared as a launch argument")
+    pytest.fail(f"{name} is not declared as a launch argument")
+
+
+def test_a_plain_simulation_never_reaches_the_real_pico(nodes):
+    """``use_sim:=true`` alone must not start pico_bridge.
+
+    The bridge drives real thrusters, and with the Pico now the default path a
+    simulation launched without options would otherwise send the simulated
+    mission's efforts to whatever Pico is plugged in. The bench rig that wants
+    exactly that has to say so with ``pico_bridge_in_sim:=true``.
+    """
+    tokens = _condition_tokens(nodes["pico_bridge"])
+    settings = {"enable_control": "true", "use_pico_bridge": "true",
+                "use_sim": "true", "pico_bridge_in_sim": "false"}
+    assert not _evaluate(tokens, settings)
+    assert _evaluate(tokens, {**settings, "pico_bridge_in_sim": "true"})
+    assert _evaluate(tokens, {**settings, "use_sim": "false"})
+    assert _default("pico_bridge_in_sim") == ["false"]
+
+
+def test_the_default_motor_path_is_the_pico(nodes):
+    """The ESCs are wired to the Pico (docs/HARDWARE_DECISIONS.md), so the
+    default is the Pico path (``use_pico_bridge:=true``), decided by the team
+    for hw-alignment Phase B (a). Changing it again is a decision: change the
+    expected value here on purpose."""
+    assert _default(SELECTOR) == ["true"]
+    assert _default("pico_port") == ["/dev/pico"]
+

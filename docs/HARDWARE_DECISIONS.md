@@ -81,7 +81,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | Pixhawk 4 | USB (via hub) — today MAVLink via `fcu_url` `tcp://localhost:5777`, a BlueOS router (`src/bringup/launch/njord.launch.py:67`) | `/dev/pixhawk` (udev) — not yet used by the launch (Phase B) | `mavros` → `imu_gps_driver` → `/imu_driver/imu_raw`, `/gps_driver/gps_raw`; EKF → `/odometry/filtered` | yes (`enable_mavros`) | Vessel, Heading, map | ⚠️ needs a serial `fcu_url` without BlueOS (Phase B) |
 | UM982 GNSS (dual antenna) | to the Pixhawk | — | via MAVROS as above | — | Heading (source shown as EKF) | ⚠️ ArduPilot/PX4 GPS-yaw config to verify |
 | F9P RTK base | shore laptop → WiFi → Jetson | — | none (MAVROS `gps_rtk` plugin not fed) | — | — | ❌ (Phase B) |
-| Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/ttyACM0` (`njord.launch.py:70`); `/dev/pico` with udev | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **no** (`use_pico_bridge:=false`, Pixhawk path is the default — Phase B) | Mode, Vessel, pre-flight | ⚠️ |
+| Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/pico` (udev, `deploy/udev/`) | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **yes** (`use_pico_bridge:=true` is the default since Phase B a) | Mode, Vessel, pre-flight | ⚠️ bench test first |
 | 2× T200 + Basic ESC 30A | PWM from Pico GPIO15/16, 1000–2000 µs, 1500 neutral | `firmware/pico-node_v4/pico-node_v4.ino` | firmware | always (firmware) | Vessel | ⚠️ motor path default (Phase B) |
 | RP4TD (ELRS) + MT12 | SBUS into Pico GPIO5 (inverted, 100 kbaud 8E2) | firmware; Ch3 throttle, Ch4 yaw, Ch7 arm, Ch8 mode | firmware | always | Vessel (RC) | ⚠️ SBUS output and failsafe behaviour to verify |
 | ESC relay (A3KM) | Pico GPIO21 | firmware | firmware | — | Vessel ("ESC power") | ❌ not wired |
@@ -137,8 +137,10 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
   RC failsafe behaviour with ExpressLRS-over-SBUS is not verified; the
   firmware does not trigger ESTOP if SBUS frames simply stop while in
   AUTONOMOUS (see Phase B in the PR description).
-* **Default motor path is still the Pixhawk** (`use_pico_bridge:=false`) while
-  the ESCs are wired to the Pico. Changing that is Phase B.
+* **Default motor path is now the Pico** (`use_pico_bridge:=true`, Phase B a),
+  on `/dev/pico`. `actuator_driver` (Pixhawk RC override) runs only with
+  `use_pico_bridge:=false`. A simulation (`use_sim:=true`) no longer starts the
+  bridge unless `pico_bridge_in_sim:=true` is also given.
 
 ## 6. TO VERIFY / OPEN
 

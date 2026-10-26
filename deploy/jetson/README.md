@@ -49,8 +49,8 @@ the host.
   `prod-jetson` image (SAM2/TensorRT) is built by hand and its default command
   runs only the SAM2 launch, not `njord.launch.py` — the explicit `ros2 launch`
   line in the unit overrides that.
-- **The motor path.** `use_pico_bridge` keeps its default (false), as do
-  `fcu_url` and `pico_port`. Changing them is Phase B.
+- **The motor path.** The defaults apply: the Pico on `/dev/pico`
+  (`use_pico_bridge:=true` since Phase B a). `fcu_url` is not changed yet.
 - **`enable_bms:=true`** assumes the two BMS readers are fitted and named by
   udev. If they are not, drop it — the battery then reads "not sent" and the
   pre-flight says it cannot confirm the battery (NO-GO), which is correct.

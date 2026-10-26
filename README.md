@@ -120,8 +120,9 @@ source install/setup.bash
 | `enable_vision` | `true` | YOLO inference node |
 | `vision_confidence` | `0.5` | YOLO detection confidence threshold |
 | `enable_control` | `true` | nav_to_pid, PID, actuator driver |
-| `use_pico_bridge` | `false` | Drive thrusters through the Pico 2 (`pico_bridge`) instead of MAVROS RC override (`actuator_driver`) |
-| `pico_port` | `/dev/ttyACM0` | Pico serial port |
+| `use_pico_bridge` | `true` | Drive thrusters through the Pico 2 (`pico_bridge`); `false` = MAVROS RC override (`actuator_driver`) |
+| `pico_port` | `/dev/pico` | Pico serial port (udev link, `deploy/udev/`) |
+| `pico_bridge_in_sim` | `false` | Also start `pico_bridge` with `use_sim:=true` (bench only: real thrusters follow the simulation) |
 | `enable_bms` | `false` | BMS reader (`sensors/bms_reader`) |
 | `bms_port` | `/dev/ttyACM3` | BMS serial port |
 | `enable_mission` | `true` | GPS waypoint sequencer (`mission_manager`) |
