@@ -39,6 +39,7 @@ from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import BatteryState, Imu, LaserScan, NavSatFix, TimeReference
 from std_msgs.msg import String, UInt32
 
+from asket_common.diagnostic_level import level_int
 from asket_common.heading import compass_deg_from_enu_quaternion, heading_from_odometry
 from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
@@ -358,8 +359,7 @@ class SystemTestNode(Node):
         status = self._node_diagnostics.get("geofence")
         if status is None:
             return {}
-        # DiagnosticStatus.level is a one-byte `bytes` in rclpy, not an int.
-        level = status.level[0] if isinstance(status.level, bytes) else int(status.level)
+        level = level_int(status.level)   # a one-byte `bytes` in rclpy, not an int
         return {
             "geofence_level": {0: "OK", 1: "WARN"}.get(level, "ERROR"),
             "geofence_message": status.message,
