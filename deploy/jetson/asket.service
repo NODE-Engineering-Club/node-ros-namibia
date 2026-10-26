@@ -1,0 +1,44 @@
+# systemd unit for the ASKET stack on the Jetson (hw-alignment step 9).
+#
+# A TEMPLATE: read deploy/jetson/README.md, check IMAGE and the launch
+# arguments, then install it as /etc/systemd/system/asket.service.
+#
+# What it keeps across restarts: everything under /data in the container is
+# the host's /srv/asket/data — missions, pre-flight history, map tiles and the
+# Setup page's file. `--rm` throws the container away on every stop; the data
+# directory is what survives.
+
+[Unit]
+Description=ASKET ROS 2 stack (mission GUI on :8090)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=IMAGE=ghcr.io/node-engineering-club/node-ros-2026:latest
+Environment=DATA=/srv/asket/data
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+ExecStartPre=/usr/bin/mkdir -p ${DATA}/missions ${DATA}/maps ${DATA}/setup
+ExecStartPre=-/usr/bin/podman rm -f asket
+# --privileged + the host's live /dev and udev database, so /dev/pico,
+# /dev/bms_pack1/2 and /dev/pixhawk (deploy/udev/) are seen as they are now,
+# including after a device re-enumerates. A --device flag would be resolved
+# once, at start.
+ExecStart=/usr/bin/podman run --rm \
+  --name asket \
+  --init \
+  --privileged \
+  --network host \
+  --ipc host \
+  -v /dev:/dev \
+  -v /run/udev:/run/udev:ro \
+  -v ${DATA}:/data \
+  ${IMAGE} \
+  ros2 launch bringup njord.launch.py \
+    enable_gui:=true \
+    enable_bms:=true
+ExecStop=/usr/bin/podman stop asket
+
+[Install]
+WantedBy=multi-user.target

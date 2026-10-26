@@ -67,6 +67,11 @@ Note: `scripts/harden-network.sh` comments describe a *routed* shore subnet
 is a single bridged subnet. The script's actual rule (Foxglove reachable from
 loopback only) does not depend on either.
 
+Deploying on the Jetson: stable USB names in `deploy/udev/README.md`, and the
+systemd unit that keeps missions, pre-flight history, map tiles and the Setup
+file across container restarts (host `/srv/asket/data` on `/data`) in
+`deploy/jetson/README.md`.
+
 ## 3. Component table (state of the `hw-alignment` branch)
 
 Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌ expected, no code · — not applicable.

@@ -125,6 +125,15 @@ RUN . /opt/ros/jazzy/setup.sh && \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Everything the stack writes and must keep lives under /data: recorded
+# missions (/data/missions), the pre-flight history (/data/system_test.jsonl),
+# map tiles (/data/maps) and the Setup page's file. The setup file defaulted to
+# ~/.ros/asket_setup.yaml — inside the container, gone with it on every
+# restart. Mount a host directory on /data to keep all of it
+# (deploy/jetson/asket.service does); without one, nothing survives a restart.
+ENV ASKET_SETUP_FILE=/data/setup/asket_setup.yaml
+RUN mkdir -p /data/missions /data/maps /data/setup
+
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["ros2", "launch", "bringup", "njord.launch.py"]
 
