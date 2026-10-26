@@ -137,6 +137,11 @@ fitted:
 # and ping-rate controls, for when this stack drives the sonar itself.
 sonar_panel: health
 
+# Where mission_recorder writes (its missions_root). The GUI lists the stored
+# missions from this directory; it runs in the same container.
+missions:
+  root: /data/missions
+
 # Where commands go. Mode requests reach the Pico through pico_bridge, which
 # this repository does not modify, so the interface is named here.
 commands:
@@ -155,6 +160,12 @@ commands:
   stop_mission:
     service: /mission_recorder/stop_mission
     type: asket_interfaces/srv/StopMission
+  export_mission:
+    service: /mission_recorder/export_mission
+    type: asket_interfaces/srv/ExportMission
+  delete_mission:
+    service: /mission_recorder/delete_mission
+    type: asket_interfaces/srv/DeleteMission
   run_system_test:
     service: /system_test/run
     type: asket_interfaces/srv/RunSystemTest

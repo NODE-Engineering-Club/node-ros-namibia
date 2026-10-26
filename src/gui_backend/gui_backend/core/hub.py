@@ -44,6 +44,7 @@ from .commands import (
     mounting_reloaded,
     propulsion_cut_confirmed,
     recording_confirmed,
+    software_authority_removed,
 )
 from . import setup_api, setup_gate, setup_store, video_frame
 from .link_profile import ProfileSelector
@@ -405,7 +406,15 @@ class Hub:
         if name == CMD_SET_MODE:
             confirm = mode_confirmed(str(args.get("mode", "")).upper())
         elif name == CMD_CUT_PROPULSION:
-            confirm = propulsion_cut_confirmed
+            # What the button does decides what confirms it. On the real
+            # stack it is a MANUAL request (topics.yaml estop.mode); only the
+            # simulator has a latched software ESTOP to wait for.
+            estop = (self.source.describe().get("estop") or {})
+            confirm = (
+                software_authority_removed
+                if estop.get("mode") == "mode_request_manual"
+                else propulsion_cut_confirmed
+            )
         elif name == CMD_SET_PING_PARAMETERS:
             # The sonar is the authority on its own settings, exactly as the
             # Pico is on the vessel's mode. A range the operator asked for that

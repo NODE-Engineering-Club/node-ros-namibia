@@ -251,9 +251,26 @@ def propulsion_cut_confirmed(state: dict) -> bool:
     return pico.get("mode") == "ESTOP" and pico.get("estop_latched") is True
 
 
+def software_authority_removed(state: dict) -> bool:
+    """The "Drop to MANUAL" button took effect.
+
+    On the real stack that button requests MANUAL (topics.yaml ``estop.mode:
+    mode_request_manual``), so ``propulsion_cut_confirmed`` — which waits for a
+    latched ESTOP — could never be satisfied, and every press ended "failed"
+    after the timeout although the Pico had done exactly what was asked.
+    ESTOP also counts: the Pico drives the thrusters only in AUTONOMOUS, so
+    either mode means software no longer has them.
+    """
+    return (state.get("pico") or {}).get("mode") in ("MANUAL", "ESTOP")
+
+
 def recording_confirmed(should_be_recording: bool):
     def check(state: dict) -> bool:
         mission = state.get("mission") or {}
+        # No report from the recorder confirms nothing — in particular not a
+        # stop, which "not RECORDING" would otherwise satisfy at once.
+        if mission.get("state") is None:
+            return False
         is_recording = mission.get("state") == "RECORDING"
         return is_recording == should_be_recording
 

@@ -40,6 +40,8 @@ from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
 from .commands import (
     CMD_CUT_PROPULSION,
     CMD_APPLY_SETUP,
+    CMD_DELETE_MISSION,
+    CMD_EXPORT_MISSION,
     CMD_RUN_SYSTEM_TEST,
     CMD_SET_MODE,
     CMD_SET_PING_PARAMETERS,
@@ -337,6 +339,10 @@ class RosSource:
             record = adapters.sonar_from_ros(msg)
             return Sample(stream, self.now_utc_ms(), payloads.sonar_payload(record, detail))
 
+        if stream == "mission":
+            payload = self._mission_payload()
+            return Sample(stream, self.now_utc_ms(), payload) if payload else None
+
         if stream == "lidar":
             if not self.describe()["fitted"]["lidar"]:
                 return None
@@ -397,13 +403,43 @@ class RosSource:
             else {},
             "power": power.payload if power else {},
             "sonar": sonar.payload if sonar else {},
-            "mission": {"state": "IDLE"},
+            # The recorder's own report. This was hard-coded IDLE, so "Start
+            # recording" could never confirm and "Stop" confirmed at once.
+            "mission": self._mission_payload() or {},
             "link_sample": self._link,
             # What the sonar bridge says it is placing soundings by. The
             # command confirmation for `apply_setup` resolves against this, so
             # it belongs here and not only in the pre-flight's state — the
             # predicate reads this dict.
             "mounting": self._mounting_state() or {},
+        }
+
+    def _mission_payload(self) -> dict | None:
+        """``/mission/state`` from mission_recorder, in the panel's shape.
+
+        The stored-mission list and the export destinations are read from the
+        disk the recorder writes to (the GUI runs in the same container), as
+        the simulator does. ``None`` while the recorder has said nothing: a
+        recorder that is not running is not an idle one.
+        """
+        msg = self._msg("mission_state")
+        if msg is None:
+            return None
+        from mission_recorder.core.export import NO_FAST_PATH_MESSAGE, detect_destinations
+        from mission_recorder.core.mission import list_missions
+
+        root = (self.config.get("missions") or {}).get("root", "/data/missions")
+        try:
+            missions = [m.to_dict() for m in list_missions(root)]
+            destinations = [d.to_dict() for d in detect_destinations(
+                exclude_roots=[root, "/data", "/"])]
+        except OSError:
+            missions, destinations = [], []
+        return {
+            **adapters.mission_from_ros(msg),
+            "missions": missions,
+            "destinations": destinations,
+            "no_fast_path_message": NO_FAST_PATH_MESSAGE,
         }
 
     def _mounting_state(self) -> dict | None:
@@ -506,6 +542,27 @@ class RosSource:
 
         if name == CMD_STOP_MISSION:
             return self._call_service("stop_mission", lambda req: None)
+
+        # The recorder's services take the mission directory as `name`.
+        if name == CMD_EXPORT_MISSION:
+            return self._call_service(
+                "export_mission",
+                lambda req: (
+                    setattr(req, "name", str(args.get("path", ""))),
+                    setattr(req, "destination", str(args.get("destination", ""))),
+                ),
+            )
+
+        if name == CMD_DELETE_MISSION:
+            if not args.get("confirm"):
+                return CommandOutcome(False, "delete requires an explicit confirmation")
+            return self._call_service(
+                "delete_mission",
+                lambda req: (
+                    setattr(req, "name", str(args.get("path", ""))),
+                    setattr(req, "confirm", True),
+                ),
+            )
 
         if name == CMD_RUN_SYSTEM_TEST:
             # The service and its client already existed — `topics.yaml` names
@@ -655,6 +712,7 @@ class RosSource:
             # for an older topics.yaml) when this stack drives it.
             "sonar_panel": self.config.get("sonar_panel") or "full",
             "estop": {
+                "mode": estop.get("mode"),
                 "available": bool(estop.get("mode")),
                 "label": estop.get("label") or "Cut propulsion",
                 "effect": estop.get("effect") or "",
