@@ -118,3 +118,46 @@ def evaluate_heading(
         divergence_meaningful=meaningful,
         accuracy_reported=bool(reported and valid),
     )
+
+
+#: A heading older than this is not a heading. The GUI drops the EKF heading at
+#: the same age (gui_backend ros_source), so the recorder and the pre-flight
+#: cannot call valid a heading the screen shows as gone.
+MAX_HEADING_AGE_S = 2.0
+
+
+def compass_deg_from_enu_quaternion(x: float, y: float, z: float, w: float) -> float:
+    """Compass bearing (0 = north, clockwise) from a ROS ENU orientation.
+
+    ROS yaw is counter-clockwise from east, hence ``90 - yaw``.
+    """
+    yaw_enu = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    return (90.0 - math.degrees(yaw_enu)) % 360.0
+
+
+def heading_from_odometry(
+    heading_deg: float | None,
+    age_s: float | None,
+    body_vx: float = 0.0,
+    body_vy: float = 0.0,
+) -> HeadingEstimate:
+    """The EKF heading on ``/odometry/filtered``, as the real boat has it.
+
+    ``/asket/heading`` is published only by the simulator; on the boat the
+    heading is robot_localization's. ``body_vx`` / ``body_vy`` are the
+    odometry twist (forward, left — body frame), so course over ground is the
+    heading turned by the drift angle. Stale or absent odometry is an invalid
+    heading, never the last value.
+    """
+    fresh = heading_deg is not None and age_s is not None and age_s < MAX_HEADING_AGE_S
+    sog = math.hypot(body_vx, body_vy)
+    cog = heading_deg if heading_deg is not None else 0.0
+    if sog > 0.05 and heading_deg is not None:
+        cog = (heading_deg - math.degrees(math.atan2(body_vy, body_vx))) % 360.0
+    return evaluate_heading(
+        heading_deg=heading_deg if fresh else None,
+        source=SOURCE_EKF if fresh else SOURCE_NONE,
+        cog_deg=cog,
+        sog_ms=sog,
+        source_valid=fresh,
+    )

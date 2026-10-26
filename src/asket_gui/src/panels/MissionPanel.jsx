@@ -4,7 +4,7 @@ import { Chip, Panel, Row, Rows } from '../components/Panel.jsx';
 import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { PanelAge } from '../components/Value.jsx';
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
-import { bytes, duration } from '../lib/format.js';
+import { bytes, duration, int } from '../lib/format.js';
 
 /**
  * Mission recording, and the missions already on the disk.
@@ -81,7 +81,7 @@ export function MissionPanel({ state, connection }) {
             <Row label="Mission">{mission.name}</Row>
             <Row label="Elapsed">{duration(mission.elapsed_s)}</Row>
             <Row label="Written">{bytes(mission.bytes_written)}</Row>
-            <Row label="Trajectory">{mission.trajectory_records} samples</Row>
+            <Row label="Trajectory">{int(mission.trajectory_records, ' samples')}</Row>
             <Row label="Disk free">{bytes(mission.disk_free_bytes)}</Row>
             <Row label="Recording left">
               {mission.estimated_remaining_s === null

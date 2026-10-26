@@ -70,6 +70,20 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument("use_sim", default_value="false"),
+        # Whether the boat carries the sensor. False shows the panel as "not
+        # fitted" instead of an empty plot or a blank picture, which would
+        # read as "clear water" / "camera broken". njord.launch.py passes
+        # enable_lidar / enable_usb_camera through.
+        DeclareLaunchArgument(
+            "lidar_fitted",
+            default_value="false",
+            description="A lidar is aboard and its driver is running.",
+        ),
+        DeclareLaunchArgument(
+            "camera_fitted",
+            default_value="false",
+            description="A camera the GUI can show is aboard and running.",
+        ),
         DeclareLaunchArgument(
             "enable_sonar",
             default_value="false",
@@ -78,7 +92,14 @@ def generate_launch_description():
                 "hardware and is not on the boat for competition work."
             ),
         ),
-        DeclareLaunchArgument("sonar_host", default_value="192.168.2.92"),
+        DeclareLaunchArgument(
+            "sonar_host",
+            default_value="10.10.20.31",
+            description=(
+                "Omniscan address on the boat LAN 10.10.20.0/24 "
+                "(docs/HARDWARE_DECISIONS.md). Factory default 192.168.2.92."
+            ),
+        ),
     ]
 
     sim_time = {"use_sim_time": LaunchConfiguration("use_sim")}
@@ -99,6 +120,8 @@ def generate_launch_description():
                     "tile_cache_path": LaunchConfiguration("tile_cache_path"),
                     "online_tiles": LaunchConfiguration("online_tiles"),
                     "static_dir": static_dir,
+                    "lidar_fitted": LaunchConfiguration("lidar_fitted"),
+                    "camera_fitted": LaunchConfiguration("camera_fitted"),
                 },
                 sim_time,
             ],
@@ -117,6 +140,11 @@ def generate_launch_description():
                     # The competition stack's own nodes, so a missing one is
                     # reported rather than silently absent from the verdict.
                     "expected_nodes": ["pico_bridge", "gui_backend"],
+                    # Equipment absent on purpose is "not checked", not a
+                    # NO-GO: no lidar unless lidar_fitted, and the sonar is
+                    # watched only when omniscan_bridge is started.
+                    "lidar_fitted": LaunchConfiguration("lidar_fitted"),
+                    "sonar_monitored": LaunchConfiguration("enable_sonar"),
                 },
                 sim_time,
             ],

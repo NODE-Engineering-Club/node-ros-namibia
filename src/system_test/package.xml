@@ -12,6 +12,14 @@
   <depend>asket_common</depend>
   <depend>diagnostic_msgs</depend>
   <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav_msgs</depend>
+  <exec_depend>omniscan_bridge</exec_depend>
+  <!-- Also imported at run time, NOT declared: gui_backend (live_inputs parses
+       the Pico STATE line with gui_backend.core.pico_state, the one parser for
+       that format). gui_backend already depends on system_test, and declaring
+       the reverse would be a dependency cycle colcon refuses. Both are always
+       installed together (the GUI launch starts this node). -->
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

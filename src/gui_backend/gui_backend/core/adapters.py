@@ -330,8 +330,13 @@ def battery_from_ros(msg, capacity_wh: float, hotel_load_w: float = 85.0):
     """
     voltage = float(msg.voltage)
     current = abs(float(msg.current))
-    soc = float(msg.percentage) if msg.percentage == msg.percentage else 0.0
-    power_w = max(voltage * current, hotel_load_w)
+    # Unknown stays unknown (NaN, sent as null). It used to become 0.0, which
+    # the GUI shows as an empty battery and the alarms as "battery critical".
+    # namibia's bms_reader estimates `percentage` from cell voltages and sends
+    # NaN when it cannot (sensors/bms_reader.py, asket_common/battery.py).
+    soc = float(msg.percentage) if math.isfinite(float(msg.percentage)) else float("nan")
+    measured_w = voltage * current
+    power_w = max(measured_w, hotel_load_w) if math.isfinite(measured_w) else hotel_load_w
     remaining_wh = capacity_wh * soc
     return SimpleNamespace(
         utc_ms=_stamp_to_utc_ms(msg.header),
@@ -539,3 +544,29 @@ def link_from_measurements(
         record.mcs_index = estimate.mcs.index
         record.phy_mbps = estimate.mcs.phy_mbps(estimate.channel_width_mhz)
     return record
+
+
+#: asket_interfaces/MissionState.state, by name — the vocabulary the panel and
+#: ``recording_confirmed`` read.
+_MISSION_STATES = {0: "IDLE", 1: "RECORDING", 2: "STOPPING", 3: "ERROR"}
+
+
+def mission_from_ros(msg) -> dict:
+    """``asket_interfaces/MissionState`` into the Mission panel's fields.
+
+    The recorder sends 0 for "remaining" when the write rate gives no
+    estimate (an infinite one); that is "not known", not "none left".
+    """
+    remaining = float(msg.estimated_remaining_s)
+    return {
+        "state": _MISSION_STATES.get(int(msg.state), "ERROR"),
+        "name": str(msg.mission_name),
+        "mission_dir": str(msg.mission_dir),
+        "elapsed_s": round(float(msg.elapsed_s), 1),
+        "bytes_written": int(msg.bytes_written),
+        "disk_free_bytes": int(msg.disk_free_bytes),
+        "disk_total_bytes": None,
+        "estimated_remaining_s": round(remaining) if remaining > 0 else None,
+        "trajectory_records": None,
+        "error_message": str(msg.error_message),
+    }

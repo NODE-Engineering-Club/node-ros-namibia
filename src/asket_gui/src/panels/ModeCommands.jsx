@@ -50,6 +50,8 @@ export function ModeCommands({ state, connection }) {
     available: declared?.available ?? false,
     label: declared?.label || COMMAND_LABELS.cut_propulsion,
     effect: declared?.effect || '',
+    // A MANUAL request on the real stack; a latched ESTOP only in the simulator.
+    isModeRequest: declared?.mode === 'mode_request_manual',
     prompt: declared?.effect
       ? `${declared.label || COMMAND_LABELS.cut_propulsion}? ${declared.effect}`
       : CONFIRM_PROMPTS.cut_propulsion,
@@ -114,22 +116,25 @@ export function ModeCommands({ state, connection }) {
           }
           style={{ marginBottom: 0 }}
         >
-          {describe(latest, armingBlock)}
+          {describe(latest, armingBlock, estop.label)}
         </p>
       )}
 
       <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
-        This is a software latch. The hardware killswitch and RC channel&nbsp;8 cut
-        propulsion independently and always work.
+        {estop.isModeRequest
+          ? 'This is a mode request, not a latch.'
+          : 'This is a software latch.'}{' '}
+        The hardware killswitch and RC channel&nbsp;8 cut propulsion independently
+        and always work.
       </p>
     </Panel>
   );
 }
 
-function describe(command, armingBlock = '') {
+function describe(command, armingBlock = '', estopLabel = COMMAND_LABELS.cut_propulsion) {
   const what =
     command.name === 'cut_propulsion'
-      ? COMMAND_LABELS.cut_propulsion
+      ? estopLabel
       : `Mode → ${command.args?.mode ?? ''}`;
   const status = COMMAND_STATUS_LABELS[command.status] || command.status;
   if (command.status === 'failed') return `${what}: ${status}. ${command.detail || ''}`;

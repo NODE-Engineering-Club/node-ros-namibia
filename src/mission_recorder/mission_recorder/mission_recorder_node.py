@@ -13,9 +13,15 @@ merged afterwards.
 from __future__ import annotations
 
 import math
+import time
 
 import rclpy
-from asket_common.heading import SOURCE_NONE, evaluate_heading
+from asket_common.heading import (
+    SOURCE_NONE,
+    compass_deg_from_enu_quaternion,
+    evaluate_heading,
+    heading_from_odometry,
+)
 from asket_interfaces.msg import HeadingStatus, MissionState, PicoStatus, SonarStatus
 from asket_interfaces.srv import (
     DeleteMission,
@@ -26,10 +32,11 @@ from asket_interfaces.srv import (
 )
 from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import TwistStamped
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import Imu, NavSatFix
-from std_msgs.msg import UInt8MultiArray
+from sensor_msgs.msg import BatteryState, Imu, NavSatFix
+from std_msgs.msg import String, UInt8MultiArray, UInt32
 
 from mission_recorder.core.export import (
     delete_mission,
@@ -47,6 +54,10 @@ from mission_recorder.core.mission import (
 )
 
 SENSOR_QOS = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.BEST_EFFORT)
+
+#: The mode integers written to the event log, as asket_interfaces/PicoStatus
+#: numbers them, so a recording reads the same whichever path fed it.
+_MODE_VALUES = {"ESTOP": 0, "MANUAL": 1, "AUTONOMOUS": 2}
 
 _STATE_VALUES = {
     STATE_IDLE: MissionState.IDLE,
@@ -73,6 +84,10 @@ class MissionRecorderNode(Node):
         # Jetson's own disk. Offering it would fill the disk the missions live
         # on. Only turn this off for testing.
         self.declare_parameter("require_mount", True)
+        # The real boat's topics (docs/HARDWARE_DECISIONS.md). "state_line":
+        # pico_bridge's raw std_msgs/String; "pico_status": asket_sim.
+        self.declare_parameter("pico_status_format", "state_line")
+        self.declare_parameter("battery_topic", "/battery/state")
 
         self.recorder = MissionRecorder(
             RecorderConfig(
@@ -91,15 +106,32 @@ class MissionRecorderNode(Node):
         self._sonar: SonarStatus | None = None
         self._pico: PicoStatus | None = None
         self._last_mode: int | None = None
+        self._heading_at: float = 0.0
+        self._odom: Odometry | None = None
+        self._odom_at: float = 0.0
+        self._battery: BatteryState | None = None
+        self._sats: int | None = None
 
         self.create_subscription(NavSatFix, "/mavros/global_position/global",
                                  self._on_fix, SENSOR_QOS)
         self.create_subscription(TwistStamped, "/mavros/global_position/raw/gps_vel",
                                  self._on_vel, SENSOR_QOS)
         self.create_subscription(Imu, "/mavros/imu/data", self._on_imu, SENSOR_QOS)
+        # /asket/heading is the simulator's. On the boat the heading is the
+        # EKF's, on /odometry/filtered — the one the GUI draws.
         self.create_subscription(HeadingStatus, "/asket/heading", self._on_heading, 10)
+        self.create_subscription(Odometry, "/odometry/filtered", self._on_odom, SENSOR_QOS)
+        self.create_subscription(UInt32, "/mavros/global_position/raw/satellites",
+                                 self._on_sats, SENSOR_QOS)
+        self.create_subscription(BatteryState, self.get_parameter("battery_topic").value,
+                                 self._on_battery, SENSOR_QOS)
         self.create_subscription(SonarStatus, "/sonar/status", self._on_sonar, 10)
-        self.create_subscription(PicoStatus, "/pico/status", self._on_pico, 10)
+        # pico_bridge republishes the firmware's raw STATE line as a
+        # std_msgs/String; only asket_sim publishes PicoStatus here.
+        if self.get_parameter("pico_status_format").value == "pico_status":
+            self.create_subscription(PicoStatus, "/pico/status", self._on_pico, 10)
+        else:
+            self.create_subscription(String, "/pico/status", self._on_pico_line, 10)
         self.create_subscription(DiagnosticArray, "/diagnostics", self._on_diagnostics, 10)
         # The unmodified Ping Protocol stream, republished by omniscan_bridge
         # for exactly this purpose. Anything reinterpreted before it reaches
@@ -132,17 +164,40 @@ class MissionRecorderNode(Node):
     def _on_fix(self, msg): self._fix = msg
     def _on_vel(self, msg): self._vel = msg
     def _on_imu(self, msg): self._imu = msg
-    def _on_heading(self, msg): self._heading = msg
+    def _on_heading(self, msg):
+        self._heading = msg
+        self._heading_at = time.monotonic()
+
+    def _on_odom(self, msg):
+        self._odom = msg
+        self._odom_at = time.monotonic()
+
+    def _on_sats(self, msg): self._sats = int(msg.data)
+    def _on_battery(self, msg): self._battery = msg
     def _on_sonar(self, msg): self._sonar = msg
 
     def _on_pico(self, msg: PicoStatus) -> None:
-        if self._last_mode is not None and msg.mode != self._last_mode:
+        self._record_mode(int(msg.mode))
+        self._pico = msg
+
+    def _on_pico_line(self, msg: String) -> None:
+        # The one parser for the firmware's line format, shared with the GUI
+        # and the pre-flight. Imported here rather than declared in
+        # package.xml: gui_backend depends on this package, and the reverse
+        # would be a cycle.
+        from gui_backend.core.pico_state import parse_state_line
+
+        state = parse_state_line(str(msg.data))
+        if state.mode in _MODE_VALUES:
+            self._record_mode(_MODE_VALUES[state.mode])
+
+    def _record_mode(self, mode: int) -> None:
+        if self._last_mode is not None and mode != self._last_mode:
             self.recorder.write_event(
                 self._utc_ms(), "mode_changed",
-                {"from": int(self._last_mode), "to": int(msg.mode)},
+                {"from": int(self._last_mode), "to": int(mode)},
             )
-        self._last_mode = msg.mode
-        self._pico = msg
+        self._last_mode = mode
 
     def _on_sonar_raw(self, msg: UInt8MultiArray) -> None:
         self.recorder.write_sonar(bytes(msg.data))
@@ -183,13 +238,7 @@ class MissionRecorderNode(Node):
             pitch = math.degrees(math.asin(
                 max(-1.0, min(1.0, 2 * (q.w * q.y - q.z * q.x)))))
 
-        estimate = evaluate_heading(
-            heading_deg=heading.heading_deg if heading else None,
-            source=heading.source if heading else SOURCE_NONE,
-            cog_deg=cog, sog_ms=sog,
-            reported_accuracy_deg=heading.accuracy_deg if heading else None,
-            source_valid=bool(heading.valid) if heading else False,
-        )
+        estimate = self._heading_estimate(cog, sog)
 
         return {
             "utc_ms": self._utc_ms(),
@@ -200,10 +249,30 @@ class MissionRecorderNode(Node):
             "cog_deg": cog, "sog_ms": sog,
             "roll_deg": roll, "pitch_deg": pitch,
             "gnss_fix_type": int(fix.status.status) + 3,
-            "num_sats": 0,
+            "num_sats": self._sats if self._sats is not None else 0,
             "hdop": math.sqrt(fix.position_covariance[0]) / 2.5
             if fix.position_covariance[0] > 0 else float("nan"),
         }
+
+    def _heading_estimate(self, cog: float, sog: float):
+        """The simulator's HeadingStatus while it is fresh, else the EKF's."""
+        heading = self._heading
+        if heading is not None and time.monotonic() - self._heading_at < 2.0:
+            return evaluate_heading(
+                heading_deg=heading.heading_deg,
+                source=heading.source,
+                cog_deg=cog, sog_ms=sog,
+                reported_accuracy_deg=heading.accuracy_deg,
+                source_valid=bool(heading.valid),
+            )
+        if self._odom is None:
+            return evaluate_heading(None, SOURCE_NONE, cog, sog, source_valid=False)
+        q = self._odom.pose.pose.orientation
+        twist = self._odom.twist.twist.linear
+        return heading_from_odometry(
+            compass_deg_from_enu_quaternion(q.x, q.y, q.z, q.w),
+            time.monotonic() - self._odom_at, twist.x, twist.y,
+        )
 
     def _write_diagnostics(self) -> None:
         if not self.recorder.recording:
@@ -218,9 +287,12 @@ class MissionRecorderNode(Node):
             "sonar_connected": bool(sonar.connected) if sonar else None,
             "sonar_ping_rate_hz": float(sonar.actual_ping_rate_hz) if sonar else None,
             "packet_loss_ratio": float(sonar.packet_loss_ratio) if sonar else None,
-            "heading_valid": bool(self._heading.valid) if self._heading else None,
-            "battery_voltage": float(self._pico.battery_voltage) if self._pico else None,
-            "mode": int(self._pico.mode) if self._pico else None,
+            "heading_valid": self._heading_estimate(0.0, 0.0).valid,
+            # The BMS aggregate on the boat; PicoStatus only in the simulator
+            # (firmware v4 does not measure the battery).
+            "battery_voltage": float(self._battery.voltage) if self._battery
+            else float(self._pico.battery_voltage) if self._pico else None,
+            "mode": self._last_mode,
         })
 
     def _publish_state(self) -> None:
@@ -255,7 +327,7 @@ class MissionRecorderNode(Node):
                 "gain": int(self._sonar.gain_setting) if self._sonar else None,
                 "speed_of_sound": float(self._sonar.speed_of_sound) if self._sonar else None,
             },
-            "heading_source": self._heading.source if self._heading else None,
+            "heading_source": self._heading_estimate(0.0, 0.0).source,
         }
 
     def _on_start(self, request, response):

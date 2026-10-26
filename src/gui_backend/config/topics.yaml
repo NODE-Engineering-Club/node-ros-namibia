@@ -17,11 +17,10 @@
 #   * /pico/status and /pico/mode_request exist only when the stack is
 #     launched with use_pico_bridge:=true (default false: the Pixhawk path,
 #     actuator_driver). Without it the vessel panel reads "not sent".
-#   * There is deliberately NO battery source yet. namibia's bms_reader
-#     publishes /battery/state but never fills BatteryState.percentage, and
-#     adapters.battery_from_ros reads that field as the state of charge: wiring
-#     it as-is would show 0 % and a permanent "battery critical" alarm. Add it
-#     once a real percentage is computed. See docs/gui/PORTING_NOTES.md.
+#   * The battery is /battery/state, produced by sensors/battery_aggregator
+#     from the two BMS readers (launched with enable_bms:=true). Its
+#     `percentage` is estimated from cell voltages (asket_common/battery.py)
+#     and is NaN — "not sent" in the GUI — when unknown, never 0.
 
 sources:
   gnss_fix:
@@ -88,6 +87,12 @@ sources:
     topic: /mission/state
     type: asket_interfaces/msg/MissionState
     optional: true
+  # Two 4S packs in parallel, combined by sensors/battery_aggregator. Optional:
+  # absent unless the stack runs with enable_bms:=true.
+  battery:
+    topic: /battery/state
+    type: sensor_msgs/msg/BatteryState
+    optional: true
   # The pre-flight report, as system_test_node publishes it.
   #
   # This used to point at /diagnostics (diagnostic_msgs/DiagnosticArray), which
@@ -114,6 +119,29 @@ sources:
     type: diagnostic_msgs/msg/DiagnosticArray
     optional: true
 
+# Which optional sensors this boat carries. A sensor that is not fitted is
+# shown as "not fitted" and never subscribed to, rather than as an empty plot
+# ("nothing in range" with no lidar is a lie) or a blank camera.
+#
+# No lidar is aboard, and the OAK-D-LR that replaced the USB camera has no
+# driver in this stack yet (docs/HARDWARE_DECISIONS.md). gui.launch.py
+# overrides both from its lidar_fitted / camera_fitted arguments.
+fitted:
+  lidar: false
+  camera: false
+
+# How the Sonar panel behaves. `health`: SonarView operates and records the
+# Omniscan on its own screen, so the panel shows only whether the sonar is
+# alive (from omniscan_bridge, when started with enable_sonar:=true) and offers
+# no controls that would fight SonarView. `full`: the panel with range, gain
+# and ping-rate controls, for when this stack drives the sonar itself.
+sonar_panel: health
+
+# Where mission_recorder writes (its missions_root). The GUI lists the stored
+# missions from this directory; it runs in the same container.
+missions:
+  root: /data/missions
+
 # Where commands go. Mode requests reach the Pico through pico_bridge, which
 # this repository does not modify, so the interface is named here.
 commands:
@@ -132,6 +160,12 @@ commands:
   stop_mission:
     service: /mission_recorder/stop_mission
     type: asket_interfaces/srv/StopMission
+  export_mission:
+    service: /mission_recorder/export_mission
+    type: asket_interfaces/srv/ExportMission
+  delete_mission:
+    service: /mission_recorder/delete_mission
+    type: asket_interfaces/srv/DeleteMission
   run_system_test:
     service: /system_test/run
     type: asket_interfaces/srv/RunSystemTest
@@ -196,7 +230,8 @@ shore_station:
   # Compass bearing the sector faces.
   boresight_deg: 0.0
   antenna:
-    # MikroTik mANTBox ax 15s: 15 dBi, 120 deg azimuth (checked against
+    # MikroTik mANTBox ax 15s — CONFIRMED as the shore sector
+    # (docs/HARDWARE_DECISIONS.md): 15 dBi, 120 deg azimuth (checked against
     # MikroTik's own product pages). The elevation figure is a guess — they
     # publish the pattern as a plot and state no number — and it only matters
     # very close in, under the tripod.
@@ -204,6 +239,9 @@ shore_station:
     azimuth_beamwidth_deg: 120.0
     elevation_beamwidth_deg: 10.0
   vessel_radio:
+    # MikroTik NetMetal 5 ax on the boat. It is a connectorised radio and its
+    # antenna is not chosen yet, so the link budget keeps the 6.7 dBi omni it
+    # assumes for the vessel end (asket_common/link_budget.py). PROVISIONAL.
     # Omnidirectional on the boat: the gain lives ashore where the tripod does
     # not move during a line. Height is a guess and it is the term that
     # dominates useful range — the two-ray null structure goes as the product
@@ -219,10 +257,28 @@ shore_station:
   # does, and that is when somebody is testing at the ramp.
   wave_height_m: 0.5
 
+# The boat LAN, 10.10.20.0/24 (docs/HARDWARE_DECISIONS.md, IP plan). For
+# reference here, beside the link budget it belongs with: nothing in the GUI
+# connects to these. The sonar address the bridge uses is in
+# omniscan_bridge/config/omniscan.yaml and gui.launch.py (sonar_host).
+network:
+  subnet: 10.10.20.0/24
+  switch: 10.10.20.2          # MikroTik CSS610
+  vessel_radio: 10.10.20.3    # NetMetal 5 ax (boat)
+  shore_radio: 10.10.20.4     # mANTBox ax 15s (tripod)
+  jetson: 10.10.20.10         # this GUI: http://10.10.20.10:8090
+  camera: 10.10.20.21         # OAK-D-LR (PoE)
+  lidar_reserved: 10.10.20.22 # Livox, not fitted
+  sonar: 10.10.20.31          # Omniscan 3D 450 SS (factory 192.168.2.92)
+  sonar_reserved: 10.10.20.32
+  laptops_dhcp: 10.10.20.100-10.10.20.199
+
 # Battery capacity, needed to turn a percentage into an endurance estimate.
 # PROVISIONAL (Q5).
 vessel:
-  battery_capacity_wh: 1200.0
+  # 2x Gens ace LiPo 4S 8000 mAh in parallel: 2 x 14.8 V x 8 Ah = 236.8 Wh
+  # (docs/HARDWARE_DECISIONS.md). Nominal; usable energy is lower.
+  battery_capacity_wh: 237.0
   hotel_load_w: 85.0
 
 # The GUI's own server. 8090 stays clear of foxglove_bridge (8765) and of the

@@ -120,7 +120,7 @@
       "applied_by": "gui_backend",
       "choices": [],
       "consequence": "Endurance is arithmetic on this. Wrong here is a confident wrong number telling somebody they have forty minutes left.",
-      "default": 1200.0,
+      "default": 237.0,
       "goes_stale": false,
       "has_default": true,
       "id": "vessel.battery.capacity_wh",

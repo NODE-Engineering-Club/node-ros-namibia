@@ -307,7 +307,8 @@ FIELDS: tuple[FieldSpec, ...] = (
         id="vessel.battery.capacity_wh",
         tier=TIER_VESSEL,
         label="Battery capacity",
-        default=1200.0,
+        # 2x LiPo 4S 8000 mAh in parallel (docs/HARDWARE_DECISIONS.md).
+        default=237.0,
         units="Wh",
         consequence=(
             "Endurance is arithmetic on this. Wrong here is a confident wrong "

@@ -54,6 +54,16 @@ def generate_launch_description():
         DeclareLaunchArgument("vision_confidence",    default_value="0.5"),
         DeclareLaunchArgument("camera_device",        default_value="/dev/video0"),
         DeclareLaunchArgument("lidar_device",         default_value="/dev/ttyUSB0"),
+        # Off by default: no lidar (RPLidar/Livox) is aboard and the USB camera
+        # was replaced by the OAK-D-LR, which has no driver here yet
+        # (docs/HARDWARE_DECISIONS.md). Starting a driver for a device that is
+        # not there only produces a crash-looping node and an empty panel.
+        DeclareLaunchArgument("enable_lidar",         default_value="false",
+                              description="Start the RPLIDAR driver (sllidar_node) on lidar_device. "
+                                          "No lidar is fitted on the current boat."),
+        DeclareLaunchArgument("enable_usb_camera",    default_value="false",
+                              description="Start camera_driver on camera_device (USB/V4L2). "
+                                          "The boat now carries an OAK-D-LR (PoE), not a USB camera."),
         DeclareLaunchArgument("use_sim",         default_value="false"),
         DeclareLaunchArgument(
             "headless",
@@ -68,8 +78,16 @@ def generate_launch_description():
         DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
         DeclareLaunchArgument("use_pico_bridge",      default_value="false"),
         DeclareLaunchArgument("pico_port",            default_value="/dev/ttyACM0"),
-        DeclareLaunchArgument("enable_bms",           default_value="false"),
-        DeclareLaunchArgument("bms_port",             default_value="/dev/ttyACM3"),
+        DeclareLaunchArgument("enable_bms",           default_value="false",
+                              description="BMS readers (one per pack) + battery_aggregator -> /battery/state"),
+        # Stable names from deploy/udev/99-asket-usb-serial.rules (the BMS
+        # boards sit behind a USB hub, so ttyACMn numbers are not stable).
+        DeclareLaunchArgument("bms_port",             default_value="/dev/bms_pack1",
+                              description="Serial port of the pack 1 BMS (MCP2221)"),
+        DeclareLaunchArgument("enable_bms2",          default_value="true",
+                              description="Second BMS (pack 2). Only read when enable_bms:=true."),
+        DeclareLaunchArgument("bms2_port",            default_value="/dev/bms_pack2",
+                              description="Serial port of the pack 2 BMS (MCP2221)"),
         DeclareLaunchArgument("enable_cloud_bridge",  default_value="false",
                               description="Outbound-only cloud telemetry relay (src/comms/cloud_bridge). "
                                           "Off by default — needs cloud_ws_url configured for a real "
@@ -256,6 +274,7 @@ def generate_launch_description():
             name="camera_driver",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_sensors"), "' == 'true' and '",
+                LaunchConfiguration("enable_usb_camera"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
             parameters=[{
@@ -275,6 +294,7 @@ def generate_launch_description():
             name="lidar_driver",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_sensors"), "' == 'true' and '",
+                LaunchConfiguration("enable_lidar"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
             remappings=[("scan", "/lidar_driver/scan_raw")],
@@ -416,23 +436,62 @@ def generate_launch_description():
             ])),
             parameters=[{"port": LaunchConfiguration("pico_port")}, sim_time],
         ),
-        # BMS reader — sole owner of the serial link to the battery management
-        # system (MCP2221 USB-UART bridge). Publishes sensor_msgs/BatteryState
-        # on /battery/state (renders in Foxglove's built-in Battery panel) and
-        # the full raw report (per-cell voltages, FET states) on
-        # /battery/status_raw.
+        # BMS readers — each the sole owner of the serial link to one battery
+        # management system (MCP2221 USB-UART bridge). Each publishes
+        # sensor_msgs/BatteryState with an estimated state of charge and the
+        # full raw report (per-cell voltages, FET states) on its own topics.
         #
         # Deliberately allowed to run even when use_sim:=true, same reasoning
         # as pico_bridge above: real battery telemetry has nothing to do with
         # whether the boat's motion is simulated, so a hybrid bench test (real
         # hardware, Gazebo-simulated perception/mission) should still surface
         # the real pack's voltage/cell balance.
+        #
+        # Two packs in parallel, one BMS each (docs/HARDWARE_DECISIONS.md): one
+        # reader per BMS on its own topic, and battery_aggregator combining
+        # them into the single /battery/state everything else reads. If only
+        # one BMS is fitted, set enable_bms2:=false; the aggregator also leaves
+        # out (and names in /diagnostics) a pack that stops reporting.
         Node(
             package="sensors",
             executable="bms_reader",
-            name="bms_reader",
+            name="bms_reader_pack1",
             condition=IfCondition(LaunchConfiguration("enable_bms")),
-            parameters=[{"port": LaunchConfiguration("bms_port")}, sim_time],
+            parameters=[{
+                "port": LaunchConfiguration("bms_port"),
+                "pack_name": "pack1",
+                "state_topic": "/battery/pack1",
+                "raw_topic": "/battery/pack1/status_raw",
+            }, sim_time],
+        ),
+        Node(
+            package="sensors",
+            executable="bms_reader",
+            name="bms_reader_pack2",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_bms"), "' == 'true' and '",
+                LaunchConfiguration("enable_bms2"), "' == 'true'"
+            ])),
+            parameters=[{
+                "port": LaunchConfiguration("bms2_port"),
+                "pack_name": "pack2",
+                "state_topic": "/battery/pack2",
+                "raw_topic": "/battery/pack2/status_raw",
+            }, sim_time],
+        ),
+        Node(
+            package="sensors",
+            executable="battery_aggregator",
+            name="battery_aggregator",
+            condition=IfCondition(LaunchConfiguration("enable_bms")),
+            parameters=[{
+                "pack_topics": PythonExpression([
+                    "['/battery/pack1', '/battery/pack2'] if '",
+                    LaunchConfiguration("enable_bms2"),
+                    "' == 'true' else ['/battery/pack1']",
+                ]),
+                "output_topic": "/battery/state",
+            }, sim_time],
         ),
         # Cloud telemetry relay — outbound-only, never touches MAVROS/
         # ArduPilot control (see src/comms/cloud_bridge's module docstring
@@ -675,6 +734,10 @@ def generate_launch_description():
             launch_arguments={
                 "gui_port": LaunchConfiguration("gui_port"),
                 "use_sim": LaunchConfiguration("use_sim"),
+                # The GUI shows the lidar and camera panels as "not fitted"
+                # rather than empty when their driver is not started.
+                "lidar_fitted": LaunchConfiguration("enable_lidar"),
+                "camera_fitted": LaunchConfiguration("enable_usb_camera"),
             }.items(),
             condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),

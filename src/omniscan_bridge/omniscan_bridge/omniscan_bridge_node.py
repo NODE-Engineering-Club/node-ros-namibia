@@ -61,7 +61,8 @@ class OmniscanBridge(Node):
     def __init__(self) -> None:
         super().__init__("omniscan_bridge")
 
-        self.declare_parameter("host", "192.168.2.92")
+        # The boat LAN address (docs/HARDWARE_DECISIONS.md); factory is 192.168.2.92.
+        self.declare_parameter("host", "10.10.20.31")
         self.declare_parameter("port", pp.DEFAULT_PORT)
         self.declare_parameter("transport", "udp")
         self.declare_parameter("frame_id", "base_link")

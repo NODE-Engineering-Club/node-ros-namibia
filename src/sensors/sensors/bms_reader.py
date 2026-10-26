@@ -27,6 +27,17 @@ has no home in sensor_msgs/BatteryState either, so it's raw-text-only too
 without a dedicated topic for it. The block is flushed on "Flags:", the
 last field the firmware sends each cycle — flushing on "FETs:" (the
 previous field) would silently drop Flags off of every published block.
+
+State of charge: the BMS reports none, so ``percentage`` is estimated from
+the weakest cell's voltage with a LiPo curve (asket_common.battery). It was
+previously left at 0, which any consumer reading it as a state of charge
+would show as an empty battery. It is NaN (unknown) when the cells cannot
+be read, never 0.
+
+One instance per BMS. The boat has two 4S packs in parallel, so the launch
+file starts two (``pack1``, ``pack2``) on their own ports and topics, and
+``battery_aggregator`` combines them into /battery/state. The defaults
+below keep the single-BMS behaviour of a bare ``ros2 run``.
 """
 import re
 
@@ -36,6 +47,8 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import String
+
+from asket_common.battery import pack_state_of_charge
 
 SERIAL_PORT = "/dev/ttyACM3"
 BAUD_RATE = 115200
@@ -54,8 +67,22 @@ class BmsReader(Node):
 
         self.declare_parameter("port", SERIAL_PORT)
         self.declare_parameter("baud", BAUD_RATE)
+        # Where this BMS's readings go, and what it is called in /diagnostics.
+        # Two packs need two of each; see the module docstring.
+        self.declare_parameter("state_topic", "/battery/state")
+        self.declare_parameter("raw_topic", "/battery/status_raw")
+        self.declare_parameter("pack_name", "")
+        # Series cell count. A report with fewer readable cells gives an
+        # unknown state of charge rather than one computed from part of the pack.
+        self.declare_parameter("cell_count", 4)
+        # Per-pack capacity, for BatteryState.design_capacity and an estimated
+        # charge (Gens ace 4S 8000 mAh).
+        self.declare_parameter("design_capacity_ah", 8.0)
         port = self.get_parameter("port").get_parameter_value().string_value
         baud = self.get_parameter("baud").get_parameter_value().integer_value
+        self._pack_name = self.get_parameter("pack_name").value
+        self._cell_count = int(self.get_parameter("cell_count").value)
+        self._design_ah = float(self.get_parameter("design_capacity_ah").value)
 
         try:
             self._ser = serial.Serial(port, baud, timeout=0)  # non-blocking
@@ -67,8 +94,10 @@ class BmsReader(Node):
         self._rx = b""
         self._block_lines = []
 
-        self._state_pub = self.create_publisher(BatteryState, "/battery/state", 10)
-        self._raw_pub = self.create_publisher(String, "/battery/status_raw", 10)
+        self._state_pub = self.create_publisher(
+            BatteryState, self.get_parameter("state_topic").value, 10)
+        self._raw_pub = self.create_publisher(
+            String, self.get_parameter("raw_topic").value, 10)
         self._diag_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
 
         self.create_timer(0.2, self._tick)
@@ -152,6 +181,13 @@ class BmsReader(Node):
         state.temperature = temp_c if temp_c is not None else float("nan")
         state.cell_voltage = cells
         state.present = True
+        state.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
+        soc = pack_state_of_charge(cells, expected_cells=self._cell_count)
+        # 0..1 per sensor_msgs/BatteryState. NaN = unknown, never 0.
+        state.percentage = soc if soc is not None else float("nan")
+        state.design_capacity = self._design_ah
+        state.charge = soc * self._design_ah if soc is not None else float("nan")
+        state.location = self._pack_name
         if chg_on is None:
             state.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_UNKNOWN
         elif chg_on:
@@ -166,12 +202,12 @@ class BmsReader(Node):
         raw.data = text
         self._raw_pub.publish(raw)
 
-        self._publish_diagnostics(cells, pack_v, temp_c, curr_a, chg_on, dsg_on, flags)
+        self._publish_diagnostics(cells, pack_v, temp_c, curr_a, chg_on, dsg_on, flags, soc)
 
-    def _publish_diagnostics(self, cells, pack_v, temp_c, curr_a, chg_on, dsg_on, flags):
+    def _publish_diagnostics(self, cells, pack_v, temp_c, curr_a, chg_on, dsg_on, flags, soc):
         fault = any(flags.values()) or dsg_on is False
         status = DiagnosticStatus()
-        status.name = "bms: BQ76920"
+        status.name = f"bms: BQ76920 {self._pack_name}".strip()
         status.hardware_id = "bq76920"
         status.level = DiagnosticStatus.ERROR if fault else DiagnosticStatus.OK
         status.message = "Fault" if fault else "OK"
@@ -180,6 +216,7 @@ class BmsReader(Node):
             status.values.append(KeyValue(key=key, value=str(value)))
 
         kv("Pack (V)", f"{pack_v:.2f}" if pack_v is not None else "?")
+        kv("SoC est. (%)", f"{soc * 100:.0f}" if soc is not None else "?")
         for i, v in enumerate(cells, start=1):
             kv(f"Cell {i} (V)", f"{v:.3f}")
         kv("Temp (C)", f"{temp_c:.1f}" if temp_c is not None else "?")

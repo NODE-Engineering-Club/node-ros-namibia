@@ -126,19 +126,18 @@ def test_an_unknown_command_names_itself():
 
 #: Commands the GUI can issue that ``RosSource`` does **not** dispatch.
 #:
-#: Not an oversight list — a record. Each needs more than a service call to be
-#: useful, and wiring the call alone would produce a button that succeeds while
-#: the panel behind it stays empty:
+#: Not an oversight list — a record. Each entry needs more than a service call
+#: to be useful, and wiring the call alone would produce a button that succeeds
+#: while the panel behind it stays empty.
 #:
-#: * ``export_mission`` and ``delete_mission`` act on missions the operator
-#:   picks from the mission list, and the ``mission`` stream is not produced by
-#:   ``RosSource`` either — ``/mission/state`` carries the recorder's state but
-#:   not the mission listing, the export destinations or the disk totals the
-#:   panel needs. The services exist (``~/export_mission``, ``~/delete_mission``,
-#:   ``~/list_missions``); the stream is the missing half.
+#: Empty since hw-alignment: ``export_mission`` and ``delete_mission`` were
+#: here because ``RosSource`` produced no ``mission`` stream to pick a mission
+#: from. It now builds one from ``/mission/state`` plus the listing on the
+#: recorder's disk, and both are dispatched to ``~/export_mission`` and
+#: ``~/delete_mission``.
 #:
-#: If you wire one, delete it from here and the test below will hold you to it.
-KNOWN_NOT_WIRED = {"export_mission", "delete_mission"}
+#: If a command is ever added here, the test below holds it to the claim.
+KNOWN_NOT_WIRED: set[str] = set()
 
 #: Commands the **backend** answers itself, which never reach a source at all.
 #:
