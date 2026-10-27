@@ -63,6 +63,12 @@ class GuiBackendNode(Node):
             self.declare_parameter(f"{sensor}_fitted", bool(fitted.get(sensor, True)))
             fitted[sensor] = bool(self.get_parameter(f"{sensor}_fitted").value)
         topics["fitted"] = fitted
+        # The same polygon file the Nav2 keep-out mask is built from, so the
+        # fence on the map is the fence the planner respects.
+        geofence = dict(topics.get("geofence") or {})
+        self.declare_parameter("geofence_file", str(geofence.get("file") or ""))
+        geofence["file"] = str(self.get_parameter("geofence_file").value)
+        topics["geofence"] = geofence
         profiles = _load_yaml(self.get_parameter("link_profiles_config").value)
 
         self.source = RosSource(self, topics)

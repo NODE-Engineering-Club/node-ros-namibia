@@ -85,6 +85,11 @@ def generate_launch_description():
             description="The Nav2 survey profile runs, so the pre-flight requires its geofence.",
         ),
         DeclareLaunchArgument(
+            "geofence_file",
+            default_value="/data/setup/geofence.yaml",
+            description="The geofence polygon drawn on the map (the file Nav2's keep-out is built from).",
+        ),
+        DeclareLaunchArgument(
             "camera_fitted",
             default_value="false",
             description="A camera the GUI can show is aboard and running.",
@@ -127,6 +132,7 @@ def generate_launch_description():
                     "static_dir": static_dir,
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "camera_fitted": LaunchConfiguration("camera_fitted"),
+                    "geofence_file": LaunchConfiguration("geofence_file"),
                 },
                 sim_time,
             ],

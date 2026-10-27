@@ -113,6 +113,65 @@ def _radio_from_config(config: dict):
     return radio, origin
 
 
+class _GeofenceFile:
+    """The day's geofence polygon, re-read when its file changes.
+
+    ``snapshot("plan")`` is called on every hub tick, so the file is stat'ed
+    at most every few seconds and parsed only when its mtime moves. A missing
+    or broken file is reported in the payload (``geofence_error``), never
+    raised: the map then simply has no fence, and the pre-flight's
+    ``nav.geofence`` check says why.
+    """
+
+    RECHECK_S = 5.0
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._checked = -math.inf
+        self._mtime = None
+        self._payload = self._empty("no geofence file is configured" if not path else "")
+
+    @staticmethod
+    def _empty(error: str) -> dict:
+        return {"lines": [], "geofence": [], "geofence_name": "", "geofence_error": error}
+
+    def payload(self) -> dict:
+        now = time.monotonic()
+        if not self.path or now - self._checked < self.RECHECK_S:
+            return self._payload
+        self._checked = now
+        import os
+
+        try:
+            mtime = os.stat(self.path).st_mtime
+        except OSError:
+            self._mtime = None
+            self._payload = self._empty(f"{self.path} does not exist")
+            return self._payload
+        if mtime == self._mtime:
+            return self._payload
+        self._mtime = mtime
+        self._payload = self._read()
+        return self._payload
+
+    def _read(self) -> dict:
+        import yaml
+
+        from asket_common.geofence import GeofenceError, load_geofence
+
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                fence = load_geofence(yaml.safe_load(handle))
+        except (OSError, yaml.YAMLError, GeofenceError) as exc:
+            return self._empty(f"{self.path}: {exc}")
+        return {
+            "lines": [],
+            "geofence": [[lon, lat] for lat, lon in fence.polygon],
+            "geofence_name": fence.name,
+            "geofence_error": "",
+        }
+
+
 class RosSource:
     """Reads real topics. Constructed with an already-created ``rclpy`` node."""
 
@@ -126,6 +185,7 @@ class RosSource:
         self._publishers: dict[str, object] = {}
         self._service_clients: dict[str, object] = {}
         self._radio, self._station_origin = _radio_from_config(config)
+        self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
         self._link = adapters.link_from_measurements("wifi", 1.0, 0.0, 800_000.0)
 
         self._subscribe_all()
@@ -377,6 +437,13 @@ class RosSource:
                 return None
             report = adapters.preflight_from_ros(msg)
             return Sample(stream, report["run_utc_ms"] or self.now_utc_ms(), report)
+
+        if stream == "plan":
+            # The real boat has no survey lines on the wire (no planner sends
+            # them), but it does have the polygon Nav2 is fenced in by. Drawing
+            # the same file the keep-out mask is built from means the line on
+            # the map is the line the planner actually respects.
+            return Sample(stream, self.now_utc_ms(), self._geofence.payload())
 
         if stream == "coverage":
             step = {"full": 1, "reduced": 3, "minimal": 10}[detail]

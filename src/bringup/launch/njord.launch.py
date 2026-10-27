@@ -792,6 +792,7 @@ def generate_launch_description():
                 # rather than empty when their driver is not started.
                 "lidar_fitted": LaunchConfiguration("enable_lidar"),
                 "camera_fitted": LaunchConfiguration("enable_usb_camera"),
+                "geofence_file": LaunchConfiguration("geofence_file"),
                 "geofence_expected": PythonExpression([
                     "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
                     LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",

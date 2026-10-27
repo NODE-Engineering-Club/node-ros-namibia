@@ -873,3 +873,4 @@ button.link,
   cursor: pointer;
 }
 .details-toggle.on { background: var(--info-fill); color: #fff; border-color: var(--info-fill); }
+.map-note-top { bottom: auto; top: 44px; }

@@ -131,6 +131,13 @@ fitted:
   lidar: false
   camera: false
 
+# The day's survey-area geofence: the same lat/lon polygon file the Nav2
+# keep-out mask is built from (bringup/config/geofence.example.yaml). Drawn on
+# the map when it exists; re-read when the file changes. gui.launch.py
+# overrides the path from its geofence_file argument.
+geofence:
+  file: /data/setup/geofence.yaml
+
 # How the Sonar panel behaves. `health`: SonarView operates and records the
 # Omniscan on its own screen, so the panel shows only whether the sonar is
 # alive (from omniscan_bridge, when started with enable_sonar:=true) and offers
