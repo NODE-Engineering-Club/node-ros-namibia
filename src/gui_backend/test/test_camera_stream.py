@@ -287,17 +287,21 @@ def test_an_unsubscribed_camera_renders_nothing():
 # -- the negotiation -------------------------------------------------------
 
 
-def test_the_camera_is_not_carried_on_a_narrow_link():
-    """Absent from the reduced profile's policies, so resolve() refuses it with
-    that profile's own sentence rather than granting a trickle nobody can use.
-    A single 320x240 frame is most of a second's budget there."""
-    from gui_backend.core.streams import resolve
+def test_the_camera_is_a_thumbnail_on_reduced_and_absent_on_the_beacon():
+    """Reduced carries a 160x120 frame every five seconds — a glance, not
+    video, and about a tenth of that profile's budget. The beacon refuses it
+    with its own sentence rather than granting a trickle nobody can use."""
+    from gui_backend.core.streams import PROFILES, estimate_bytes_per_s, resolve
 
     assert resolve("camera", None, None, "full").granted
-    for profile in ("reduced", "minimal"):
-        resolution = resolve("camera", None, None, profile)
-        assert not resolution.granted
-        assert profile in resolution.reason
+    reduced = resolve("camera", None, None, "reduced")
+    assert reduced.granted
+    assert reduced.rate_hz <= 0.2
+    assert reduced.detail == "minimal"
+    assert estimate_bytes_per_s([reduced]) < 0.15 * PROFILES["reduced"].budget_bytes_per_s
+    minimal = resolve("camera", None, None, "minimal")
+    assert not minimal.granted
+    assert "minimal" in minimal.reason
 
 
 def test_the_full_profile_can_actually_afford_it():

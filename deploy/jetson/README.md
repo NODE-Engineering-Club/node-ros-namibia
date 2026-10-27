@@ -18,6 +18,43 @@ kept by each browser, not on the Jetson, and survive on their own.
 Not kept: ROS logs (`/root/.ros/log`). Add `-v /srv/asket/ros-log:/root/.ros/log`
 to the unit if you want them.
 
+## asket.service replaces njord.service — never both
+
+`scripts/init.sh` is the **Raspberry Pi + BlueOS** installer. It installs
+`njord.service` (plus `njord-update.service` and `blueos.service`), which runs
+the same `njord.launch.py` in a container named `njord`. On the Jetson,
+`asket.service` **replaces** it. If both ran, there would be two stacks: two
+`pico_bridge` fighting over `/dev/pico`, every topic published twice, two GUIs
+on port 8090.
+
+Three things stop that:
+
+1. Do not run `scripts/init.sh` on the Jetson. If it was run, disable its units
+   first:
+
+   ```bash
+   systemctl list-unit-files | grep -E 'njord|blueos'     # what is installed
+   sudo systemctl disable --now njord.service njord-update.service
+   ```
+
+2. `asket.service` declares `Conflicts=njord.service`: starting either one
+   stops the other, so they cannot both be up even if both are enabled.
+3. `asket.service` refuses to start while a container named `njord` is
+   running (a container started by hand, for instance), and says why in
+   `journalctl -u asket.service`.
+
+Check that only one stack is running:
+
+```bash
+systemctl is-active asket.service njord.service   # active / inactive
+sudo podman ps --format '{{.Names}}'               # only "asket"
+```
+
+`blueos.service` is not touched. Note that `fcu_url` still defaults to
+BlueOS's MAVLink router (`tcp://localhost:5777`); without BlueOS, MAVROS gets
+no data from the Pixhawk until the serial `fcu_url` (`/dev/pixhawk`) is set up
+(Phase B d, waiting on the Pixhawk firmware check).
+
 ## Install
 
 ```bash
@@ -49,10 +86,16 @@ the host.
   `prod-jetson` image (SAM2/TensorRT) is built by hand and its default command
   runs only the SAM2 launch, not `njord.launch.py` — the explicit `ros2 launch`
   line in the unit overrides that.
-- **The motor path.** `use_pico_bridge` keeps its default (false), as do
-  `fcu_url` and `pico_port`. Changing them is Phase B.
-- **`enable_bms:=true`** assumes the two BMS readers are fitted and named by
-  udev. If they are not, drop it — the battery then reads "not sent" and the
-  pre-flight says it cannot confirm the battery (NO-GO), which is correct.
+- **The motor path.** The defaults apply: the Pico on `/dev/pico`
+  (`use_pico_bridge:=true` since Phase B a). `fcu_url` is not changed yet.
+- **`enable_bms:=true`** assumes the pack 1 BMS reader is fitted and named by
+  udev (`/dev/bms_pack1`); the second one is off by default (`enable_bms2`,
+  only one BMS is wired). If none is fitted, drop it — the battery then reads
+  "not sent" and the pre-flight says it cannot confirm the battery (NO-GO),
+  which is correct.
+- **The geofence.** The Nav2 survey profile needs
+  `/srv/asket/data/setup/geofence.yaml` (example:
+  `src/bringup/config/geofence.example.yaml`); without it the pre-flight is
+  NO-GO.
 - **`scripts/init.sh`** is the older Raspberry Pi + BlueOS installer. It is
   left as it was; this unit is for the Jetson without BlueOS.

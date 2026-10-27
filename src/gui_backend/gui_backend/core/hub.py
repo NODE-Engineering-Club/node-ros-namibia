@@ -23,6 +23,7 @@ browser must never be able to stall the vessel's telemetry.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ from .link_profile import ProfileSelector
 from .shaper import LinkShaper
 from .source import DataSource
 from .streams import (
+    DETAIL_FULL,
     PROFILE_ORDER,
     STREAMS,
     Resolution,
@@ -402,6 +404,11 @@ class Hub:
             cmd = self.commands.issue(name, args, now_utc, command_id=command_id)
             return cmd.to_dict()
 
+        if name == CMD_SET_MODE and str(args.get("mode", "")).upper() == "AUTONOMOUS":
+            refused = self._nogo_gate(args, now_utc, command_id)
+            if refused is not None:
+                return refused
+
         confirm = None
         if name == CMD_SET_MODE:
             confirm = mode_confirmed(str(args.get("mode", "")).upper())
@@ -439,6 +446,53 @@ class Hub:
         elif cmd.status != STATUS_FAILED and confirm is not None:
             cmd.detail = outcome.detail or "sent, waiting for the vessel to confirm"
         return cmd.to_dict()
+
+    def _nogo_gate(self, args: dict, now_utc: int, command_id: str | None) -> dict | None:
+        """Autonomous is refused while the latest pre-flight is NO-GO.
+
+        An aid, not a safety: the RC transmitter (Ch7, Ch8) is the authority
+        and this changes nothing about it. It stops the one press that is
+        almost always a mistake — handing the boat to the autopilot over a
+        red verdict — and leaves a deliberate way past it: `force_nogo` in the
+        request, sent only by the cockpit's double-confirmed "I know it is
+        NO-GO, force" button. Every forced press is logged and written to
+        asket_overrides.jsonl next to the setup file.
+
+        With no pre-flight report at all, nothing is refused here (the
+        readiness line says "run the pre-flight").
+        """
+        sample = self.source.snapshot("diagnostics", DETAIL_FULL)
+        report = sample.payload if sample is not None else None
+        if not report or report.get("go") is not False:
+            return None
+        summary = str(report.get("summary") or "NO-GO")
+        if not args.get("force_nogo"):
+            cmd = self.commands.begin(CMD_SET_MODE, args, now_utc, command_id=command_id)
+            self.commands.fail(
+                cmd,
+                f"Autonomous is blocked: the pre-flight is {summary}. Fix it and run "
+                "the pre-flight again, or use \"I know it is NO-GO, force\".",
+                now_utc,
+            )
+            result = cmd.to_dict()
+            result["nogo"] = True
+            return result
+        record = {
+            "utc_ms": now_utc,
+            "action": "autonomous_forced_over_nogo",
+            "by": str(args.get("by") or ""),
+            "preflight_summary": summary,
+            "preflight_run_utc_ms": report.get("run_utc_ms"),
+        }
+        _log.warning("Autonomous FORCED over a NO-GO pre-flight: %s", summary)
+        try:
+            path = setup_store.DEFAULT_PATH.parent / "asket_overrides.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record) + "\n")
+        except OSError as exc:
+            _log.warning("override record not written: %s", exc)
+        return None
 
     def _save_setup(self, args: dict, now_utc: int, command_id: str | None) -> dict:
         """Write the setup file, under all three guards.
@@ -567,7 +621,19 @@ class Hub:
             }
             for effect in effects
         ]
+        self._resend_hello()
         return result
+
+    def _resend_hello(self) -> None:
+        """Values the backend applies itself (the SonarView address, the
+        station, the battery) travel in `hello`. Re-sent to every client after
+        a save, so "in use" is true on every open page, not only after a
+        reload. The source re-reads the file it just wrote."""
+        refresh = getattr(getattr(self.source, "setup", None), "refresh", None)
+        if refresh is not None:
+            refresh(force=True)
+        for session in self.clients.values():
+            session.send(self.hello(session))
 
     def _apply_setup(self, args: dict, now_utc: int, command_id: str | None) -> dict:
         """Tell the owning node to re-read the setup file, and wait for proof.
@@ -990,6 +1056,9 @@ class Hub:
             "profile": self.selector.profile,
             "profile_manual": self.selector.manual,
             "connected_clients": len(self.clients),
+            # This browser's own round trip, in ms — the latency the person
+            # looking at the page is actually getting. None until measured.
+            "client_rtt_ms": None if session.rtt_ms is None else round(session.rtt_ms),
             "rate_bytes_per_s": round(
                 sum(c.bytes_estimate_per_s for c in self.clients.values())
             ),

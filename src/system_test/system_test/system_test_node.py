@@ -39,10 +39,11 @@ from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import BatteryState, Imu, LaserScan, NavSatFix, TimeReference
 from std_msgs.msg import String, UInt32
 
+from asket_common.diagnostic_level import level_int
 from asket_common.heading import compass_deg_from_enu_quaternion, heading_from_odometry
 from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
-from system_test.core.checks import FAIL, PASS, SKIPPED, WARN, Thresholds, run_checks
+from system_test.core.checks import FAIL, NOTE, PASS, SKIPPED, WARN, Thresholds, run_checks
 from system_test.core.history import PreflightHistory
 from system_test.core.live_inputs import gps_time_facts, heading_facts, pico_facts
 
@@ -50,11 +51,18 @@ SENSOR_QOS = QoSProfile(depth=5, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 #: Latched, so a client connecting later still gets the boot-time verdict.
 LATCHED_QOS = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
 
+#: The Nav2 survey profile's nodes worth naming (njord.launch.py).
+NAV2_SURVEY_NODES = (
+    "controller_server", "planner_server", "bt_navigator",
+    "velocity_smoother", "collision_monitor", "geofence_mask_node",
+)
+
 _STATUS_VALUES = {
     PASS: SystemTestItem.PASS,
     WARN: SystemTestItem.WARN,
     FAIL: SystemTestItem.FAIL,
     SKIPPED: SystemTestItem.SKIPPED,
+    NOTE: SystemTestItem.NOTE,
 }
 
 
@@ -105,6 +113,10 @@ class SystemTestNode(Node):
         # checks are listed as "not checked" and do not ground the boat.
         self.declare_parameter("lidar_fitted", False)
         self.declare_parameter("sonar_monitored", False)
+        # The Nav2 survey profile is running, so its geofence must be active.
+        self.declare_parameter("geofence_expected", False)
+        # MAVROS was started (enable_mavros, not in simulation): expect its node.
+        self.declare_parameter("mavros_expected", False)
 
         self.history = PreflightHistory(self.get_parameter("history_path").value)
         self.thresholds = Thresholds()
@@ -141,6 +153,18 @@ class SystemTestNode(Node):
         self.create_subscription(Odometry, "/odometry/filtered", self._on_odom, SENSOR_QOS)
         self.create_subscription(UInt32, "/mavros/global_position/raw/satellites",
                                  self._on_sats, SENSOR_QOS)
+        # The real HDOP and fix type, from MAVROS's GPSRAW, when mavros_msgs
+        # is installed. The same source the GUI's Boat panel reads, so the
+        # two never quote different HDOPs.
+        self._gpsraw = None
+        self._gpsraw_at = 0.0
+        try:
+            from mavros_msgs.msg import GPSRAW
+        except ImportError:
+            GPSRAW = None
+        if GPSRAW is not None:
+            self.create_subscription(GPSRAW, "/mavros/gpsstatus/gps1/raw",
+                                     self._on_gpsraw, SENSOR_QOS)
         self.create_subscription(TimeReference, "/mavros/time_reference",
                                  self._on_time_ref, SENSOR_QOS)
         self.create_subscription(SonarStatus, "/sonar/status", self._set("_sonar"), 10)
@@ -195,6 +219,10 @@ class SystemTestNode(Node):
         self._odom = msg
         self._odom_at = time.monotonic()
 
+    def _on_gpsraw(self, msg) -> None:
+        self._gpsraw = msg
+        self._gpsraw_at = time.monotonic()
+
     def _on_sats(self, msg: UInt32) -> None:
         self._sats = int(msg.data)
 
@@ -208,6 +236,8 @@ class SystemTestNode(Node):
             absent.add("lidar")
         if not self.get_parameter("sonar_monitored").value:
             absent.add("sonar_bridge")
+        if not self.get_parameter("geofence_expected").value:
+            absent.add("survey_nav")
         return absent
 
     def _real_vessel_facts(self) -> dict:
@@ -230,6 +260,15 @@ class SystemTestNode(Node):
             )))
         if self._sats is not None:
             facts["num_sats"] = self._sats
+        if self._gpsraw is not None and now - self._gpsraw_at < 5.0:
+            raw = self._gpsraw
+            # MAVLink GPS_FIX_TYPE (3 = 3D, 5/6 = RTK) is the scale the GNSS
+            # check reads. 255 / 0 / 65535 are GPSRAW's "unknown".
+            facts["gnss_fix_type"] = int(raw.fix_type)
+            if int(raw.satellites_visible) != 255:
+                facts["num_sats"] = int(raw.satellites_visible)
+            if int(raw.eph) not in (0, 65535):
+                facts["hdop"] = int(raw.eph) / 100.0
         if self._time_ref is not None:
             ref = self._time_ref
             facts.update(gps_time_facts(
@@ -293,6 +332,11 @@ class SystemTestNode(Node):
             disk_free = None
 
         expected = list(self.get_parameter("expected_nodes").value)
+        # What else this launch started, so it is missed if it dies.
+        if self.get_parameter("mavros_expected").value:
+            expected.append("mavros")
+        if self.get_parameter("geofence_expected").value:
+            expected.extend(NAV2_SURVEY_NODES)
         # The ROS graph first: a node that publishes no /diagnostics of its
         # own (gui_backend, for one) is running all the same, and reporting
         # it missing turned a working stack NO-GO.
@@ -342,10 +386,23 @@ class SystemTestNode(Node):
             "battery_endurance_s": _endurance_s(battery),
             "link_rtt_ms": float(link.rtt_ms) if link else None,
             "link_active": link.active_link if link else None,
+            "link_clients": int(link.connected_clients) if link else None,
             "expected_nodes": expected,
             "present_nodes": present,
             "mounting": self._mounting(),
+            **self._geofence(),
             **self._real_vessel_facts(),
+        }
+
+    def _geofence(self) -> dict:
+        """geofence_mask_node's own report, from /diagnostics."""
+        status = self._node_diagnostics.get("geofence")
+        if status is None:
+            return {}
+        level = level_int(status.level)   # a one-byte `bytes` in rclpy, not an int
+        return {
+            "geofence_level": {0: "OK", 1: "WARN"}.get(level, "ERROR"),
+            "geofence_message": status.message,
         }
 
     def _mounting(self) -> dict | None:

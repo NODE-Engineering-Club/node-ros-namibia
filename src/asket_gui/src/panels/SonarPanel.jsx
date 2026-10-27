@@ -5,6 +5,7 @@ import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { PanelAge } from '../components/Value.jsx';
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
 import { bytes, int, num, pct } from '../lib/format.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * Sonar health, and the controls for it.
@@ -39,47 +40,56 @@ export function SonarPanel({ state, connection }) {
  * started (enable_sonar:=true), and says plainly when nothing is monitoring it.
  */
 function SonarHealth({ state }) {
+  const details = useDetails();
   const sonar = streamPayload(state, 'sonar');
   const ageMs = streamAgeMs(state, 'sonar');
   const rateHz = state.subscriptions.sonar?.rate_hz;
+  const url = state.hello?.source?.sonarview_url || '';
 
-  if (!sonar) {
-    return (
-      <Panel
-        title="Sonar"
-        id="sonar"
-        aside={<Chip title="Nothing in this stack is reading the sonar.">not monitored</Chip>}
-        summary={
-          <p className="hint" style={{ margin: 0 }}>
-            The sonar is operated and recorded in SonarView, on its own screen.
-            Start the stack with enable_sonar:=true for a health line here.
-          </p>
-        }
-      />
-    );
-  }
+  // From omniscan_bridge when it runs in health mode (enable_sonar:=true):
+  // alive while it reports a connected sonar and the report is fresh.
+  const stale = ageMs !== null && ageMs > 10_000;
+  const health = !sonar
+    ? null
+    : sonar.connected && !stale
+      ? { level: 'ok', text: 'sonar alive' }
+      : { level: 'alarm', text: 'sonar silent' };
 
-  const connected = sonar.connected;
   return (
     <Panel
       title="Sonar"
       id="sonar"
       aside={
-        <>
-          <Chip level={connected ? 'ok' : 'alarm'}>
-            {connected ? 'connected' : 'no data'}
-          </Chip>
-          <PanelAge ageMs={ageMs} rateHz={rateHz} />
-        </>
+        health ? (
+          <>
+            <Chip level={health.level}>{health.text}</Chip>
+            {details && <PanelAge ageMs={ageMs} rateHz={rateHz} />}
+          </>
+        ) : null
       }
       summary={
         <>
-          <Rows>
-            <Row label="Ping rate">{num(sonar.actual_ping_rate_hz, 1, ' Hz')}</Row>
-          </Rows>
-          <p className="hint" style={{ marginBottom: 0, marginTop: 6 }}>
-            Settings and recording are in SonarView.
+          <p style={{ margin: '0 0 8px' }}>
+            Sonar run by <strong>SonarView</strong>: settings and recording are there.
           </p>
+          {url ? (
+            <a className="button-link" href={url} target="_blank" rel="noopener noreferrer">
+              Open SonarView
+            </a>
+          ) : (
+            <p className="hint" style={{ margin: 0 }}>
+              No SonarView address — set it on the Setup page.
+            </p>
+          )}
+          {details && (
+            <p className="hint" style={{ marginBottom: 0, marginTop: 6 }}>
+              {url ? <>Address: <span className="mono">{url}</span> (Setup page). </> : null}
+              {sonar
+                ? `Ping rate ${num(sonar.actual_ping_rate_hz, 1, ' Hz')}, from omniscan_bridge.`
+                : 'Health not monitored: start the stack with enable_sonar:=true '
+                  + 'for "sonar alive / silent" here.'}
+            </p>
+          )}
         </>
       }
     />

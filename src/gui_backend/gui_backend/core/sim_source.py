@@ -621,7 +621,10 @@ class SimSource:
 
     def run_preflight(self, only=None):
         report = run_checks(
-            self._preflight_state(), only=only, run_utc_ms=self.world.utc_ms
+            self._preflight_state(), only=only, run_utc_ms=self.world.utc_ms,
+            # The simulator runs no Nav2, so there is no survey geofence to
+            # check; the item says so instead of grounding the simulated boat.
+            absent={"survey_nav"},
         )
         self.last_report = report
         self.preflight.append(report)

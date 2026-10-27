@@ -16,7 +16,7 @@ import { staleness, thresholdsForRate } from '../lib/staleness.js';
  * `mission`, link from `link` — so the strip and the panel cannot disagree.
  * The panels keep the detail; this keeps the headline.
  */
-export function StatusStrip({ state }) {
+export function StatusStrip({ state, details = false }) {
   const power = streamPayload(state, 'power');
   const mission = streamPayload(state, 'mission');
   const link = streamPayload(state, 'link');
@@ -42,7 +42,9 @@ export function StatusStrip({ state }) {
         value={mission?.state ? labelFor(mission.state) : 'not sent'}
         detail={recording && mission?.elapsed_s ? duration(mission.elapsed_s) : ''}
       />
-      <Item
+      {/* The link is part of the readiness line in the simple view; the
+          strip item, with its profile, is a Details value. */}
+      {details && <Item
         label="Link"
         level={
           !state.connected || link?.active_link === 'none'
@@ -54,7 +56,7 @@ export function StatusStrip({ state }) {
         age={ageLevel(state, 'link')}
         value={state.connected ? LINK_LABELS[link?.active_link] || 'connected' : 'disconnected'}
         detail={PROFILE_LABELS[profile.profile] || ''}
-      />
+      />}
     </div>
   );
 }

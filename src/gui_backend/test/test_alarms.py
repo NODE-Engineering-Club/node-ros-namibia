@@ -109,3 +109,24 @@ def test_a_recorder_that_stopped_still_raises_an_alarm():
 
 def test_no_recording_alarm_when_nothing_went_wrong():
     assert "recording_stopped" not in keys({"recording": False, "recording_error": None})
+
+
+def test_the_geofence_warns_inside_and_alarms_outside():
+    near = next(a for a in evaluate({"geofence_distance_m": 10.0}, T)
+                if a.key == "geofence_approach")
+    assert near.severity == "warn"
+    # Nothing aboard stops the boat at the line; the text must not say so.
+    assert "will stop" not in near.remedy
+    assert "Manual" in near.remedy
+    out = next(a for a in evaluate({"geofence_distance_m": -12.0}, T)
+               if a.key == "geofence_outside")
+    assert out.severity == "alarm"
+    assert "12 m outside" in out.message
+    assert "geofence_approach" not in keys({"geofence_distance_m": -12.0})
+    assert not keys({"geofence_distance_m": 80.0}) & {"geofence_approach", "geofence_outside"}
+
+
+def test_link_lost_does_not_send_anyone_to_a_cellular_link_the_boat_lacks():
+    alarm = next(a for a in evaluate({"link_age_s": 30.0}, T) if a.key == "link_lost")
+    assert "cellular" not in alarm.remedy
+    assert "shore station" in alarm.remedy

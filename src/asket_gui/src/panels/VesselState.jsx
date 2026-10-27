@@ -3,7 +3,8 @@ import { PanelAge, Value } from '../components/Value.jsx';
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
 import { coordinate, int, num } from '../lib/format.js';
 import { hullSummary } from '../lib/hull.js';
-import { MODE_LABELS } from '../lib/labels.js';
+import { ch8Zone, MODE_LABELS } from '../lib/labels.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * What the vessel is actually doing.
@@ -113,54 +114,10 @@ export function VesselState({ state }) {
             {num(vessel?.roll_deg, 1, '°')} / {num(vessel?.pitch_deg, 1, '°')}
           </Value>
         </Row>
-        <Row label="GNSS">
-          <Value ageMs={vesselAge} rateHz={vesselRate} showAge={false}>
-            {int(vessel?.num_sats)} sats, HDOP {num(vessel?.hdop, 1)}
-          </Value>
-        </Row>
+        <GnssRows vessel={vessel} ageMs={vesselAge} rateHz={vesselRate} />
       </Rows>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-        {/* RC link and channel 8 are shown because they are the sovereign
-            path. Software can observe them; it can never move them.
-
-            Both are absent by design on the reduced and minimal profiles, and
-            "not sent" must never render as "lost" — reporting a healthy RC
-            link as lost because the shore link is narrow is precisely the kind
-            of lie this GUI exists to avoid. */}
-        <Chip level={rcLevel(pico?.rc_link_ok)} title={rcTitle(pico?.rc_link_ok)}>
-          RC {pico?.rc_link_ok === undefined ? 'not sent' : pico.rc_link_ok ? 'linked' : 'lost'}
-        </Chip>
-        {/* The verdict, not the arithmetic. The backend compares against the
-            firmware's own threshold on the firmware's own scale; this renders
-            what it concluded. The previous version compared here, against a
-            field whose name claimed percent while it carried a raw SBUS count,
-            so the alarm never fired — least of all at the bottom of the
-            travel, which is the position it existed to catch. */}
-        <Chip
-          level={ch8Level(pico?.ch8_asserting_estop)}
-          title="Channel 8 selects the mode in hardware: bottom third is ESTOP. Nothing in this GUI can move it."
-        >
-          Ch8 {ch8Text(pico)}
-        </Chip>
-        {pico?.version_mismatch && (
-          <Chip level="alarm" title="This GUI parses a different firmware than the Pico is running. Every field on this panel is suspect.">
-            Firmware v{pico.firmware_version} — not readable
-          </Chip>
-        )}
-        {pico?.link_live === false && (
-          <Chip level="warn" title="The Pico is not hearing our heartbeat. It will not grant autonomy while this is so.">
-            Pico hears no heartbeat
-          </Chip>
-        )}
-        {pico?.mode_requested_auto && mode !== 'AUTONOMOUS' && (
-          <Chip level="warn" title="AUTO was requested and is not in effect. Channel 8 must be in its top position, and the Pico must be hearing our heartbeat.">
-            AUTO requested, not granted
-          </Chip>
-        )}
-        {pico?.estop_latched && <Chip level="alarm">Propulsion cut</Chip>}
-        {pico?.hardware_killswitch_engaged && <Chip level="alarm">Killswitch engaged</Chip>}
-      </div>
+      <VesselChips pico={pico} mode={mode} />
 
       {/* A fault is never hidden behind a disclosure triangle. Anything
           off-nominal is promoted out of the collapse; the rest stays folded
@@ -171,45 +128,131 @@ export function VesselState({ state }) {
         </p>
       )}
 
-      {hull.relays.length > 0 && (
-        <details className="advanced">
-          <summary>Advanced — {hull.summary}</summary>
-          <Rows>
-            {hull.relays.map((r) => (
-              <Row key={`r${r.index}`} label={r.name}>
-                <span className={r.closed ? '' : 'dim-value'} title={r.description}>
-                  {r.text}
-                </span>
-              </Row>
-            ))}
-            {hull.escs.map((e) => (
-              <Row key={`e${e.index}`} label={e.name}>
-                <span
-                  className={e.ok ? '' : e.unknown ? 'warnline' : 'errline'}
-                  title={
-                    e.unknown
-                      ? 'This status code is hull-specific and not documented here (open question Q7). It is reported, not interpreted.'
-                      : ''
-                  }
-                >
-                  {e.text}
-                </span>
-                <span className="raw-code"> ({e.code})</span>
-              </Row>
-            ))}
-          </Rows>
-          {/* The relay is named because its function is confirmed in firmware
-              source (GPIO21, ESC power). The ESC codes are not, and the two
-              are described differently on purpose — a panel that hedges about
-              everything teaches an operator to discount all of it. */}
-          <p className="hint" style={{ marginBottom: 0 }}>
-            The relay cuts ESC power — open while disarmed is correct. ESC status
-            codes beyond 0 are hull-specific and not interpreted here; see
-            docs/open_questions.md Q7.
-          </p>
-        </details>
-      )}
+      <HullDetail hull={hull} />
     </Panel>
+  );
+}
+
+/**
+ * RC link, Ch8, and whatever is off-nominal about the Pico, as chips.
+ * Shared by this panel and the Boat panel.
+ */
+export function VesselChips({ pico, mode }) {
+  const details = useDetails();
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+      {/* RC link and channel 8 are shown because they are the sovereign
+          path. Software can observe them; it can never move them.
+
+          Both are absent by design on the reduced and minimal profiles, and
+          "not sent" must never render as "lost" — reporting a healthy RC
+          link as lost because the shore link is narrow is precisely the kind
+          of lie this GUI exists to avoid. */}
+      <Chip level={rcLevel(pico?.rc_link_ok)} title={rcTitle(pico?.rc_link_ok)}>
+        RC {pico?.rc_link_ok === undefined ? 'not sent' : pico.rc_link_ok ? 'linked' : 'lost'}
+      </Chip>
+      {/* The verdict, not the arithmetic. The backend compares against the
+          firmware's own threshold on the firmware's own scale; this renders
+          what it concluded. The previous version compared here, against a
+          field whose name claimed percent while it carried a raw SBUS count,
+          so the alarm never fired — least of all at the bottom of the
+          travel, which is the position it existed to catch. */}
+      <Chip
+        level={ch8Level(pico?.ch8_asserting_estop)}
+        title="Channel 8 selects the mode in hardware: bottom third is ESTOP. Nothing in this GUI can move it."
+      >
+        Ch8 {ch8Text(pico, details)}
+      </Chip>
+      {pico?.version_mismatch && (
+        <Chip level="alarm" title="This GUI parses a different firmware than the Pico is running. Every field on this panel is suspect.">
+          Firmware v{pico.firmware_version} — not readable
+        </Chip>
+      )}
+      {pico?.link_live === false && (
+        <Chip level="warn" title="The Pico is not hearing our heartbeat. It will not grant autonomy while this is so.">
+          Pico hears no heartbeat
+        </Chip>
+      )}
+      {pico?.mode_requested_auto && mode !== 'AUTONOMOUS' && (
+        <Chip level="warn" title="AUTO was requested and is not in effect. Channel 8 must be in its top position, and the Pico must be hearing our heartbeat.">
+          AUTO requested, not granted
+        </Chip>
+      )}
+      {pico?.estop_latched && <Chip level="alarm">Propulsion cut</Chip>}
+      {pico?.hardware_killswitch_engaged && <Chip level="alarm">Killswitch engaged</Chip>}
+    </div>
+  );
+}
+
+/** Relay and ESC rows: debugging detail on a normal day. */
+export function HullDetail({ hull }) {
+  if (hull.relays.length === 0) return null;
+  return (
+    <details className="advanced">
+      <summary>Advanced — {hull.summary}</summary>
+      <Rows>
+        {hull.relays.map((r) => (
+          <Row key={`r${r.index}`} label={r.name}>
+            <span className={r.closed ? '' : 'dim-value'} title={r.description}>
+              {r.text}
+            </span>
+          </Row>
+        ))}
+        {hull.escs.map((e) => (
+          <Row key={`e${e.index}`} label={e.name}>
+            <span
+              className={e.ok ? '' : e.unknown ? 'warnline' : 'errline'}
+              title={
+                e.unknown
+                  ? 'This status code is hull-specific and not documented here (open question Q7). It is reported, not interpreted.'
+                  : ''
+              }
+            >
+              {e.text}
+            </span>
+            <span className="raw-code"> ({e.code})</span>
+          </Row>
+        ))}
+      </Rows>
+      {/* The relay is named because its function is confirmed in firmware
+          source (GPIO21, ESC power). The ESC codes are not, and the two
+          are described differently on purpose — a panel that hedges about
+          everything teaches an operator to discount all of it. */}
+      <p className="hint" style={{ marginBottom: 0 }}>
+        The relay cuts ESC power — open while disarmed is correct. ESC status
+        codes beyond 0 are hull-specific and not interpreted here; see
+        docs/open_questions.md Q7.
+      </p>
+    </details>
+  );
+}
+
+/**
+ * Satellites and HDOP, which only MAVROS's GPSRAW carries (the Pixhawk link).
+ * Without it they read "not provided" — never a number from somewhere else.
+ * The fix's own standard deviation, from the NavSatFix covariance, is shown
+ * under its own name: it used to be printed as "HDOP".
+ */
+export function GnssRows({ vessel, ageMs, rateHz }) {
+  const sats = vessel?.num_sats;
+  const hdop = vessel?.hdop;
+  return (
+    <>
+      <Row label="Satellites / HDOP">
+        <Value ageMs={ageMs} rateHz={rateHz} showAge={false}>
+          {sats === null || sats === undefined
+            ? <span className="dim-value" title="Only MAVROS's GPSRAW carries these, once the Pixhawk link is up.">not provided</span>
+            : `${int(sats)} sats, HDOP ${num(hdop, 1)}`}
+        </Value>
+      </Row>
+      {vessel?.position_sigma_m !== null && vessel?.position_sigma_m !== undefined && (
+        <Row label="Position σ">
+          <Value ageMs={ageMs} rateHz={rateHz} showAge={false}>
+            {num(vessel.position_sigma_m, 2, ' m')}
+          </Value>
+        </Row>
+      )}
+    </>
   );
 }
 
@@ -221,13 +264,14 @@ function ch8Level(asserting) {
   return asserting ? 'alarm' : 'ok';
 }
 
-function ch8Text(pico) {
+function ch8Text(pico, details) {
   const raw = pico?.rc_channel8_raw;
   if (raw === null || raw === undefined) return 'not sent';
-  // The count is shown as well as the verdict, because 1811 vs 1400 is the
-  // difference between "autonomy permitted" and "manual forced" and an
-  // operator debugging a switch needs the number.
-  return pico.ch8_asserting_estop ? `${raw} — ESTOP` : String(raw);
+  // The position in words; the count as well in Details, because 1811 vs
+  // 1400 is the difference between "autonomy permitted" and "manual forced"
+  // and an operator debugging a switch needs the number.
+  const zone = pico.ch8_asserting_estop ? ch8Zone(0) : ch8Zone(raw);
+  return details ? `${zone} (${raw})` : zone;
 }
 
 function rcLevel(ok) {

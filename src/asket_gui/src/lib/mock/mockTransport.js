@@ -241,6 +241,17 @@ export class MockTransport {
         result('failed', `unknown mode '${args.mode}'`);
         return;
       }
+      // The backend's NO-GO gate (hub._nogo_gate), mirrored.
+      if (modeName === 'AUTONOMOUS' && this.lastReport && this.lastReport.go === false
+          && !args.force_nogo) {
+        this.#emit({
+          type: 'command_result', server_utc_ms: this.world.utcMs, id, name, args,
+          status: 'failed', nogo: true,
+          detail: `Autonomous is blocked: the pre-flight is ${this.lastReport.summary}. `
+            + 'Fix it and run the pre-flight again, or use "I know it is NO-GO, force".',
+        });
+        return;
+      }
       this.world.requestMode(mode);
       result('pending', 'sent to the Pico');
       // Confirmation comes from watching the vessel's own state, never from

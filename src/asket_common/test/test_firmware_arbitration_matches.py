@@ -46,11 +46,12 @@ from asket_common.mode_arbitration import (
     MODE_MANUAL,
     MODE_MID_MAX,
     MODE_RANK,
+    SBUS_FAILSAFE_TIMEOUT_S,
     arbitrate,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-FIRMWARE = ROOT / "firmware" / "pico-node_v4" / "pico-node_v4.ino"
+FIRMWARE = ROOT / "firmware" / "pico-node_v5" / "pico-node_v5.ino"
 TEST_DIR = ROOT / "firmware" / "test"
 
 pytestmark = pytest.mark.skipif(
@@ -82,28 +83,29 @@ def firmware_rows():
 
     rows = {}
     for line in out.strip().splitlines():
-        ch8, ch7, wants, link, fs, latch_in, mode, armed, latch_out = (
-            int(x) for x in line.split()
-        )
-        rows[(ch8, ch7, bool(wants), bool(link), bool(fs), bool(latch_in))] = (
+        (ch8, ch7, wants, link, fs, latch_in, silent, rc_in,
+         mode, armed, latch_out, rc_out) = (int(x) for x in line.split())
+        rows[(ch8, ch7, bool(wants), bool(link), bool(fs), bool(latch_in),
+              bool(silent), bool(rc_in))] = (
             FIRMWARE_MODE_NUMBERS[mode],
             bool(armed),
             bool(latch_out),
+            bool(rc_out),
         )
     return rows
 
 
 def test_the_table_covers_the_whole_input_space(firmware_rows):
     # 7 channel-8 values (zone interiors and both boundaries) x 4 channel-7
-    # values x 2^4 booleans.
-    assert len(firmware_rows) == 7 * 4 * 2 * 2 * 2 * 2 == 448
+    # values x 2^6 booleans (v5 adds SBUS silence and the RC-loss latch).
+    assert len(firmware_rows) == 7 * 4 * 2 ** 6 == 1792
 
 
 def test_firmware_agrees_with_python_on_every_cell(firmware_rows):
     """The whole point of this file."""
     mismatches = []
     for key, got in sorted(firmware_rows.items()):
-        ch8, ch7, wants, link, fs, latch_in = key
+        ch8, ch7, wants, link, fs, latch_in, silent, rc_in = key
         expected = arbitrate(
             ch8,
             ch7,
@@ -111,12 +113,16 @@ def test_firmware_agrees_with_python_on_every_cell(firmware_rows):
             link_live=link,
             sbus_failsafe=fs,
             estop_latched=latch_in,
+            sbus_silent=silent,
+            rc_lost_latched=rc_in,
         )
-        want = (expected.mode, expected.armed, expected.estop_latched)
+        want = (expected.mode, expected.armed, expected.estop_latched,
+                expected.rc_lost_latched)
         if got != want:
             mismatches.append(
                 f"  ch8={ch8} ch7={ch7} wantauto={wants} link={link} "
-                f"failsafe={fs} latch={latch_in}: firmware={got} python={want}"
+                f"failsafe={fs} latch={latch_in} silent={silent} rclatch={rc_in}: "
+                f"firmware={got} python={want}"
             )
     assert not mismatches, (
         f"firmware and Python arbitration disagree on {len(mismatches)} of "
@@ -136,10 +142,13 @@ def test_the_transmitter_is_sovereign(firmware_rows):
     The rule the whole safety argument rests on. Autonomy is reachable only
     from the top zone, and never while the receiver declares failsafe.
     """
-    for (ch8, _ch7, _w, _l, fs, _latch), (mode, _armed, _out) in firmware_rows.items():
+    for (ch8, _ch7, _w, _l, fs, _latch, silent, _rc), (mode, _armed, _out, _rco) in (
+        firmware_rows.items()
+    ):
         if mode == MODE_AUTONOMOUS:
             assert ch8 >= MODE_MID_MAX, f"autonomy granted at ch8={ch8}"
             assert not fs, "autonomy granted while the receiver declared failsafe"
+            assert not silent, "autonomy granted while SBUS was silent"
         if ch8 < MODE_LOW_MAX:
             assert mode == MODE_ESTOP, f"ch8={ch8} is the E-stop zone"
 
@@ -151,24 +160,55 @@ def test_the_top_zone_permits_autonomy_rather_than_granting_it(firmware_rows):
     still am". This is the distinction v4 draws that v3 did not, and it is the
     one most likely to be lost in a future refactor.
     """
-    for (ch8, _ch7, wants, link, fs, _latch), (mode, _a, _o) in firmware_rows.items():
-        if ch8 >= MODE_MID_MAX and not fs:
+    for (ch8, _ch7, wants, link, fs, _latch, silent, _rc), (mode, _a, _o, _r) in (
+        firmware_rows.items()
+    ):
+        if ch8 >= MODE_MID_MAX and not fs and not silent:
             expected = MODE_AUTONOMOUS if (wants and link) else MODE_MANUAL
             assert mode == expected, (
                 f"ch8={ch8} wantauto={wants} link={link} gave {mode}"
             )
 
 
-def test_a_receiver_failsafe_forces_estop_from_every_position(firmware_rows):
-    for (_ch8, _ch7, _w, _l, fs, _latch), (mode, armed, _o) in firmware_rows.items():
-        if fs:
+def test_a_lost_rc_link_forces_estop_from_every_position(firmware_rows):
+    """The receiver's failsafe bit, and since v5 SBUS silence, in every mode.
+
+    v4 ignored silence in AUTONOMOUS: the last frame's channels stayed in
+    sbus_channels[] and kept the boat armed and autonomous. The silent=1 rows
+    here are that case.
+    """
+    for (_ch8, _ch7, _w, _l, fs, _latch, silent, _rc), (mode, armed, _o, rc_out) in (
+        firmware_rows.items()
+    ):
+        if fs or silent:
             assert mode == MODE_ESTOP
             assert armed is False
+            assert rc_out is True, "an RC loss that did not latch"
+
+
+def test_a_returning_link_does_not_re_arm_on_its_own(firmware_rows):
+    """v5: with the RC-loss latch held, nothing arms until channel 7 is low.
+
+    v4 cleared its latch whenever the mode was ESTOP -- which a failsafe forces
+    -- so the boat re-armed by itself when the link returned with Ch7 high.
+    """
+    for (ch8, ch7, _w, _l, fs, _latch, silent, rc_in), (mode, armed, _o, rc_out) in (
+        firmware_rows.items()
+    ):
+        live = not fs and not silent
+        arm_high = ch7 > ARM_THRESHOLD
+        if rc_in and arm_high:
+            assert armed is False, f"re-armed with the RC latch held (ch8={ch8} ch7={ch7})"
+            assert rc_out is True, "the RC latch cleared without channel 7 going low"
+        if rc_in and not arm_high and live:
+            assert rc_out is False, "channel 7 low on a live link did not clear the RC latch"
+        if rc_in and not live:
+            assert rc_out is True, "the RC latch cleared while the link was still lost"
 
 
 def test_estop_is_never_armed(firmware_rows):
     """Whatever else is true, the E-stop mode does not turn propellers."""
-    for _key, (mode, armed, _out) in firmware_rows.items():
+    for _key, (mode, armed, _out, _rc) in firmware_rows.items():
         if mode == MODE_ESTOP:
             assert armed is False
 
@@ -179,7 +219,7 @@ def test_a_held_latch_keeps_the_vessel_disarmed(firmware_rows):
     This is the mechanism behind "why will it not arm", and the one an operator
     meets most often.
     """
-    for (ch8, ch7, _w, _l, _fs, latch_in), (mode, armed, latch_out) in (
+    for (ch8, ch7, _w, _l, _fs, latch_in, _s, _rc), (mode, armed, latch_out, _rco) in (
         firmware_rows.items()
     ):
         arm_high = ch7 > ARM_THRESHOLD
@@ -191,13 +231,17 @@ def test_a_held_latch_keeps_the_vessel_disarmed(firmware_rows):
 
 
 def test_arming_needs_channel_seven(firmware_rows):
-    for (_ch8, ch7, _w, _l, _fs, _latch), (_mode, armed, _o) in firmware_rows.items():
+    for (_ch8, ch7, _w, _l, _fs, _latch, _s, _rc), (_mode, armed, _o, _r) in (
+        firmware_rows.items()
+    ):
         if armed:
             assert ch7 > ARM_THRESHOLD
 
 
 def test_no_decision_is_more_permissive_than_its_zone(firmware_rows):
-    for (ch8, _ch7, _w, _l, _fs, _latch), (mode, _a, _o) in firmware_rows.items():
+    for (ch8, _ch7, _w, _l, _fs, _latch, _s, _rc), (mode, _a, _o, _r) in (
+        firmware_rows.items()
+    ):
         ceiling = MODE_ESTOP if ch8 < MODE_LOW_MAX else MODE_AUTONOMOUS
         assert MODE_RANK[mode] <= MODE_RANK[ceiling]
 
@@ -283,10 +327,15 @@ def test_the_estop_feedback_flag_matches_the_firmware():
     ) is ESTOP_FEEDBACK_ENABLED
 
 
-def test_the_failsafe_timeouts_are_both_500ms():
-    """Documented as 600 ms in several places for a long time. They are 500."""
-    for name in ("SBUS_FAILSAFE_TIMEOUT_MS", "SERIAL_FAILSAFE_TIMEOUT_MS"):
-        assert _constant(rf"const unsigned long {name} = (\d+);", name) == 500, name
+def test_the_failsafe_timeouts():
+    """SBUS 300 ms since v5 (RC loss must open the relay in under 500 ms, loop
+    included); the serial motor-command failsafe stays at 500 ms."""
+    sbus = _constant(r"const unsigned long SBUS_FAILSAFE_TIMEOUT_MS = (\d+);",
+                     "SBUS_FAILSAFE_TIMEOUT_MS")
+    assert sbus == 300
+    assert sbus / 1000.0 == SBUS_FAILSAFE_TIMEOUT_S
+    assert _constant(r"const unsigned long SERIAL_FAILSAFE_TIMEOUT_MS = (\d+);",
+                     "SERIAL_FAILSAFE_TIMEOUT_MS") == 500
 
 
 def test_the_firmware_still_has_no_serial_estop_verb():
@@ -348,7 +397,7 @@ def test_the_firmware_prints_every_key_the_parser_expects():
     from gui_backend.core.pico_state import _FIELDS
 
     source = _sketch()
-    start = source.index('Serial.print(F("STATE ver="))')
+    start = source.index('tx_add("STATE ver=");')
     end = source.index("last_status = now;", start)
     printed = source[start:end]
 

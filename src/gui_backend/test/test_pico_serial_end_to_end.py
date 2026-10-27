@@ -273,7 +273,7 @@ def test_the_firmware_source_still_says_what_these_tests_assume():
     """
     ino = (
         Path(__file__).resolve().parents[3]
-        / "firmware" / "pico-node_v4" / "pico-node_v4.ino"
+        / "firmware" / "pico-node_v5" / "pico-node_v5.ino"
     ).read_text()
 
     def const(pattern):

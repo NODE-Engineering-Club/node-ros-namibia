@@ -212,15 +212,14 @@ def _reduced_profile() -> Profile:
             "sonar": StreamPolicy(0.5, DETAIL_REDUCED),
             "diagnostics": StreamPolicy(0.1, DETAIL_REDUCED),
             "plan": StreamPolicy(0.0, DETAIL_REDUCED),
-            # `camera` is deliberately absent, so resolve() refuses it with
-            # this profile's own sentence rather than granting a trickle.
-            #
-            # A single 320x240 frame is about 10 kB and this budget is 12 kB/s,
-            # so even 0.2 fps would be a sixth of everything, permanently, for
-            # a picture five seconds old at every glance — the freeze problem
-            # on a timer. A one-shot "fetch one frame now" is the right shape
-            # here and is not built: it is a middle rung, and whether this
-            # profile is ever reached depends on Q6a, which is open.
+            # A thumbnail every five seconds: 160x120 (the minimal camera
+            # detail), about 3 kB a frame, so roughly 0.7 kB/s against this
+            # profile's 12 kB/s. It used to be refused outright because a
+            # 320x240 frame is most of a second's budget; at a quarter of the
+            # pixels and a fifth of a hertz it is a glance at the water, and
+            # the panel shows the rate actually received so nobody mistakes
+            # it for video.
+            "camera": StreamPolicy(0.2, DETAIL_MINIMAL),
         },
         budget_bytes_per_s=12_000.0,
     )

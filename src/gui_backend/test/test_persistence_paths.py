@@ -42,3 +42,10 @@ def test_the_jetson_unit_mounts_a_host_directory_on_data():
     assert "Environment=DATA=/srv/asket/data" in unit
     # live /dev, so udev links survive a re-plug (deploy/udev/README.md)
     assert "-v /dev:/dev" in unit
+
+
+def test_the_jetson_unit_never_runs_alongside_init_sh_njord_service():
+    """Two stacks would fight over /dev/pico and publish every topic twice."""
+    unit = _text(ROOT / "deploy" / "jetson" / "asket.service")
+    assert "Conflicts=njord.service" in unit
+    assert "podman container exists njord" in unit

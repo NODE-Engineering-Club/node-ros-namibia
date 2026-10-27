@@ -16,9 +16,9 @@ pyserial and cannot tell the difference, so its line splitting, its ``STATE``
 filter, its reject counter and the parser downstream are all genuinely
 exercised — in ``sim:=true``, on a laptop, with no boat.
 
-It speaks exactly what ``firmware/pico-node_v4/pico-node_v4.ino`` speaks:
+It speaks exactly what ``firmware/pico-node_v5/pico-node_v5.ino`` speaks:
 
-* ``[VER] pico-node 4`` once on open, then a ``STATE key=value`` line at 4 Hz;
+* ``[VER] pico-node 5`` once on open, then a ``STATE key=value`` line at 4 Hz;
 * accepts ``L,R`` motor commands, ``PING``, ``MODE AUTO`` and ``MODE MANUAL``;
 * answers the mode verbs with ``[ACK] ...``, and anything else with
   ``Invalid cmd: ...``;
@@ -68,7 +68,7 @@ SERIAL_FAILSAFE_TIMEOUT_S = 0.5
 
 @dataclass
 class FakePicoSerial:
-    """A pty that behaves like a Pico running pico-node_v4."""
+    """A pty that behaves like a Pico running pico-node_v5."""
 
     pico: PicoSim
     #: Wall-clock seconds per simulated second. >1 runs faster than real time.

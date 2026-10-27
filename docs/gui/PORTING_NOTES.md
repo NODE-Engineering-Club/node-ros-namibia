@@ -154,8 +154,8 @@ Not part of the GUI, noticed while porting, **not changed**:
    (same mode/arming/failsafe logic; adds the version, a non-blocking serial
    reader, and removes `BENCH_NO_RC_OVERRIDE`). Check with
    `ros2 topic echo /pico/status --field data`.
-3. **Motor path default** — `use_pico_bridge` stays `false` here. The GUI's mode
-   panel needs `true`.
+3. **Motor path default** — decided: `use_pico_bridge` is `true` since
+   hw-alignment Phase B (a).
 4. **"Cut propulsion"** — keep it as "Drop to MANUAL", or add a real serial
    ESTOP path in firmware (bench decision, boat out of the water).
 5. **`prod-jetson` default command** — SAM2 pipeline only, or the full stack.

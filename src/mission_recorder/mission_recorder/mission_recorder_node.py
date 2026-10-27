@@ -16,6 +16,7 @@ import math
 import time
 
 import rclpy
+from asket_common.diagnostic_level import level_int
 from asket_common.heading import (
     SOURCE_NONE,
     compass_deg_from_enu_quaternion,
@@ -206,10 +207,14 @@ class MissionRecorderNode(Node):
         if not self.recorder.recording:
             return
         for status in msg.status:
-            if status.level:
+            # level is a one-byte `bytes` in rclpy: `if status.level` was
+            # always true and int(status.level) raised, killing the recorder
+            # on the first /diagnostics message of every recording.
+            level = level_int(status.level)
+            if level:
                 self.recorder.write_event(
                     self._utc_ms(), "diagnostic",
-                    {"name": status.name, "level": int(status.level),
+                    {"name": status.name, "level": level,
                      "message": status.message},
                 )
 

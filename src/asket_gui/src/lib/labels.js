@@ -58,3 +58,25 @@ export const HEADING_SOURCE_LABELS = {
   cog: 'Course over ground',
   none: 'None',
 };
+
+// Position quality in words. `fix_quality` is computed by the backend from
+// MAVROS's GPSRAW fix type (5 RTK float, 6 RTK fixed) when the Pixhawk link
+// is up, otherwise from the NavSatFix status, which can only say "a fix".
+export const FIX_QUALITY_LABELS = {
+  rtk_fixed: 'RTK fixed',
+  rtk_float: 'RTK float',
+  gps: 'GPS only',
+  none: 'no position',
+};
+
+// Ch8 zones, mirroring MODE_LOW_MAX / MODE_MID_MAX in pico-node_v5.ino and
+// asket_common/mode_arbitration.py.
+export const CH8_ESTOP_MAX = 700;
+export const CH8_MANUAL_MAX = 1400;
+
+export function ch8Zone(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (raw < CH8_ESTOP_MAX) return 'down — E-stop';
+  if (raw < CH8_MANUAL_MAX) return 'middle — manual only';
+  return 'up — autonomy allowed';
+}

@@ -14,8 +14,16 @@ from nav2_common.launch import RewrittenYaml
 
 def generate_launch_description():
     cfg = get_package_share_directory("bringup") + "/config"
+    # nav2_profile picks the Nav2 parameter file. An unknown profile is a
+    # KeyError at launch rather than a silent fallback.
     nav2_params = ParameterFile(
-        RewrittenYaml(source_file=cfg + "/nav2_params.yaml", param_rewrites={}, convert_types=True),
+        RewrittenYaml(
+            source_file=PythonExpression([
+                "{'survey': '", cfg, "/nav2_params_survey.yaml', 'full': '", cfg,
+                "/nav2_params.yaml'}['", LaunchConfiguration("nav2_profile"), "']",
+            ]),
+            param_rewrites={}, convert_types=True,
+        ),
         allow_substs=True,
     )
     desc_share = get_package_share_directory("description")
@@ -44,6 +52,16 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_mavros",       default_value="true"),
         DeclareLaunchArgument("enable_localization",  default_value="true"),
         DeclareLaunchArgument("enable_nav2",          default_value="true"),
+        # Phase B (f). survey: no obstacle layer (nothing aboard detects
+        # obstacles), a geofence keep-out and a speed limit
+        # (config/nav2_params_survey.yaml). full: config/nav2_params.yaml, for
+        # the SAM2/fusion obstacle pipeline, which needs sensors not fitted.
+        DeclareLaunchArgument("nav2_profile",         default_value="survey",
+                              description="Nav2 parameters: 'survey' (geofence + speed limit, no "
+                                          "obstacle layer) or 'full' (SAM2/fusion obstacles)."),
+        DeclareLaunchArgument("geofence_file",        default_value="/data/setup/geofence.yaml",
+                              description="Survey-area polygon (lat/lon) for the survey profile. "
+                                          "Example: config/geofence.example.yaml."),
         DeclareLaunchArgument("enable_sensors",       default_value="true"),
         DeclareLaunchArgument("enable_perception",    default_value="true"),
         DeclareLaunchArgument("enable_geo_fusion",    default_value="true"),
@@ -64,6 +82,13 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_usb_camera",    default_value="false",
                               description="Start camera_driver on camera_device (USB/V4L2). "
                                           "The boat now carries an OAK-D-LR (PoE), not a USB camera."),
+        # The OAK-D-LR (PoE, 10.10.20.21) through Luxonis' depthai_ros_driver.
+        # Off by default: the driver is NOT in the image yet
+        # (ros-jazzy-depthai-ros-driver, plus ros-jazzy-compressed-image-
+        # transport for the GUI's JPEG topic). See docs/CAMERA_OAK.md.
+        DeclareLaunchArgument("enable_oak",           default_value="false",
+                              description="Start depthai_ros_driver for the OAK-D-LR (config/oak.yaml). "
+                                          "The package must be installed; it is not in the image yet."),
         DeclareLaunchArgument("use_sim",         default_value="false"),
         DeclareLaunchArgument(
             "headless",
@@ -76,16 +101,36 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_foxglove",      default_value="true"),
         DeclareLaunchArgument("fcu_url",              default_value="tcp://localhost:5777"),
         DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
-        DeclareLaunchArgument("use_pico_bridge",      default_value="false"),
-        DeclareLaunchArgument("pico_port",            default_value="/dev/ttyACM0"),
+        # Phase B (a): the ESCs are wired to the Pico, so the Pico is the motor
+        # path by default. false selects actuator_driver (MAVROS RC override
+        # through the Pixhawk) instead; the two never run together
+        # (system_test/test/test_motor_path_exclusive.py).
+        DeclareLaunchArgument("use_pico_bridge",      default_value="true",
+                              description="Drive the thrusters through the Pico (pico_bridge). "
+                                          "false = actuator_driver via MAVROS/Pixhawk."),
+        # /dev/pico is the udev link (deploy/udev/). /dev/ttyACM0 was the old
+        # default: behind the hub that number belongs to whichever device woke
+        # first, which can be a BMS bridge.
+        DeclareLaunchArgument("pico_port",            default_value="/dev/pico"),
+        # pico_bridge drives REAL thrusters. With use_sim:=true it used to start
+        # anyway (bench rig: simulated mission, real Pico). Now that the bridge
+        # is on by default, a plain simulation must not reach real hardware, so
+        # that rig needs this argument on purpose. Boat on a stand, props off.
+        DeclareLaunchArgument("pico_bridge_in_sim",   default_value="false",
+                              description="Also start pico_bridge when use_sim:=true (bench only: "
+                                          "real thrusters follow the simulated mission)."),
         DeclareLaunchArgument("enable_bms",           default_value="false",
                               description="BMS readers (one per pack) + battery_aggregator -> /battery/state"),
-        # Stable names from deploy/udev/99-asket-usb-serial.rules (the BMS
-        # boards sit behind a USB hub, so ttyACMn numbers are not stable).
+        # Stable names from deploy/udev/99-asket.rules (the BMS boards sit
+        # behind a USB hub, so ttyACMn numbers are not stable).
         DeclareLaunchArgument("bms_port",             default_value="/dev/bms_pack1",
                               description="Serial port of the pack 1 BMS (MCP2221)"),
-        DeclareLaunchArgument("enable_bms2",          default_value="true",
-                              description="Second BMS (pack 2). Only read when enable_bms:=true."),
+        # false while only one BMS is wired (team decision, Phase B). With one
+        # reader the aggregator combines one pack; set true once the second
+        # BMS is fitted and /dev/bms_pack2 exists.
+        DeclareLaunchArgument("enable_bms2",          default_value="false",
+                              description="Second BMS (pack 2). Only read when enable_bms:=true. "
+                                          "false while only one BMS is wired."),
         DeclareLaunchArgument("bms2_port",            default_value="/dev/bms_pack2",
                               description="Serial port of the pack 2 BMS (MCP2221)"),
         DeclareLaunchArgument("enable_cloud_bridge",  default_value="false",
@@ -225,6 +270,18 @@ def generate_launch_description():
             name="datum_sync",
             condition=IfCondition(LaunchConfiguration("enable_localization")),
         ),
+        # The geofence keep-out mask for the survey profile, in the map frame
+        # anchored by datum_sync (same home position).
+        Node(
+            package="sensors",
+            executable="geofence_mask_node",
+            name="geofence_mask_node",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
+                LaunchConfiguration("nav2_profile"), "' == 'survey'"
+            ])),
+            parameters=[{"geofence_file": LaunchConfiguration("geofence_file")}, sim_time],
+        ),
         # Nav2 — individual nodes so we can omit opennav_docking (unsupported on USV)
         GroupAction(
             condition=IfCondition(LaunchConfiguration("enable_nav2")),
@@ -283,6 +340,25 @@ def generate_launch_description():
                 "topic":           "/front_camera_driver/image_raw",
                 "camera_info_url": "package://bringup/config/front_camera.yaml",
             }, sim_time],
+        ),
+        # OAK-D-LR. FindPackageShare is resolved only when the include runs,
+        # so with enable_oak:=false a missing depthai_ros_driver costs nothing.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("depthai_ros_driver"), "launch", "camera.launch.py"]
+                )
+            ),
+            launch_arguments={
+                "name": "oak",
+                "params_file": PathJoinSubstitution(
+                    [FindPackageShare("bringup"), "config", "oak.yaml"]
+                ),
+            }.items(),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_oak"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
         ),
         # RPLIDAR S2M1-R2L via Slamtec's official driver (vendored as the
         # src/sllidar_ros2 submodule). The A-series custom driver that used to
@@ -419,9 +495,10 @@ def generate_launch_description():
         # to a Raspberry Pi Pico, bypassing MAVROS/the Pixhawk for motor control.
         # mavros is still used for GPS/IMU sensing in this mode.
         #
-        # Deliberately allowed to run even when use_sim:=true (unlike
-        # actuator_driver above, which stays sim-excluded since it targets
-        # mavros/the Pixhawk): this lets a bench test drive REAL motors via
+        # Allowed to run with use_sim:=true only when pico_bridge_in_sim:=true
+        # is also given (unlike actuator_driver above, which stays
+        # sim-excluded since it targets mavros/the Pixhawk): this lets a bench
+        # test drive REAL motors via
         # the real Pico off of Gazebo-simulated perception/mission logic —
         # the boat physically can't move (elevated/on a stand), but the
         # thrusters WILL spin in response to real /control/effort commands.
@@ -432,7 +509,9 @@ def generate_launch_description():
             name="pico_bridge",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_control"), "' == 'true' and '",
-                LaunchConfiguration("use_pico_bridge"), "' == 'true'"
+                LaunchConfiguration("use_pico_bridge"), "' == 'true' and ('",
+                LaunchConfiguration("use_sim"), "' != 'true' or '",
+                LaunchConfiguration("pico_bridge_in_sim"), "' == 'true')"
             ])),
             parameters=[{"port": LaunchConfiguration("pico_port")}, sim_time],
         ),
@@ -449,9 +528,10 @@ def generate_launch_description():
         #
         # Two packs in parallel, one BMS each (docs/HARDWARE_DECISIONS.md): one
         # reader per BMS on its own topic, and battery_aggregator combining
-        # them into the single /battery/state everything else reads. If only
-        # one BMS is fitted, set enable_bms2:=false; the aggregator also leaves
-        # out (and names in /diagnostics) a pack that stops reporting.
+        # them into the single /battery/state everything else reads. Only one
+        # BMS is wired today, so enable_bms2 defaults to false; the aggregator
+        # also leaves out (and names in /diagnostics) a pack that stops
+        # reporting.
         Node(
             package="sensors",
             executable="bms_reader",
@@ -737,7 +817,23 @@ def generate_launch_description():
                 # The GUI shows the lidar and camera panels as "not fitted"
                 # rather than empty when their driver is not started.
                 "lidar_fitted": LaunchConfiguration("enable_lidar"),
-                "camera_fitted": LaunchConfiguration("enable_usb_camera"),
+                # The panel's picture is the OAK's compressed RGB topic
+                # (topics.yaml camera_image); the USB driver publishes raw
+                # images only, so it fills the panel only once a compressed
+                # republisher is added.
+                "camera_fitted": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_oak"), "' == 'true' or '",
+                    LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
+                ]),
+                "geofence_file": LaunchConfiguration("geofence_file"),
+                "mavros_expected": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
+                    LaunchConfiguration("use_sim"), "' != 'true' else 'false'",
+                ]),
+                "geofence_expected": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
+                    LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",
+                ]),
             }.items(),
             condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),

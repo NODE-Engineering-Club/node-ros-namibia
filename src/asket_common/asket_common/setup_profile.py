@@ -335,6 +335,18 @@ FIELDS: tuple[FieldSpec, ...] = (
             "any transmit power we are allowed to use."
         ),
     ),
+    FieldSpec(
+        id="vessel.sonarview.url",
+        tier=TIER_VESSEL,
+        label="SonarView address",
+        # SonarView in its container on the Jetson. Cerulean's Docker and
+        # BlueOS instructions both serve its web interface on port 7077.
+        default="http://10.10.20.10:7077",
+        consequence=(
+            "The Sonar card's 'Open SonarView' button goes nowhere, and the "
+            "sonar — settings and recording — is operated only from there."
+        ),
+    ),
     # -- deployment: set up again on every beach --------------------------
     FieldSpec(
         id="deployment.station.lat",
@@ -405,48 +417,11 @@ FIELDS: tuple[FieldSpec, ...] = (
         supplied=BY_CHOICE,
         choices=("20", "40", "80"),
     ),
-    FieldSpec(
-        id="deployment.origin.lat",
-        tier=TIER_DEPLOYMENT,
-        label="Local origin latitude",
-        default=None,
-        units="deg",
-        consequence=(
-            "The datum every recorded metre is relative to. Move it and the "
-            "whole mission moves with it, silently."
-        ),
-        silently_corrupts=True,
-        supplied=FROM_FIRST_FIX,
-    ),
-    FieldSpec(
-        id="deployment.origin.lon",
-        tier=TIER_DEPLOYMENT,
-        label="Local origin longitude",
-        default=None,
-        units="deg",
-        consequence="As above; the two are derived together.",
-        silently_corrupts=True,
-        supplied=FROM_FIRST_FIX,
-    ),
-    FieldSpec(
-        id="deployment.sonar.range_m",
-        tier=TIER_DEPLOYMENT,
-        label="Sonar range",
-        default=30.0,
-        units="m",
-        consequence=(
-            "Too short and the bottom is outside the window. Obvious within a "
-            "minute of pinging, which is why this is not in the group that "
-            "ruins a survey quietly."
-        ),
-    ),
-    FieldSpec(
-        id="deployment.sonar.gain",
-        tier=TIER_DEPLOYMENT,
-        label="Sonar gain",
-        default=4.0,
-        consequence="Too low and the returns are weak; visible on the sonar panel.",
-    ),
+    # Removed: deployment.origin.lat/lon (nothing read them: the map frame is
+    # anchored to the Pixhawk home by sensors/datum_sync), and
+    # deployment.sonar.range_m/gain (the sonar is set in SonarView; the full
+    # panel sets them live with set_ping_parameters). A saved file that still
+    # holds them loads, and keeps them as unknown fields.
 )
 
 FIELD_BY_ID: dict[str, FieldSpec] = {spec.id: spec for spec in FIELDS}

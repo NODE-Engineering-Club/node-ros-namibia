@@ -33,6 +33,7 @@ export function vesselPayload(world, detail) {
     cog_deg: round(world.cogDeg(), 1),
     sog_ms: round(world.sogMs(), 2),
     heading_source: world.headingSource(),
+    fix_quality: fixQuality(world.gnss().fixType),
   });
   if (detail === 'reduced') return out;
 
@@ -45,10 +46,19 @@ export function vesselPayload(world, detail) {
     gnss_fix_type: gnss.fixType,
     num_sats: gnss.numSats,
     hdop: round(gnss.hdop, 2),
+    position_sigma_m: null,
     distance_travelled_m: round(world.distanceTravelled, 1),
     on_survey: world.onSurvey(),
   });
   return out;
+}
+
+// MAVLink GPS_FIX_TYPE to the cockpit's four words, as adapters.py maps it.
+function fixQuality(fixType) {
+  if (fixType === 6) return 'rtk_fixed';
+  if (fixType === 5) return 'rtk_float';
+  if (fixType >= 2) return 'gps';
+  return 'none';
 }
 
 export function headingPayload(world, detail) {
@@ -162,6 +172,10 @@ export function picoPayload(world, detail) {
     sbus_frames_bad: 0,
     sbus_failsafe: !world.rcLinkOk,
     sbus_frame_lost: false,
+    // v5. The mock's RC link is never "lost" in the firmware's sense, and its
+    // serial link never backs up.
+    rc_lost_latched: false,
+    serial_tx_dropped: 0,
     arming_block: armingBlockReason(
       world.armed,
       world.rcChannel7 > CH7_ARM_MIN,

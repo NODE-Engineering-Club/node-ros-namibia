@@ -10,6 +10,7 @@
 #include <deque>
 #include <vector>
 #include <algorithm>
+#include <climits>
 
 typedef uint8_t byte;
 #define HIGH 1
@@ -60,20 +61,40 @@ class SerialStub {
  public:
   std::string out;            // everything printed
   std::deque<char> in;        // everything the host "sent"
+
+  // The USB CDC transmit side, as far as the sketch can see it.
+  //
+  // write_room is what availableForWrite() reports: how many bytes TinyUSB
+  // could accept right now. A host that has the port open but stopped reading
+  // is write_room = 0. Real TinyUSB write() SPINS until it has sent
+  // everything while the port is open -- so a write() of more than
+  // write_room bytes is exactly the call that would freeze loop() on the
+  // Pico. The stub cannot block, so it counts those calls instead, and the
+  // harness asserts there are none.
+  long write_room = LONG_MAX / 2;
+  int  oversize_writes = 0;   // write() of more than availableForWrite() bytes
+  int  direct_prints   = 0;   // print()/println(): unguarded by availableForWrite()
+  int  availableForWrite() { return (int)std::min<long>(write_room, INT_MAX); }
+  size_t write(const uint8_t* b, size_t n) {
+    if ((long)n > write_room) { oversize_writes++; n = write_room > 0 ? (size_t)write_room : 0; }
+    out.append((const char*)b, n);
+    write_room -= (long)n;
+    return n;
+  }
   void begin(unsigned long) {}
   void begin(unsigned long, int) {}
   int  available() { return (int)in.size(); }
   int  read() { if (in.empty()) return -1; char c = in.front(); in.pop_front(); return (unsigned char)c; }
   void feed(const std::string& d) { for (char c : d) in.push_back(c); }
 
-  void print(const char* v) { out += v; }
-  void print(const String& v) { out += v.s; }
-  void print(char v) { out += v; }
-  void print(int v) { char b[32]; snprintf(b, 32, "%d", v); out += b; }
-  void print(unsigned long v) { char b[32]; snprintf(b, 32, "%lu", v); out += b; }
-  void println() { out += "\n"; }
+  void print(const char* v) { direct_prints++; out += v; }
+  void print(const String& v) { direct_prints++; out += v.s; }
+  void print(char v) { direct_prints++; out += v; }
+  void print(int v) { direct_prints++; char b[32]; snprintf(b, 32, "%d", v); out += b; }
+  void print(unsigned long v) { direct_prints++; char b[32]; snprintf(b, 32, "%lu", v); out += b; }
+  void println() { direct_prints++; out += "\n"; }
   template <typename T> void println(T v) { print(v); out += "\n"; }
-  void println(const char* v) { out += v; out += "\n"; }
+  void println(const char* v) { direct_prints++; out += v; out += "\n"; }
 
   String readStringUntil(char term) {
     String r; 

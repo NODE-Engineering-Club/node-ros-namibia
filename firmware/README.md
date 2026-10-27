@@ -1,27 +1,111 @@
 # Pico firmware
 
-> **Which firmware is flashed on the boat is to be confirmed by the team.**
->
-> This directory now holds two sketches side by side. Neither replaces the
-> other, and nothing in this repository flashes either of them.
+> **Current firmware: `pico-node_v5/`** (hw-alignment Phase B c). The stack
+> expects it: `pico_bridge` forwards motor commands and `MODE AUTO` only to a
+> Pico that reports `ver=5` (anything else gets `PING` and `MODE MANUAL`
+> only), the GUI reports any other version as a mismatch and the pre-flight
+> fails on it.
 >
 > | Directory | Origin | Status line |
 > |---|---|---|
+> | `pico-node_v5/pico-node_v5.ino` | v4 + three safety fixes (below) | `STATE ver=5 mode=… rclatch=… txdrop=…` |
+> | `pico-node_v4/pico-node_v4.ino` | copied from `NODE-Engineering-Club/node-ros-2026` at `1606eb7`, **kept unchanged to roll back to** | `STATE ver=4 mode=…` |
 > | `pico/asket_ec_pico.ino` | this repo (node-ros-2026 branch `GPS_Fix_and_Task`, commit `920773f`) | `STATE mode=…` |
-> | `pico-node_v4/pico-node_v4.ino` | copied from `NODE-Engineering-Club/node-ros-2026` at `1606eb7` | `STATE ver=4 mode=…` |
 >
-> `pico-node_v4/` and `test/` were copied so that the mission GUI's test suite
-> (`src/asket_common/test/test_firmware_arbitration_matches.py`) can compile the
-> sketch and compare it against the Python mirror of its mode arbitration.
-> Their presence is not a decision to flash v4. The mode, arming, motor and
-> failsafe logic of the two sketches is identical; v4 differs only in a version
-> announcement (`[VER] pico-node 4`, `ver=4` in every STATE line), a
-> non-blocking serial reader, and the removal of `BENCH_NO_RC_OVERRIDE`.
-> See `docs/gui/PORTING_NOTES.md`.
+> To see which one is running: `ros2 topic echo /pico/status --field data`. A
+> line starting `STATE ver=5` is v5.
 >
-> To see which one is running: `ros2 topic echo /pico/status --field data`
-> (with `use_pico_bridge:=true`). A line starting `STATE ver=4` is v4; a line
-> starting `STATE mode=` is `asket_ec_pico`.
+> Rolling back to v4 means flashing `pico-node_v4/` **and** checking out the
+> Jetson software from before Phase B c (the commit before "Phase B (c)"):
+> the current stack refuses to drive a v4 Pico, on purpose.
+
+```
+make -C firmware/test      # host-side tests, no Pico and no Arduino toolchain
+```
+
+## pico-node_v5 — what changed from v4
+
+Three fixes to the safety chain. The mode zones, mixing, pins, PWM, ESC arm
+window and the heartbeat are v4's, unchanged.
+
+1. **RC lost in AUTONOMOUS → E-stop.** v4 checked for SBUS silence only
+   outside AUTONOMOUS (`if (current_mode != MODE_AUTONOMOUS && …)`), and the
+   channels kept the last decoded frame. A receiver that stopped sending left
+   the boat armed and autonomous, Ch8/Ch7 frozen high, the Jetson still
+   driving. v5 treats "no valid frame for `SBUS_FAILSAFE_TIMEOUT_MS`" (now
+   **300 ms**, was 500) exactly like the receiver's failsafe bit, in every
+   mode, inside `update_state()`: ESTOP, relay open, thrusters neutral. Host
+   test: the relay opens 292 ms after the last frame.
+2. **No automatic re-arm.** In v4 a failsafe forced ESTOP, and ESTOP cleared
+   the latch, so when the link came back with Ch7 still high the boat re-armed
+   by itself — straight back into AUTONOMOUS if the Jetson still wanted it. v5
+   latches any RC loss in `rc_lost_latched` (reported as `rclatch=`), cleared
+   only when Ch7 is seen **low** on a **live** link (Ch7 low during the
+   failsafe does not count). Entering it also drops the Jetson's AUTO request,
+   and `MODE AUTO` is refused (`[NAK]`) while it is held: after re-arming the
+   boat is MANUAL until autonomy is asked for again. The latch also starts set
+   at power-up, so a boat switched on with Ch7 already high does not arm until
+   the switch is cycled (v4 armed).
+3. **Serial output never blocks.** TinyUSB's CDC `write()` spins while the
+   host has the port open but is not reading; v4's direct `Serial.print()`
+   could freeze `loop()` — SBUS, motors and failsafes with it. v5 queues every
+   line in a 1 KB ring and `tx_pump()` hands TinyUSB only what
+   `availableForWrite()` reports free. A line that does not fit is dropped
+   whole and counted (`txdrop=`).
+
+Wire format: `ver=5`, and two fields appended at the end of `STATE`:
+`rclatch=0|1` and `txdrop=<count>`. New serial replies: `[NAK] MODE AUTO
+refused: RC link lost, cycle Ch7 first`, `[E-STOP] RC link lost: …`,
+`[RC] link back and Ch7 low: may arm again`.
+
+**GPIO20 E-stop feedback is still off** (not wired). The code path is v4's,
+behind `#define ESTOP_FEEDBACK_ENABLED 0`, now `#ifndef`-guarded so the host
+tests also build and exercise it enabled (`fwtest_feedback`). Enable it only
+once the divider is fitted, together with `ESTOP_FEEDBACK_ENABLED = True` in
+`src/asket_common/asket_common/mode_arbitration.py` (a test fails if they
+disagree).
+
+### Host tests for v5 (`make -C firmware/test`)
+
+Two binaries: `fwtest` (as shipped) and `fwtest_feedback` (GPIO20 path on).
+Besides v4's checks they cover:
+
+* SBUS silent while AUTONOMOUS, with the Jetson still sending motor commands:
+  relay open in < 500 ms, ESTOP reported, thrusters neutral, AUTO withdrawn.
+* Link back with Ch7 high: stays disarmed (`rclatch=1`); Ch7 low then high
+  re-arms in MANUAL; an AUTO sent during the outage was refused; the receiver
+  failsafe bit behaves the same, and Ch7 low *during* it does not count.
+* A host that stops reading: no `print`/`println` anywhere, no `write()` larger
+  than `availableForWrite()` (the stub counts the calls that would block on a
+  real Pico), the loop keeps running, SBUS silence still opens the relay, lines
+  are dropped and counted, and every line sent through a 24-byte window
+  arrives whole.
+
+Re-introducing each v4 defect in a copy of the sketch makes these fail (14
+checks fail with SBUS silence ignored). They do **not** replace the bench.
+
+## Flashing (Arduino IDE)
+
+1. Stop the ROS stack first: `pico_bridge` owns the port
+   (`sudo systemctl stop asket.service`, or Ctrl-C the launch).
+2. Arduino IDE → *Preferences → Additional boards manager URLs*:
+   `https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json`
+   → *Boards Manager* → install **Raspberry Pi Pico/RP2040/RP2350** (Earle
+   Philhower).
+3. *Tools → Board → Raspberry Pi Pico 2* (RP2350; pick *Raspberry Pi Pico* if
+   the board is an RP2040), *Tools → USB Stack → Adafruit TinyUSB* (the sketch
+   includes `Adafruit_TinyUSB.h`; `Servo` ships with the core).
+4. Open `firmware/pico-node_v5/pico-node_v5.ino`, *Verify*, then *Upload*. If
+   no port shows, hold BOOTSEL while plugging the Pico in and upload to the
+   UF2 drive.
+5. Serial Monitor at 115200: the first line must be `[VER] pico-node 5`, then
+   `STATE ver=5 … rclatch=1 …` (latched until Ch7 is cycled).
+
+Rollback: the same with `firmware/pico-node_v4/pico-node_v4.ino`, plus the
+Jetson software from before Phase B c.
+
+Then run the bench test, ESC unpowered and then powered with the props out of
+the water: `docs/BENCH_TEST_PHASE_B.md`.
 
 ---
 

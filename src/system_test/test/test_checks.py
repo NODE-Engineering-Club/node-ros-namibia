@@ -9,6 +9,7 @@ from system_test.core.checks import (
     MOUNTING_FIELD,
     CHECKS,
     FAIL,
+    NOTE,
     PASS,
     SKIPPED,
     WARN,
@@ -19,7 +20,7 @@ from system_test.core.checks import (
 HEALTHY = dict(
     pico_age_s=0.1, rc_link_ok=True,
     # Raw SBUS counts, 172..1811. The firmware's thresholds are on this scale.
-    rc_channel8_raw=1811, rc_channel7_raw=1811, pico_firmware_version=4,
+    rc_channel8_raw=1811, rc_channel7_raw=1811, pico_firmware_version=5,
     num_sats=14, gnss_fix_type=3, hdop=0.8,
     heading_valid=True, heading_source="gnss_compass", heading_accuracy_deg=0.2,
     heading_divergence_deg=2.0, heading_divergence_meaningful=True,
@@ -31,6 +32,8 @@ HEALTHY = dict(
     # disciplined; the check that reads this measures drift rather than
     # asking whether the NTP daemon says it is locked.
     gps_time_offset_ms=40, gps_time_age_s=1.0,
+    # The Nav2 survey profile's fence, as geofence_mask_node reports it.
+    geofence_level="OK", geofence_message="'test block', 72.0 ha",
     disk_free_bytes=200 * 1024**3, disk_write_mbps=120.0,
     state_of_charge=0.9, battery_voltage=16.2,
     link_rtt_ms=25.0, link_active="wifi",
@@ -213,7 +216,7 @@ def test_a_firmware_version_mismatch_grounds_the_vessel():
     result = item(report, "pico.firmware_version")
     assert result.status == FAIL
     assert "v3" in result.message
-    assert "pico-node_v4" in result.remedy
+    assert "pico-node_v5" in result.remedy
     assert not report.go
 
 
@@ -386,10 +389,13 @@ def test_a_disk_smaller_than_the_battery_is_the_binding_one_and_says_so():
 # that is not reporting much — so the pre-flight has to say so out loud.
 
 
-def test_an_unverified_state_format_warns_on_every_run():
+def test_an_unverified_state_format_is_a_standing_note_on_every_run():
+    # Grey, not amber: it was amber on every single run, and an amber that
+    # never changes teaches people to read past amber.
     report = run_checks(dict(HEALTHY, pico_state_format_verified=False))
     result = item(report, "pico.state_format")
-    assert result.status == WARN
+    assert result.status == NOTE
+    assert "warning" not in report.summary
     assert "never been checked" in result.message
     assert "ros2 topic echo /pico/status" in result.remedy
     # A warning, not a blocker: the vessel is fine, our reading of it is what
@@ -424,7 +430,7 @@ def test_no_pico_status_at_all_is_unknown_not_a_pass():
 # -- the e-stop feedback that does not exist yet ---------------------------
 
 
-def test_the_estop_feedback_warns_on_every_run_while_it_is_compiled_out():
+def test_the_estop_feedback_is_a_standing_note_while_it_is_compiled_out():
     """What the repository ships with today.
 
     ESTOP_FEEDBACK_ENABLED is 0, so nothing in the firmware confirms the ESC
@@ -435,7 +441,7 @@ def test_the_estop_feedback_warns_on_every_run_while_it_is_compiled_out():
     """
     report = run_checks(dict(HEALTHY, pico_estop_feedback_enabled=False))
     result = item(report, "pico.estop_feedback")
-    assert result.status == WARN
+    assert result.status == NOTE
     # The message has to say what is *not verified*, not merely that a flag is
     # off. A crew reading "ESTOP_FEEDBACK_ENABLED is 0" learns nothing.
     assert "collapsed" in result.message or "verified" in result.message.lower()
@@ -469,3 +475,25 @@ def test_the_shipped_default_is_off_so_the_warning_is_the_normal_case():
     from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
 
     assert ESTOP_FEEDBACK_ENABLED is False
+
+
+def test_a_pico_still_on_v4_grounds_the_vessel():
+    """v4 stays armed when SBUS goes silent in AUTONOMOUS and re-arms by itself
+    after a failsafe (firmware/pico-node_v5/). The pre-flight must say so
+    rather than let the boat out on it."""
+    result = item(run_checks(dict(HEALTHY, pico_firmware_version=4)), "pico.firmware_version")
+    assert result.status == FAIL
+    assert "v4" in result.message
+
+
+# -- the shore link with nobody on the other end ----------------------------
+
+
+def test_the_link_is_not_measured_without_a_browser():
+    """With no client the round trip reads 0 ms, which passed as a perfect
+    link. Not measured is what it is."""
+    result = item(run_checks(dict(HEALTHY, link_rtt_ms=0.0, link_clients=0)), "link.quality")
+    assert result.status == SKIPPED
+    assert "Not measured" in result.message
+    measured = item(run_checks(dict(HEALTHY, link_rtt_ms=20.0, link_clients=1)), "link.quality")
+    assert measured.status == PASS

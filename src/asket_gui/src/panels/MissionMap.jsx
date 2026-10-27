@@ -6,6 +6,8 @@ import { coverageRibbon, lidarPoints } from '../lib/geometry.js';
 import { blankStyle, buildStyle, graticule } from '../lib/mapStyle.js';
 import { registerMockTileProtocol } from '../lib/mock/tiles.js';
 import { streamPayload } from '../lib/connection.js';
+import { isFitted, isSimulated } from '../lib/fitted.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * The primary panel.
@@ -56,6 +58,17 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
   const plan = streamPayload(state, 'plan');
   const coverage = streamPayload(state, 'coverage');
   const lidar = streamPayload(state, 'lidar');
+  const details = useDetails();
+  // Planned lines and coverage come only from the simulator: on the boat no
+  // planner publishes them, and an empty "Covered" in the legend reads as
+  // "nothing has been covered". Obstacles need a lidar. The layers stay in
+  // the code, fed nothing.
+  const simulated = isSimulated(state, connection);
+  const showSurvey = simulated;
+  const showObstacles = simulated || isFitted(state, 'lidar');
+  const legend = LEGEND.filter(
+    (item) => (showSurvey || !item.survey) && (showObstacles || !item.obstacle),
+  );
 
   // -- tile availability ------------------------------------------------
 
@@ -179,7 +192,7 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
 
     setData(instance, 'plan', {
       type: 'FeatureCollection',
-      features: (plan?.lines || []).map((line) => ({
+      features: (showSurvey ? plan?.lines || [] : []).map((line) => ({
         type: 'Feature',
         properties: { index: line.index },
         geometry: { type: 'LineString', coordinates: line.coords },
@@ -196,7 +209,7 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
     setData(
       instance,
       'coverage',
-      coverageRibbon(coverage?.segments || [], coverage?.side),
+      coverageRibbon(showSurvey ? coverage?.segments || [] : [], coverage?.side),
     );
 
     setData(instance, 'track', {
@@ -210,7 +223,7 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
       instance,
       'lidar',
       lidarPoints(
-        showRawLidar ? lidar?.raw || lidar?.filtered : lidar?.filtered,
+        !showObstacles ? [] : showRawLidar ? lidar?.raw || lidar?.filtered : lidar?.filtered,
         vessel?.lat,
         vessel?.lon,
         vessel?.heading_deg ?? 0,
@@ -236,7 +249,7 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
     if (follow && vessel?.lat) {
       instance.easeTo({ center: [vessel.lon, vessel.lat], duration: 400 });
     }
-    if (!framed.current && plan?.lines?.length) {
+    if (!framed.current && showSurvey && plan?.lines?.length) {
       framed.current = true;
       // Open on the whole job. Following is switched off for the same reason
       // the Fit survey button switches it off: centred on the vessel at survey
@@ -247,7 +260,10 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
       // cancels an in-flight fitBounds, leaving the survey a smudge.
       fitSurvey(instance, plan, coverage, 0);
     }
-  }, [ready, vessel, track, plan, coverage, lidar, follow, showRawLidar, onFollowChange]);
+  }, [
+    ready, vessel, track, plan, coverage, lidar, follow, showRawLidar, onFollowChange,
+    showSurvey, showObstacles,
+  ]);
 
   // -- graticule --------------------------------------------------------
 
@@ -275,16 +291,18 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
         {/* Judging coverage means seeing the whole box at once. Following the
             vessel keeps you at a zoom where a gap two lines away is off
             screen. */}
-        <button
-          onClick={() => {
-            onFollowChange(false);
-            fitSurvey(map.current, plan, coverage);
-          }}
-          disabled={!plan?.lines?.length}
-          title="Zoom out to the whole survey box, so gaps in coverage are visible"
-        >
-          Fit survey
-        </button>
+        {showSurvey && (
+          <button
+            onClick={() => {
+              onFollowChange(false);
+              fitSurvey(map.current, plan, coverage);
+            }}
+            disabled={!plan?.lines?.length}
+            title="Zoom out to the whole survey box, so gaps in coverage are visible"
+          >
+            Fit survey
+          </button>
+        )}
         {/* Off by default, and labelled when on: it is the most useful layer
             here, and it is also volunteer data that lags the real world. */}
         {!connection.isMock && sources.basemap && (
@@ -305,7 +323,7 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
           06:00. The legend is small, permanent, and uses the same colours the
           layers are painted with — they are declared once, below. */}
       <div className="map-legend">
-        {LEGEND.map((item) => (
+        {legend.map((item) => (
           <div key={item.label}>
             <span
               className={`swatch ${item.fill ? 'fill' : ''}`}
@@ -330,6 +348,10 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
           need different actions, and the operator cannot tell them apart by
           looking. */}
       {!connection.isMock && <BasemapNote info={tiles} seamark={seamark} />}
+      {/* Why there is no fence on the map, for whoever set the day up. */}
+      {details && !simulated && plan?.geofence_error && (
+        <div className="map-note map-note-top">No geofence drawn: {plan.geofence_error}</div>
+      )}
       {tiles?.mbtiles?.available && tiles.mbtiles.bounds && vessel?.lat &&
         !tiles.online &&
         !withinBounds(tiles.mbtiles.bounds, vessel.lat, vessel.lon) && (
@@ -539,11 +561,11 @@ const COLOURS = {
 };
 
 const LEGEND = [
-  { label: 'Covered', color: COLOURS.coverage, fill: true, opacity: 0.42 },
-  { label: 'Planned line', color: COLOURS.plan },
+  { label: 'Covered', color: COLOURS.coverage, fill: true, opacity: 0.42, survey: true },
+  { label: 'Planned line', color: COLOURS.plan, survey: true },
   { label: 'Track', color: COLOURS.track },
   { label: 'Geofence', color: COLOURS.geofence },
-  { label: 'Obstacle', color: COLOURS.lidar, fill: true },
+  { label: 'Obstacle', color: COLOURS.lidar, fill: true, obstacle: true },
 ];
 
 function addLayers(map, withGraticule) {

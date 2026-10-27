@@ -1,6 +1,6 @@
 """Parsing the Pico's STATE line.
 
-The format here is transcribed from ``firmware/pico-node_v4/pico-node_v4.ino``,
+The format here is transcribed from ``firmware/pico-node_v5/pico-node_v5.ino``,
 field by field, so these tests can assert real spellings — unlike the previous
 round, where the format was a guess and the tests could only pin behaviour.
 
@@ -25,16 +25,16 @@ from gui_backend.core.pico_state import (
 
 #: Copied from the firmware's own loop(), in field order. Every test that needs
 #: a well-formed line starts from this one.
-V4_LINE = (
-    "STATE ver=4 mode=3 armed=1 relay=1 wantauto=1 link=1 estoplatch=0 "
+V5_LINE = (
+    "STATE ver=5 mode=3 armed=1 relay=1 wantauto=1 link=1 estoplatch=0 "
     "thr=991 yaw=991 ch7=1811 ch8=1811 "
-    "sbusok=2400 sbusbad=0 sbusfs=0 sbuslost=0"
+    "sbusok=2400 sbusbad=0 sbusfs=0 sbuslost=0 rclatch=0 txdrop=0"
 )
 
 
 def _line(**overrides):
-    """V4_LINE with some fields replaced, keeping the real field order."""
-    parts = V4_LINE.split()
+    """V5_LINE with some fields replaced, keeping the real field order."""
+    parts = V5_LINE.split()
     out = [parts[0]]
     for token in parts[1:]:
         key = token.split("=")[0]
@@ -59,16 +59,16 @@ def test_the_format_is_still_marked_unverified():
     "STATEMENT mode=AUTO",
     "\x00\xff binary noise",
     "STATE " + "x" * 10000,
-    "STATE ver=4 mode= armed=",
+    "STATE ver=5 mode= armed=",
     "STATE=1",
-    "STATE ver=4 mode=3 armed=1 " + "=" * 500,
+    "STATE ver=5 mode=3 armed=1 " + "=" * 500,
 ])
 def test_nothing_a_serial_link_can_produce_makes_it_raise(line):
     state = parse_state_line(line)
     assert isinstance(state.parsed, bool)
 
 
-@pytest.mark.parametrize("value", [None, 42, b"STATE ver=4 mode=3 armed=1", object()])
+@pytest.mark.parametrize("value", [None, 42, b"STATE ver=5 mode=3 armed=1", object()])
 def test_a_non_string_is_not_a_line(value):
     assert parse_state_line(value).parsed is False
 
@@ -90,7 +90,7 @@ def test_a_v3_line_is_refused_rather_than_half_read():
 
 
 def test_a_real_v4_line_reads_every_field():
-    state = parse_state_line(V4_LINE)
+    state = parse_state_line(V5_LINE)
     assert state.parsed is True
     assert state.unknown_keys == []
     assert state.firmware_version == PROTOCOL_VERSION
@@ -165,7 +165,7 @@ def test_the_estop_threshold_fires_on_the_sbus_scale(ch8, asserting):
 
 
 def test_channel_8_absent_is_unknown_not_safe():
-    line = " ".join(t for t in V4_LINE.split() if not t.startswith("ch8="))
+    line = " ".join(t for t in V5_LINE.split() if not t.startswith("ch8="))
     assert parse_state_line(line).ch8_asserting_estop is None
 
 
@@ -173,15 +173,15 @@ def test_channel_8_absent_is_unknown_not_safe():
 
 
 def test_a_future_firmware_is_a_mismatch_not_a_guess():
-    state = parse_state_line(_line(ver="5"))
-    assert state.firmware_version == 5
+    state = parse_state_line(_line(ver="6"))
+    assert state.firmware_version == 6
     assert state.version_mismatch is True
 
 
 def test_a_line_with_no_version_is_not_reported_as_a_mismatch():
     """Absent is not wrong. It is a different failure — an older firmware, or a
     truncated line — and the check layer says so differently."""
-    line = " ".join(t for t in V4_LINE.split() if not t.startswith("ver="))
+    line = " ".join(t for t in V5_LINE.split() if not t.startswith("ver="))
     state = parse_state_line(line)
     assert state.firmware_version is None
     assert state.version_mismatch is False
@@ -190,8 +190,8 @@ def test_a_line_with_no_version_is_not_reported_as_a_mismatch():
 def test_version_is_the_first_field_so_it_survives_truncation():
     """A line cut short by a serial glitch still carries its version, which is
     what lets the check layer say 'wrong firmware' instead of 'unreadable'."""
-    truncated = V4_LINE[:20]
-    assert truncated.startswith("STATE ver=4 ")
+    truncated = V5_LINE[:20]
+    assert truncated.startswith("STATE ver=5 ")
     assert parse_state_line(truncated).firmware_version == PROTOCOL_VERSION
 
 
@@ -201,13 +201,13 @@ def test_version_is_the_first_field_so_it_survives_truncation():
 def test_one_understood_field_is_not_enough():
     """``armed=1`` alone used to mark a line parsed. A line whose mode was
     misread then reported success, and the operator saw a confident panel."""
-    state = parse_state_line("STATE ver=4 armed=1")
+    state = parse_state_line("STATE ver=5 armed=1")
     assert state.armed is True
     assert state.parsed is False
 
 
 def test_mode_and_armed_together_are_enough():
-    assert parse_state_line("STATE ver=4 mode=2 armed=0").parsed is True
+    assert parse_state_line("STATE ver=5 mode=2 armed=0").parsed is True
 
 
 def test_state_alone_carries_nothing():
@@ -218,7 +218,7 @@ def test_state_alone_carries_nothing():
 
 
 def test_unknown_keys_are_reported_not_dropped():
-    state = parse_state_line(V4_LINE + " newfield=7")
+    state = parse_state_line(V5_LINE + " newfield=7")
     assert "newfield" in state.unknown_keys
     assert state.parsed is True  # a new field does not invalidate the rest
 
@@ -235,5 +235,19 @@ def test_rc_link_follows_the_receivers_own_failsafe_bit():
 
 
 def test_rc_link_is_unknown_when_the_bit_is_not_sent():
-    line = " ".join(t for t in V4_LINE.split() if not t.startswith("sbusfs="))
+    line = " ".join(t for t in V5_LINE.split() if not t.startswith("sbusfs="))
     assert parse_state_line(line).rc_link_ok is None
+
+
+def test_v5_fields_are_read():
+    """rclatch and txdrop, the two fields v5 adds at the end of the line."""
+    state = parse_state_line(_line(rclatch="1", txdrop="7"))
+    assert state.rc_lost_latched is True
+    assert state.serial_tx_dropped == 7
+    assert state.unknown_keys == []
+
+
+def test_a_v4_line_is_a_mismatch():
+    """A Pico still flashed with pico-node_v4 is reported, not half-read."""
+    state = parse_state_line(_line(ver="4"))
+    assert state.version_mismatch is True

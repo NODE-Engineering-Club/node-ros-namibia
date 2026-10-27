@@ -75,8 +75,11 @@ def evaluate(state: dict, thresholds: AlarmThresholds | None = None) -> list[Ala
                 "link_lost",
                 SEVERITY_ALARM,
                 f"No data from the vessel for {link_age_s:.0f} s",
-                "Everything on screen is stale. Move towards the vessel or "
-                "switch to the cellular link.",
+                # There is no cellular link on this boat: the shore WiFi is
+                # the only path, and the RC transmitter never depended on it.
+                "Everything on screen is stale. Check the shore station (power, "
+                "tripod pointing at the boat) and keep the boat in sight; the "
+                "RC transmitter still controls it within range.",
             )
         )
 
@@ -224,14 +227,28 @@ def evaluate(state: dict, thresholds: AlarmThresholds | None = None) -> list[Ala
             )
 
     # -- geofence ---------------------------------------------------------
+    # Signed: positive inside the fence, negative outside. Nothing stops the
+    # boat at the boundary — Nav2 only refuses to plan or follow a path
+    # beyond it, and in Manual the transmitter can drive straight across.
     fence_m = state.get("geofence_distance_m")
-    if fence_m is not None and fence_m < t.geofence_approach_m:
+    if fence_m is not None and fence_m < 0:
+        out.append(
+            Alarm(
+                "geofence_outside",
+                SEVERITY_ALARM,
+                f"{-fence_m:.0f} m outside the geofence",
+                "Bring the boat back inside in Manual: Autonomous will not plan "
+                "a path from out here.",
+            )
+        )
+    elif fence_m is not None and fence_m < t.geofence_approach_m:
         out.append(
             Alarm(
                 "geofence_approach",
                 SEVERITY_WARN,
                 f"{fence_m:.0f} m from the geofence",
-                "The vessel will stop at the boundary. Turn it, or move the fence.",
+                "Autonomous will not go past it, but nothing stops the boat "
+                "crossing it in Manual. Turn back inside.",
             )
         )
 

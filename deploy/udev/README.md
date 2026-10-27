@@ -86,10 +86,9 @@ Then start the stack with the names:
 
 ```bash
 ros2 launch bringup njord.launch.py \
-  pico_port:=/dev/pico \
-  enable_bms:=true            # bms_port / bms2_port already default to /dev/bms_pack1 / 2
+  enable_bms:=true            # pico_port, bms_port, bms2_port already default to the links
 ```
 
-`pico_port` still defaults to `/dev/ttyACM0` in `njord.launch.py`: the Pico
-path is part of the motor chain, and changing its default is Phase B. The
-Pixhawk link (`fcu_url`) is Phase B too.
+`pico_port` defaults to `/dev/pico` since Phase B (a): without the udev rule
+the Pico bridge cannot open its port, and says so in its log. The Pixhawk link
+(`fcu_url`) is not changed yet.

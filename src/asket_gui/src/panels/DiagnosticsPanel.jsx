@@ -2,6 +2,7 @@ import { Chip, Panel } from '../components/Panel.jsx';
 import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { streamPayload } from '../lib/connection.js';
 import { COMMAND_STATUS_LABELS } from '../lib/labels.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * Pre-flight built-in test.
@@ -16,10 +17,15 @@ import { COMMAND_STATUS_LABELS } from '../lib/labels.js';
  * NO-GO: "GO, 14 checks could not run" is the most dangerous sentence this
  * panel could produce.
  */
-const STATUS_LEVEL = { PASS: 'ok', WARN: 'warn', FAIL: 'alarm', SKIPPED: '' };
-const STATUS_LABEL = { PASS: 'ok', WARN: 'warn', FAIL: 'fail', SKIPPED: 'unknown' };
+const STATUS_LEVEL = { PASS: 'ok', WARN: 'warn', FAIL: 'alarm', SKIPPED: '', NOTE: 'note' };
+const STATUS_LABEL = { PASS: 'ok', WARN: 'warn', FAIL: 'fail', SKIPPED: 'unknown', NOTE: 'note' };
+
+//: What the simple view lists: the red and amber rows. Passing, unknown and
+//: grey-note rows are Details (the verdict above still names a blocking one).
+const SIMPLE_STATUSES = new Set(['FAIL', 'WARN']);
 
 export function DiagnosticsPanel({ state, connection }) {
+  const details = useDetails();
   const report = streamPayload(state, 'diagnostics');
 
   // The most recent press, whatever became of it.
@@ -59,7 +65,10 @@ export function DiagnosticsPanel({ state, connection }) {
   // Anything short of a clean GO opens the list. The verdict sentence names the
   // first problem; the list is what you act on, and having to ask for it is one
   // step too many when it is already telling you something is wrong.
-  const notClean = items.filter((i) => i.status !== 'PASS');
+  // A grey note is a standing fact, not something "not passing".
+  const notClean = items.filter((i) => i.status !== 'PASS' && i.status !== 'NOTE');
+  const shown = details ? items : items.filter((i) => SIMPLE_STATUSES.has(i.status));
+  const hiddenCount = items.length - shown.length;
   const forced = report && !report.go
     ? 'the vessel is NO-GO'
     : notClean.length
@@ -164,7 +173,7 @@ export function DiagnosticsPanel({ state, connection }) {
 
       {items.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          {items.map((item) => (
+          {shown.map((item) => (
             <div
               key={item.id}
               style={{ borderTop: '1px solid var(--line)', padding: '6px 0' }}
@@ -175,7 +184,11 @@ export function DiagnosticsPanel({ state, connection }) {
               </div>
               <div className="hint">{item.message}</div>
               {item.remedy && item.status !== 'PASS' && (
-                <div className={item.status === 'FAIL' ? 'errline' : 'warnline'}>
+                <div
+                  className={
+                    item.status === 'FAIL' ? 'errline' : item.status === 'NOTE' ? 'hint' : 'warnline'
+                  }
+                >
                   {item.remedy}
                 </div>
               )}
@@ -191,6 +204,11 @@ export function DiagnosticsPanel({ state, connection }) {
               )}
             </div>
           ))}
+          {hiddenCount > 0 && (
+            <p className="hint" style={{ margin: '6px 0 0' }}>
+              {hiddenCount} other check(s) — passing, not checked or notes — in Details.
+            </p>
+          )}
         </div>
       )}
     </Panel>

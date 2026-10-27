@@ -29,6 +29,8 @@ export function Panel({
   const open = forceOpen || openPref;
 
   if (!collapsible) {
+    // Nothing folds here, but a panel whose detail is a Details-view value
+    // still states what is off-nominal, on screen in both views.
     return (
       <section className="panel">
         <h2>
@@ -36,6 +38,7 @@ export function Panel({
           {aside}
         </h2>
         {summary}
+        {forceReason && <p className="forced-note">{forceReason}</p>}
         {children}
       </section>
     );

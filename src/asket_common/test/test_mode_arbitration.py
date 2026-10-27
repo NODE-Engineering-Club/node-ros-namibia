@@ -14,6 +14,7 @@ import pytest
 from asket_common.mode_arbitration import (
     ARM_BLOCKED_CONTRADICTORY,
     ARM_BLOCKED_LATCHED,
+    ARM_BLOCKED_RC_LOST,
     ARM_BLOCKED_RC_LOW,
     ARM_BLOCKED_UNKNOWN,
     ARM_THRESHOLD,
@@ -205,3 +206,28 @@ def test_not_knowing_is_not_evidence_of_a_block():
     the case every panel starts in, before the first STATE line arrives."""
     assert arming_block_reason(None) is None
     assert arming_block_reason(None, rc_arm_high=False, estop_latched=True) is None
+
+
+# -- v5: RC loss ------------------------------------------------------------
+
+
+def test_sbus_silence_forces_estop_even_when_autonomous_was_granted():
+    arb = arbitrate(1811, 1811, serial_wants_auto=True, link_live=True, sbus_silent=True)
+    assert arb.mode == MODE_ESTOP
+    assert arb.armed is False
+    assert arb.rc_lost_latched is True
+    assert arb.autonomy_blocked_by == "sbus_silent"
+
+
+def test_a_returning_link_needs_channel_7_cycled():
+    held = arbitrate(1811, 1811, rc_lost_latched=True)          # link back, Ch7 high
+    assert held.armed is False and held.rc_lost_latched is True
+    cleared = arbitrate(1811, 172, rc_lost_latched=True)        # Ch7 low, live link
+    assert cleared.rc_lost_latched is False
+    assert arbitrate(1811, 1811, rc_lost_latched=False).armed is True
+
+
+def test_the_arming_reason_names_the_lost_link():
+    assert arming_block_reason(False, rc_arm_high=True, rc_lost_latched=True) == ARM_BLOCKED_RC_LOST
+    # channel 7 low is still the first thing to say
+    assert arming_block_reason(False, rc_arm_high=False, rc_lost_latched=True) == ARM_BLOCKED_RC_LOW

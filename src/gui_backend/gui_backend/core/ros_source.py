@@ -35,6 +35,8 @@ from asket_common.heading import (
 )
 
 from . import adapters, payloads
+from .ros_camera import CompressedCamera
+from .setup_values import SetupValues
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
 
 from .commands import (
@@ -66,7 +68,50 @@ class LatestMessage:
         return time.monotonic() - self.received_monotonic
 
 
-def _radio_from_config(config: dict):
+#: Setup fields that, when answered, take precedence over topics.yaml's
+#: shore_station block. Read by gui_backend itself, live.
+_STATION_FIELDS = (
+    "deployment.station.lat", "deployment.station.lon", "deployment.station.boresight_deg",
+)
+
+
+def _station_config(config: dict, setup) -> dict:
+    """topics.yaml's shore_station, with the Setup page's answers laid over it.
+
+    The station counts as configured from Setup only when its position AND
+    its bearing have been entered: a position without a bearing would draw a
+    confident sector pointing north. The other values (heights, sea state,
+    channel width) apply whenever they are answered.
+    """
+    from asket_common.link_budget import SEA_STATE_WAVE_HEIGHT_M
+
+    station = dict(config.get("shore_station") or {})
+    if setup is None:
+        return station
+    if all(setup.answered(f) for f in _STATION_FIELDS):
+        station.update(
+            configured=True,
+            lat=float(setup.get("deployment.station.lat")),
+            lon=float(setup.get("deployment.station.lon")),
+            boresight_deg=float(setup.get("deployment.station.boresight_deg")),
+        )
+    if setup.answered("deployment.station.height_m"):
+        station["height_m"] = float(setup.get("deployment.station.height_m"))
+    if setup.answered("deployment.radio.channel_width_mhz"):
+        station["channel_width_mhz"] = float(setup.get("deployment.radio.channel_width_mhz"))
+    if setup.answered("deployment.sea.state"):
+        wave = SEA_STATE_WAVE_HEIGHT_M.get(str(setup.get("deployment.sea.state")))
+        if wave is not None:
+            station["wave_height_m"] = wave
+    if setup.answered("vessel.radio.antenna_height_m"):
+        station["vessel_radio"] = dict(
+            station.get("vessel_radio") or {},
+            height_m=float(setup.get("vessel.radio.antenna_height_m")),
+        )
+    return station
+
+
+def _radio_from_config(config: dict, setup=None):
     """Build the link budget from ``topics.yaml``, or return nothing.
 
     Nothing is the honest answer when the station has not been entered. The
@@ -79,7 +124,7 @@ def _radio_from_config(config: dict):
     This is the interim. These values belong on the mission setup page beside
     the sonar mounting geometry — see ``docs/open_questions.md`` Q11.
     """
-    station_cfg = (config.get("shore_station") or {})
+    station_cfg = _station_config(config, setup)
     if not station_cfg.get("configured"):
         return None, None
 
@@ -113,6 +158,65 @@ def _radio_from_config(config: dict):
     return radio, origin
 
 
+class _GeofenceFile:
+    """The day's geofence polygon, re-read when its file changes.
+
+    ``snapshot("plan")`` is called on every hub tick, so the file is stat'ed
+    at most every few seconds and parsed only when its mtime moves. A missing
+    or broken file is reported in the payload (``geofence_error``), never
+    raised: the map then simply has no fence, and the pre-flight's
+    ``nav.geofence`` check says why.
+    """
+
+    RECHECK_S = 5.0
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._checked = -math.inf
+        self._mtime = None
+        self._payload = self._empty("no geofence file is configured" if not path else "")
+
+    @staticmethod
+    def _empty(error: str) -> dict:
+        return {"lines": [], "geofence": [], "geofence_name": "", "geofence_error": error}
+
+    def payload(self) -> dict:
+        now = time.monotonic()
+        if not self.path or now - self._checked < self.RECHECK_S:
+            return self._payload
+        self._checked = now
+        import os
+
+        try:
+            mtime = os.stat(self.path).st_mtime
+        except OSError:
+            self._mtime = None
+            self._payload = self._empty(f"{self.path} does not exist")
+            return self._payload
+        if mtime == self._mtime:
+            return self._payload
+        self._mtime = mtime
+        self._payload = self._read()
+        return self._payload
+
+    def _read(self) -> dict:
+        import yaml
+
+        from asket_common.geofence import GeofenceError, load_geofence
+
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                fence = load_geofence(yaml.safe_load(handle))
+        except (OSError, yaml.YAMLError, GeofenceError) as exc:
+            return self._empty(f"{self.path}: {exc}")
+        return {
+            "lines": [],
+            "geofence": [[lon, lat] for lat, lon in fence.polygon],
+            "geofence_name": fence.name,
+            "geofence_error": "",
+        }
+
+
 class RosSource:
     """Reads real topics. Constructed with an already-created ``rclpy`` node."""
 
@@ -126,10 +230,29 @@ class RosSource:
         self._publishers: dict[str, object] = {}
         self._service_clients: dict[str, object] = {}
         self._radio, self._station_origin = _radio_from_config(config)
+        self._radio_profile = None
+        self._camera = CompressedCamera()
+
+        self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
         self._link = adapters.link_from_measurements("wifi", 1.0, 0.0, 800_000.0)
 
         self._subscribe_all()
         self._prepare_commands()
+
+    def _setup_or_config(self, field_id: str, config_value):
+        if self.setup.answered(field_id) or config_value is None:
+            return float(self.setup.get(field_id))
+        return float(config_value)
+
+    @property
+    def setup(self) -> SetupValues:
+        """The Setup page's file: the values gui_backend applies itself are
+        read from here (core/setup_values.py). Created on first use."""
+        values = self.__dict__.get("_setup_values")
+        if values is None:
+            values = SetupValues((getattr(self, "config", None) or {}).get("setup_file"))
+            self.__dict__["_setup_values"] = values
+        return values
 
     # -- wiring -----------------------------------------------------------
 
@@ -158,6 +281,16 @@ class RosSource:
             )
 
     def _make_callback(self, name: str):
+        if name == "camera_image":
+            def on_frame(msg) -> None:
+                self.latest[name] = LatestMessage(msg, time.monotonic())
+                # Stamped with the driver's capture time when it sets one, so
+                # a frame that queued shows its true age.
+                stamp = adapters._stamp_to_utc_ms(msg.header)
+                self._camera.on_message(msg, stamp or self.now_utc_ms())
+
+            return on_frame
+
         def callback(msg) -> None:
             self.latest[name] = LatestMessage(msg, time.monotonic())
 
@@ -206,10 +339,18 @@ class RosSource:
         odom_age = self.latest.get("odom_filtered", LatestMessage()).age_s
         heading_valid = odom is not None and odom_age < 2.0
 
+        # Satellites, HDOP and RTK state exist only in MAVROS's GPSRAW, so
+        # only while the Pixhawk link is up. A stale one is dropped rather
+        # than letting a frozen "RTK fixed" outlive the link that said it.
+        gps_raw = self._msg("gps_raw")
+        if self.latest.get("gps_raw", LatestMessage()).age_s > 5.0:
+            gps_raw = None
+
         return adapters.vessel_from_odometry(
             fix,
             odom,
             self._msg("imu"),
+            gps_raw=gps_raw,
             extra={
                 "heading_source": SOURCE_EKF if heading_valid else SOURCE_NONE,
                 "heading_valid": heading_valid,
@@ -266,10 +407,23 @@ class RosSource:
         that differs, and here it comes from the GNSS fix instead of from a
         simulated vessel.
         """
+        self._refresh_radio()
         self._link = adapters.link_from_measurements(
             active_link, quality, rtt_ms, capacity,
             radio=self._radio, **self._vessel_enu(),
         )
+
+    def _refresh_radio(self) -> None:
+        """Rebuild the link budget when the Setup file has changed."""
+        profile = self.setup.refresh()
+        if profile is self._radio_profile:
+            return
+        self._radio_profile = profile
+        try:
+            self._radio, self._station_origin = _radio_from_config(self.config, self.setup)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.node.get_logger().error(f"shore station not usable: {exc}")
+            self._radio, self._station_origin = None, None
 
     def _vessel_enu(self) -> dict:
         """The boat in the station's local ENU frame, or nothing.
@@ -321,8 +475,12 @@ class RosSource:
             vessel_cfg = self.config.get("vessel") or {}
             record = adapters.battery_from_ros(
                 msg,
-                capacity_wh=vessel_cfg.get("battery_capacity_wh", 237.0),
-                hotel_load_w=vessel_cfg.get("hotel_load_w", 85.0),
+                # The Setup page's answer when there is one, else topics.yaml,
+                # else the field's shipped default.
+                capacity_wh=self._setup_or_config(
+                    "vessel.battery.capacity_wh", vessel_cfg.get("battery_capacity_wh")),
+                hotel_load_w=self._setup_or_config(
+                    "vessel.battery.hotel_load_w", vessel_cfg.get("hotel_load_w")),
             )
             vessel = self._vessel_record()
             return Sample(
@@ -348,14 +506,25 @@ class RosSource:
                 return None
             return self._lidar_sample(detail)
 
+        if stream == "camera":
+            # Not fitted: no stream at all, and the panel says "Camera not
+            # connected". Fitted: a picture, or the reason there is none.
+            if not self.describe()["fitted"].get("camera"):
+                return None
+            utc, payload = self._camera.payload(detail)
+            return Sample(stream, utc or self.now_utc_ms(), payload)
+
         if stream == "link":
-            return Sample(
-                stream, self.now_utc_ms(),
-                payloads.link_payload(
-                    self._link, profile="", profile_manual=False, clients=0,
-                    rate_bytes_per_s=0.0, detail=detail,
-                ),
+            payload = payloads.link_payload(
+                self._link, profile="", profile_manual=False, clients=0,
+                rate_bytes_per_s=0.0, detail=detail,
             )
+            # Nothing on the boat measures link quality: the node feeds 1.0
+            # whenever a browser is connected, which the panel printed as
+            # "Quality 100 %". Sent as unknown rather than as that number.
+            if "quality" in payload:
+                payload["quality"] = None
+            return Sample(stream, self.now_utc_ms(), payload)
 
         if stream == "track":
             step = {"full": 1, "reduced": 3, "minimal": 10}[detail]
@@ -377,6 +546,13 @@ class RosSource:
                 return None
             report = adapters.preflight_from_ros(msg)
             return Sample(stream, report["run_utc_ms"] or self.now_utc_ms(), report)
+
+        if stream == "plan":
+            # The real boat has no survey lines on the wire (no planner sends
+            # them), but it does have the polygon Nav2 is fenced in by. Drawing
+            # the same file the keep-out mask is built from means the line on
+            # the map is the line the planner actually respects.
+            return Sample(stream, self.now_utc_ms(), self._geofence.payload())
 
         if stream == "coverage":
             step = {"full": 1, "reduced": 3, "minimal": 10}[detail]
@@ -485,7 +661,8 @@ class RosSource:
                 if state["mission"].get("state") == "ERROR"
                 else None
             ),
-            "disk_free_bytes": None,
+            # From the recorder's own report (its disk, not this process's).
+            "disk_free_bytes": state["mission"].get("disk_free_bytes"),
             "sonar_expected": self._msg("sonar_status") is not None,
             "sonar_connected": state["sonar"].get("connected"),
             "sonar_seconds_since_data": state["sonar"].get("seconds_since_data"),
@@ -494,11 +671,22 @@ class RosSource:
             "heading_divergence_suspicious": state["heading"].get("divergence_suspicious"),
             "heading_divergence_deg": state["heading"].get("divergence_deg"),
             "roll_deg": state["vessel"].get("roll_deg"),
-            "geofence_distance_m": None,
+            "geofence_distance_m": self._geofence_distance_m(state["vessel"]),
             "rc_link_ok": state["pico"].get("rc_link_ok"),
             # Whether the GUI is reading the Pico's status or guessing at it.
             **self._pico_state_facts(),
         }
+
+    def _geofence_distance_m(self, vessel: dict) -> float | None:
+        """Signed metres to the day's fence edge (positive inside), or None
+        when there is no fence or no position."""
+        from asket_common.geofence import signed_distance_m
+
+        fence = self._geofence.payload().get("geofence") or []
+        lat, lon = vessel.get("lat"), vessel.get("lon")
+        if len(fence) < 3 or lat is None or lon is None:
+            return None
+        return signed_distance_m([(p_lat, p_lon) for p_lon, p_lat in fence], lat, lon)
 
     def _pico_state_facts(self) -> dict:
         """What the pre-flight needs to judge the STATE parser.
@@ -711,6 +899,8 @@ class RosSource:
             # "health" when SonarView runs the sonar; "full" (the default,
             # for an older topics.yaml) when this stack drives it.
             "sonar_panel": self.config.get("sonar_panel") or "full",
+            # Where SonarView's web page is, from the Setup page.
+            "sonarview_url": str(self.setup.get("vessel.sonarview.url") or ""),
             "estop": {
                 "mode": estop.get("mode"),
                 "available": bool(estop.get("mode")),

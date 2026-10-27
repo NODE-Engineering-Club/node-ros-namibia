@@ -80,6 +80,21 @@ def generate_launch_description():
             description="A lidar is aboard and its driver is running.",
         ),
         DeclareLaunchArgument(
+            "geofence_expected",
+            default_value="false",
+            description="The Nav2 survey profile runs, so the pre-flight requires its geofence.",
+        ),
+        DeclareLaunchArgument(
+            "mavros_expected",
+            default_value="false",
+            description="MAVROS is started, so the pre-flight expects its node.",
+        ),
+        DeclareLaunchArgument(
+            "geofence_file",
+            default_value="/data/setup/geofence.yaml",
+            description="The geofence polygon drawn on the map (the file Nav2's keep-out is built from).",
+        ),
+        DeclareLaunchArgument(
             "camera_fitted",
             default_value="false",
             description="A camera the GUI can show is aboard and running.",
@@ -122,6 +137,7 @@ def generate_launch_description():
                     "static_dir": static_dir,
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "camera_fitted": LaunchConfiguration("camera_fitted"),
+                    "geofence_file": LaunchConfiguration("geofence_file"),
                 },
                 sim_time,
             ],
@@ -139,12 +155,16 @@ def generate_launch_description():
                     ),
                     # The competition stack's own nodes, so a missing one is
                     # reported rather than silently absent from the verdict.
-                    "expected_nodes": ["pico_bridge", "gui_backend"],
+                    "expected_nodes": ["pico_bridge", "gui_backend", "mission_recorder"],
+                    # Plus mavros when it is started, and the Nav2 survey
+                    # nodes when geofence_expected (system_test_node adds them).
+                    "mavros_expected": LaunchConfiguration("mavros_expected"),
                     # Equipment absent on purpose is "not checked", not a
                     # NO-GO: no lidar unless lidar_fitted, and the sonar is
                     # watched only when omniscan_bridge is started.
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "sonar_monitored": LaunchConfiguration("enable_sonar"),
+                    "geofence_expected": LaunchConfiguration("geofence_expected"),
                 },
                 sim_time,
             ],

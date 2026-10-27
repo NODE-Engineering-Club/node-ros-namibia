@@ -54,6 +54,10 @@ DEFAULT_FREQ_MHZ = 5500.0
 #: exactly when somebody is testing at the ramp.
 DEFAULT_WAVE_HEIGHT_M = 0.5
 
+#: The Setup page's sea state, as a wave height for the two-ray term. Glassy
+#: matches the simulator's GLASSY_WAVE_HEIGHT_M; slight is the default above.
+SEA_STATE_WAVE_HEIGHT_M = {"glassy": 0.02, "slight": 0.5, "moderate": 1.25}
+
 
 def wavelength_m(freq_mhz: float = DEFAULT_FREQ_MHZ) -> float:
     return C_M_S / (freq_mhz * 1e6)

@@ -165,15 +165,33 @@ def test_nothing_is_given_a_name_nobody_has_confirmed():
 # just a way to hide faults.
 
 COLLAPSIBLE = {
-    "PowerPanel.jsx": "power",
     "HeadingPanel.jsx": "heading",
     "SonarPanel.jsx": "sonar",
     "VesselState.jsx": "vessel",
     "LidarPanel.jsx": "obstacles",
     "DiagnosticsPanel.jsx": "preflight",
+}
+
+#: Panels of the simple view that no longer fold (their detail is a Details
+#: value instead). The same rule in another form: what is off-nominal is
+#: stated on screen, by Panel, in both views.
+NOT_FOLDING = {
+    "PowerPanel.jsx": "power",
     "MissionPanel.jsx": "recording",
     "LinkStatus.jsx": "link",
 }
+
+
+@pytest.mark.parametrize("panel,panel_id", sorted(NOT_FOLDING.items()))
+def test_a_panel_that_does_not_fold_still_states_its_fault(panel, panel_id):
+    text = source("panels", panel)
+    assert f'id="{panel_id}"' in text
+    assert "forceReason={forced}" in text
+    assert "const forced =" in text
+    assert "summary={" in text
+    panel_component = source("components", "Panel.jsx")
+    plain = panel_component.split("if (!collapsible) {", 1)[1].split("return (\n    <section className={`panel", 1)[0]
+    assert "{forceReason && <p className=\"forced-note\">{forceReason}</p>}" in plain
 
 
 def summary_block(panel: str) -> str:

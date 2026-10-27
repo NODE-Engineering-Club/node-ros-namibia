@@ -432,6 +432,12 @@ export class Connection {
           rateHz: header.rate_hz,
           reason: 'live',
           statusAt: now,
+          // When each recent frame ARRIVED here, for the rate actually
+          // received — which on a struggling link is not the rate asked for.
+          arrivals: [
+            ...(previous?.arrivals || []).filter((t) => now - t < RECEIVED_WINDOW_MS),
+            now,
+          ],
         },
       });
       return;
@@ -490,6 +496,20 @@ export function cameraAgeMs(state) {
  * together means the link has gone. Different problems, different places to
  * go, and from the shore they look identical without this.
  */
+const RECEIVED_WINDOW_MS = 15_000;
+
+/**
+ * Frames per second actually received over the last fifteen seconds, or null
+ * before two frames have arrived. Long enough a window to measure the reduced
+ * profile's one frame in five seconds.
+ */
+export function cameraReceivedFps(state, nowMs = Date.now()) {
+  const recent = (state.camera?.arrivals || []).filter((t) => nowMs - t < RECEIVED_WINDOW_MS);
+  if (recent.length < 2) return recent.length ? 0 : null;
+  const span = Math.max(nowMs - recent[0], recent[recent.length - 1] - recent[0]);
+  return span > 0 ? (recent.length - 1) / (span / 1000) : null;
+}
+
 export function cameraSilenceMs(state) {
   const at = state.camera?.statusAt;
   return at ? Date.now() - at : null;

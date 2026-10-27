@@ -36,7 +36,7 @@ export const MODE_MANUAL = 1;
 export const MODE_AUTONOMOUS = 2;
 export const MODE_NAMES = { 0: 'ESTOP', 1: 'MANUAL', 2: 'AUTONOMOUS' };
 
-// Raw SBUS counts, as pico-node_v4 reports them. Eleven bits clamped to this
+// Raw SBUS counts, as pico-node_v5 reports them. Eleven bits clamped to this
 // range with 991 at centre — NOT percentages. Mirrors SBUS_MIN/MID/MAX in
 // asket_sim/core/pico.py and gui_backend/core/pico_state.py; a test compares
 // the payloads these produce against the backend's, so the three cannot drift.
@@ -48,8 +48,8 @@ export const SBUS_MAX = 1811;
 export const CH8_ESTOP_MAX = 700;
 export const CH7_ARM_MIN = 1000;
 
-// FW_VERSION in firmware/pico-node_v4/pico-node_v4.ino.
-export const FIRMWARE_VERSION = 4;
+// FW_VERSION in firmware/pico-node_v5/pico-node_v5.ino.
+export const FIRMWARE_VERSION = 5;
 
 const wrap180 = (deg) => ((deg + 180) % 360 + 360) % 360 - 180;
 const wrap360 = (deg) => ((deg % 360) + 360) % 360;

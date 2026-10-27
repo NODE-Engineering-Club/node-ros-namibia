@@ -81,6 +81,9 @@ def vessel_payload(sample, detail: str = DETAIL_FULL) -> dict:
             "cog_deg": _f(sample.cog_deg, 1),
             "sog_ms": _f(sample.sog_ms, 2),
             "heading_source": sample.heading_source,
+            # "RTK fixed", "RTK float", "GPS", "no position": the one GNSS
+            # word an operator needs, so it travels on the reduced link too.
+            "fix_quality": _fix_quality(sample),
         }
     )
     if detail == DETAIL_REDUCED:
@@ -107,11 +110,25 @@ def vessel_payload(sample, detail: str = DETAIL_FULL) -> dict:
             # a real count, so nothing in sim could reach the branch.
             "num_sats": _opt_int(sample.num_sats),
             "hdop": _f(sample.hdop, 2),
+            # Horizontal standard deviation of the fix, in metres, from the
+            # NavSatFix covariance. Not an HDOP, and never labelled as one.
+            "position_sigma_m": _f(getattr(sample, "position_sigma_m", None), 2),
             "distance_travelled_m": _f(sample.distance_travelled_m, 1),
             "on_survey": bool(sample.on_survey),
         }
     )
     return out
+
+
+def _fix_quality(sample) -> str | None:
+    """The adapters set it; the simulator's vessel carries only a MAVLink
+    fix type, which is the same scale GPSRAW uses."""
+    quality = getattr(sample, "fix_quality", None)
+    if quality is not None or not hasattr(sample, "gnss_fix_type"):
+        return quality
+    from .adapters import fix_quality_from_mavlink
+
+    return fix_quality_from_mavlink(sample.gnss_fix_type)
 
 
 def heading_payload(estimate: HeadingEstimate, detail: str = DETAIL_FULL) -> dict:
@@ -203,6 +220,8 @@ def pico_payload(sample, detail: str = DETAIL_FULL) -> dict:
             "sbus_frames_bad": _opt_int(getattr(sample, "sbus_frames_bad", None)),
             "sbus_failsafe": _opt_bool(getattr(sample, "sbus_failsafe", None)),
             "sbus_frame_lost": _opt_bool(getattr(sample, "sbus_frame_lost", None)),
+            "rc_lost_latched": _opt_bool(getattr(sample, "rc_lost_latched", None)),
+            "serial_tx_dropped": _opt_int(getattr(sample, "serial_tx_dropped", None)),
             # Why the propellers cannot turn, in one sentence, or absent when
             # nothing is blocking them.
             #
@@ -218,6 +237,7 @@ def pico_payload(sample, detail: str = DETAIL_FULL) -> dict:
                 _opt_bool(sample.armed),
                 rc_arm_high=_opt_bool(getattr(sample, "ch7_arm_high", None)),
                 estop_latched=_opt_bool(sample.estop_latched),
+                rc_lost_latched=_opt_bool(getattr(sample, "rc_lost_latched", None)),
             ),
         }
     )

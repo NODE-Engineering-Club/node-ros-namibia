@@ -1,7 +1,10 @@
+import { useState } from 'react';
+
 import { Panel } from '../components/Panel.jsx';
 import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { streamPayload } from '../lib/connection.js';
 import { COMMAND_LABELS, COMMAND_STATUS_LABELS, CONFIRM_PROMPTS } from '../lib/labels.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * The three mode commands.
@@ -16,6 +19,16 @@ import { COMMAND_LABELS, COMMAND_STATUS_LABELS, CONFIRM_PROMPTS } from '../lib/l
  *   a confirmation from the Pico or an explicit failure.
  */
 export function ModeCommands({ state, connection }) {
+  return (
+    <Panel title="Mode">
+      <ModeButtons state={state} connection={connection} />
+    </Panel>
+  );
+}
+
+/** The buttons and their outcome line, shared with the Boat panel. */
+export function ModeButtons({ state, connection }) {
+  const details = useDetails();
   const pico = streamPayload(state, 'pico');
   const mode = pico?.mode;
 
@@ -43,6 +56,12 @@ export function ModeCommands({ state, connection }) {
 
   const withArmingBlock = (prompt) => (armingBlock ? `${prompt} ${armingBlock}.` : prompt);
 
+  // Refused by the backend's NO-GO gate. The way past it is two deliberate
+  // acts — tick the box, then the two-step button — and the backend logs it.
+  // An aid, not a safety: the transmitter remains the authority.
+  const nogoRefused = latest?.name === 'set_mode' && latest?.status === 'failed' && latest?.nogo;
+  const [nogoAcknowledged, setNogoAcknowledged] = useState(false);
+
   // The vessel declares what a propulsion cut can do here; the GUI does not
   // assume it. Falls back to the honest minimum before the hello arrives.
   const declared = state.hello?.source?.estop;
@@ -58,7 +77,7 @@ export function ModeCommands({ state, connection }) {
   };
 
   return (
-    <Panel title="Mode">
+    <>
       {/* Standing, above the buttons, because the state exists before
           anybody presses one. Without it an operator who presses
           Autonomous, sees the vessel confirm AUTONOMOUS, and watches
@@ -109,6 +128,30 @@ export function ModeCommands({ state, connection }) {
         </p>
       )}
 
+      {nogoRefused && mode !== 'AUTONOMOUS' && (
+        <div className="nogo-force">
+          <label>
+            <input
+              type="checkbox"
+              checked={nogoAcknowledged}
+              onChange={(e) => setNogoAcknowledged(e.target.checked)}
+            />{' '}
+            I have read the pre-flight and accept the NO-GO
+          </label>
+          <ConfirmButton
+            danger
+            label="I know it is NO-GO, force"
+            prompt="Send the boat autonomous over a NO-GO pre-flight? This is logged."
+            disabled={offline || !nogoAcknowledged}
+            pending={pendingFor('set_mode', 'AUTONOMOUS')}
+            onConfirm={() => {
+              setNogoAcknowledged(false);
+              connection.command('set_mode', { mode: 'AUTONOMOUS', force_nogo: true });
+            }}
+          />
+        </div>
+      )}
+
       {latest && (
         <p
           className={
@@ -120,14 +163,16 @@ export function ModeCommands({ state, connection }) {
         </p>
       )}
 
-      <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
-        {estop.isModeRequest
-          ? 'This is a mode request, not a latch.'
-          : 'This is a software latch.'}{' '}
-        The hardware killswitch and RC channel&nbsp;8 cut propulsion independently
-        and always work.
-      </p>
-    </Panel>
+      {details && (
+        <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
+          {estop.isModeRequest
+            ? 'This is a mode request, not a latch.'
+            : 'This is a software latch.'}{' '}
+          The hardware killswitch and RC channel&nbsp;8 cut propulsion independently
+          and always work.
+        </p>
+      )}
+    </>
   );
 }
 

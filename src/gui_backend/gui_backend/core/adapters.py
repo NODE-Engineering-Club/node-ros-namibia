@@ -95,6 +95,9 @@ def vessel_from_ros(fix, compass_hdg, gps_vel, imu, gps_raw=None, extra=None):
         else 0,
         num_sats=num_sats,
         hdop=hdop,
+        fix_quality=fix_quality_from_mavlink(getattr(gps_raw, "fix_type", None))
+        if gps_raw is not None
+        else None,
         distance_travelled_m=(extra or {}).get("distance_travelled_m", 0.0),
         on_survey=(extra or {}).get("on_survey", False),
     )
@@ -112,7 +115,7 @@ def pico_from_ros(msg, received_utc_ms: int = 0):
     * ``std_msgs/String`` — what the real ``pico_bridge`` publishes. It reads
       lines off the serial link and republishes any ``STATE ...`` line verbatim,
       unparsed, so the text is parsed here through
-      :mod:`gui_backend.core.pico_state`. The format is ``pico-node_v4``'s, and
+      :mod:`gui_backend.core.pico_state`. The format is ``pico-node_v5``'s, and
       only that one.
     * ``asket_interfaces/PicoStatus`` — what ``asket_sim`` publishes, a proper
       structured message.
@@ -195,6 +198,8 @@ def _pico_from_state_line(line: str, received_utc_ms: int):
         sbus_frames_bad=state.sbus_frames_bad,
         sbus_failsafe=state.sbus_failsafe,
         sbus_frame_lost=state.sbus_frame_lost,
+        rc_lost_latched=state.rc_lost_latched,
+        serial_tx_dropped=state.serial_tx_dropped,
         state_line=state.raw,
         state_parsed=state.parsed,
         state_unknown_keys=state.unknown_keys,
@@ -202,7 +207,42 @@ def _pico_from_state_line(line: str, received_utc_ms: int):
     )
 
 
-def vessel_from_odometry(fix, odom_filtered, imu=None, extra=None):
+#: MAVLink GPS_FIX_TYPE (what MAVROS's GPSRAW carries) to the four words the
+#: cockpit uses. 7 (static) and 8 (PPP) are ordinary positions for a boat.
+_FIX_QUALITY = {
+    0: "none", 1: "none", 2: "gps", 3: "gps", 4: "gps",
+    5: "rtk_float", 6: "rtk_fixed", 7: "gps", 8: "gps",
+}
+
+#: GPSRAW's "unknown" sentinels.
+_GPSRAW_UNKNOWN_SATS = 255
+_GPSRAW_UNKNOWN_EPH = 65535
+
+
+def fix_quality_from_mavlink(fix_type) -> str | None:
+    """``rtk_fixed`` / ``rtk_float`` / ``gps`` / ``none``, or None if unknown."""
+    if fix_type is None:
+        return None
+    return _FIX_QUALITY.get(int(fix_type), "none")
+
+
+def gpsraw_fields(gps_raw) -> dict:
+    """Satellites, HDOP and fix quality from ``mavros_msgs/GPSRAW``.
+
+    The only message on this boat that carries them: NavSatFix has neither a
+    satellite count nor a DOP, and its status cannot tell RTK from a plain
+    fix (MAVROS reports both as STATUS_FIX). Unknown sentinels become None.
+    """
+    sats = int(getattr(gps_raw, "satellites_visible", _GPSRAW_UNKNOWN_SATS))
+    eph = int(getattr(gps_raw, "eph", _GPSRAW_UNKNOWN_EPH))
+    return {
+        "fix_quality": fix_quality_from_mavlink(getattr(gps_raw, "fix_type", None)),
+        "num_sats": None if sats == _GPSRAW_UNKNOWN_SATS else sats,
+        "hdop": None if eph in (0, _GPSRAW_UNKNOWN_EPH) else eph / 100.0,
+    }
+
+
+def vessel_from_odometry(fix, odom_filtered, imu=None, extra=None, gps_raw=None):
     """Assemble a vessel record from the club stack's topics.
 
     Where the values come from, and why:
@@ -248,14 +288,28 @@ def vessel_from_odometry(fix, odom_filtered, imu=None, extra=None):
     stamps = [_stamp_to_utc_ms(m.header) for m in (fix, odom_filtered, imu) if m is not None]
     utc_ms = min(stamps) if stamps else 0
 
-    # Neither NavSatFix nor Odometry carries a satellite count, and this stack
-    # has no equivalent of MAVROS's GPSRAW. Absent, not zero: "0 satellites"
-    # would read as a GNSS failure and ground a perfectly healthy vessel.
-    hdop = None
+    # Neither NavSatFix nor Odometry carries a satellite count or a DOP. They
+    # come from MAVROS's GPSRAW when the Pixhawk link is up, and are absent
+    # otherwise. Absent, not zero: "0 satellites" would read as a GNSS
+    # failure and ground a perfectly healthy vessel.
+    #
+    # This used to put sqrt(position covariance) — a standard deviation in
+    # metres — in the `hdop` field, and the panel printed it as "HDOP". It is
+    # now its own field, under its own name.
+    sigma_m = None
     if fix is not None and fix.position_covariance[0] > 0.0:
-        # Horizontal standard deviation in metres. Reported as itself rather
-        # than converted to an HDOP by a made-up UERE.
-        hdop = math.sqrt(fix.position_covariance[0])
+        sigma_m = math.sqrt(fix.position_covariance[0])
+
+    if gps_raw is not None:
+        gnss = gpsraw_fields(gps_raw)
+    else:
+        # Without GPSRAW, NavSatFix can only say "a fix" or "no fix".
+        status = getattr(getattr(fix, "status", None), "status", None)
+        gnss = {
+            "fix_quality": None if status is None else ("gps" if status >= 0 else "none"),
+            "num_sats": None,
+            "hdop": None,
+        }
 
     return SimpleNamespace(
         utc_ms=utc_ms,
@@ -273,8 +327,10 @@ def vessel_from_odometry(fix, odom_filtered, imu=None, extra=None):
         gnss_fix_type=int(getattr(getattr(fix, "status", None), "status", -1)) + 3
         if fix is not None
         else 0,
-        num_sats=None,
-        hdop=hdop,
+        num_sats=gnss["num_sats"],
+        hdop=gnss["hdop"],
+        fix_quality=gnss["fix_quality"],
+        position_sigma_m=sigma_m,
         distance_travelled_m=(extra or {}).get("distance_travelled_m", 0.0),
         on_survey=(extra or {}).get("on_survey", False),
     )
@@ -400,7 +456,7 @@ def _nearest(ranges, angle_min_deg, increment_deg):
 #: Mapped by name rather than by index arithmetic, for the same reason the
 #: Pico's mode numbering is: the two scales are allowed to diverge, and an
 #: off-by-one would turn a FAIL into a WARN on screen.
-_PREFLIGHT_STATUS = {0: "PASS", 1: "WARN", 2: "FAIL", 3: "SKIPPED"}
+_PREFLIGHT_STATUS = {0: "PASS", 1: "WARN", 2: "FAIL", 3: "SKIPPED", 4: "NOTE"}
 
 
 def preflight_from_ros(msg) -> dict:

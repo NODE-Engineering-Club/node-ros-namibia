@@ -22,7 +22,7 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | Energy | 2× LiPo 4S 8000 mAh **in parallel** ≈ 2 × 14.8 V × 8 Ah ≈ **237 Wh**. Probably **2 BQ76920 BMS** boards, one per pack — **TO VERIFY**. |
 | GNSS | Holybro H-RTK Unicore UM982 (dual antenna, heading) **on the Pixhawk**. RTK base Holybro F9P ashore; corrections wanted along base → shore laptop → WiFi → Jetson → MAVROS → Pixhawk (**not implemented**, see Phase B). |
 | Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. |
-| Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver yet.** |
+| Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver in the image yet**; prepared behind `enable_oak` (off), see `docs/CAMERA_OAK.md`. |
 | Lidars | **No Livox and no RPLidar on board for now.** ⇒ **The boat has no obstacle detection.** |
 | BlueOS / Raspberry Pi 5 | **Not used.** |
 | Network | MikroTik CSS610 switch + NetMetal 5 ax (boat) + mANTBox ax 15s (shore). IP plan below. |
@@ -81,17 +81,17 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | Pixhawk 4 | USB (via hub) — today MAVLink via `fcu_url` `tcp://localhost:5777`, a BlueOS router (`src/bringup/launch/njord.launch.py:67`) | `/dev/pixhawk` (udev) — not yet used by the launch (Phase B) | `mavros` → `imu_gps_driver` → `/imu_driver/imu_raw`, `/gps_driver/gps_raw`; EKF → `/odometry/filtered` | yes (`enable_mavros`) | Vessel, Heading, map | ⚠️ needs a serial `fcu_url` without BlueOS (Phase B) |
 | UM982 GNSS (dual antenna) | to the Pixhawk | — | via MAVROS as above | — | Heading (source shown as EKF) | ⚠️ ArduPilot/PX4 GPS-yaw config to verify |
 | F9P RTK base | shore laptop → WiFi → Jetson | — | none (MAVROS `gps_rtk` plugin not fed) | — | — | ❌ (Phase B) |
-| Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/ttyACM0` (`njord.launch.py:70`); `/dev/pico` with udev | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **no** (`use_pico_bridge:=false`, Pixhawk path is the default — Phase B) | Mode, Vessel, pre-flight | ⚠️ |
+| Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/pico` (udev, `deploy/udev/`) | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **yes** (`use_pico_bridge:=true` is the default since Phase B a) | Mode, Vessel, pre-flight | ⚠️ bench test first |
 | 2× T200 + Basic ESC 30A | PWM from Pico GPIO15/16, 1000–2000 µs, 1500 neutral | `firmware/pico-node_v4/pico-node_v4.ino` | firmware | always (firmware) | Vessel | ⚠️ motor path default (Phase B) |
 | RP4TD (ELRS) + MT12 | SBUS into Pico GPIO5 (inverted, 100 kbaud 8E2) | firmware; Ch3 throttle, Ch4 yaw, Ch7 arm, Ch8 mode | firmware | always | Vessel (RC) | ⚠️ SBUS output and failsafe behaviour to verify |
 | ESC relay (A3KM) | Pico GPIO21 | firmware | firmware | — | Vessel ("ESC power") | ❌ not wired |
 | E-stop button feedback | Pico GPIO20 (divider) | `ESTOP_FEEDBACK_ENABLED 0` | firmware | — | "not sent" | ❌ not wired |
 | 3 lights + buzzer | Pico GPIO10/11/12, GPIO13 | firmware | firmware | always | — | ✅ (firmware) |
-| BMS pack 1, pack 2 (BQ76920 via MCP2221) | USB-UART 115200 (via hub) | `bms_port` `/dev/bms_pack1`, `bms2_port` `/dev/bms_pack2` (udev) | `bms_reader` ×2 → `/battery/pack1`, `/battery/pack2`; `battery_aggregator` → `/battery/state` | no (`enable_bms:=false`) | Power, status strip | ⚠️ state of charge estimated from cell voltage |
+| BMS pack 1, pack 2 (BQ76920 via MCP2221) | USB-UART 115200 (via hub) | `bms_port` `/dev/bms_pack1`, `bms2_port` `/dev/bms_pack2` (udev) | `bms_reader` → `/battery/pack1` (+ `/battery/pack2` with `enable_bms2:=true`); `battery_aggregator` → `/battery/state` | no (`enable_bms:=false`); only one BMS wired, so `enable_bms2` defaults to false | Power, status strip | ⚠️ state of charge estimated from cell voltage; with one BMS the second pack is not measured |
 | 2× LiPo 4S 8000 mAh (parallel) | — | GUI capacity 237 Wh (`src/gui_backend/config/topics.yaml`) | — | — | Power | ✅ config |
 | Omniscan 3D 450 SS Modular | Ethernet | 10.10.20.31 (`src/omniscan_bridge/config/omniscan.yaml`), UDP 62312 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
 | SonarView | Docker on the Jetson (OPEN) | SonarLink `ws://127.0.0.1:7077` (`src/comms/cloud_bridge/config/cloud_bridge_params.yaml`) | `sonar_bridge_node` → `/sonar/decimated` (cloud) | no | — | ⚠️ |
-| OAK-D-LR | PoE Ethernet | 10.10.20.21 (no driver) | expected `/camera/front/image_raw` (SAM2) | — | Camera: "not fitted" | ❌ no driver |
+| OAK-D-LR | PoE Ethernet | 10.10.20.21 (`enable_oak`, off) | `/oak/rgb/image_raw/compressed` for the GUI (to verify); SAM2 expects `/camera/front/image_raw` | — | Camera: "Camera not connected" | ❌ driver not installed |
 | USB camera | — (not used) | `/dev/video0` | `camera_driver` | **no** (`enable_usb_camera:=false`) | — | — |
 | RPLidar S2 | — (not on board) | `/dev/ttyUSB0` | `sllidar_node` | **no** (`enable_lidar:=false`) | Obstacles: "not fitted" | — |
 | Livox Mid-360S | — (not on board) | 10.10.20.22 reserved | none | — | — | ❌ no driver |
@@ -127,18 +127,68 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
  Cloudflare relay ◄─(outbound, read-only)── Jetson (when enable_cloud_bridge:=true)
 ```
 
+## 4b. Nav2 survey profile (Phase B f) — no obstacle sensors
+
+`njord.launch.py nav2_profile:=survey` (default) loads
+`src/bringup/config/nav2_params_survey.yaml`. `nav2_profile:=full` keeps
+`nav2_params.yaml`, built for the SAM2/fusion obstacle pipeline (Livox +
+OAK-D-LR, not fitted). The survey profile knows two things: where the boat may
+go, and how fast. **It does not know about anything in the water.**
+
+| What | Value | Where | Why |
+|---|---|---|---|
+| Obstacle layers | none, in both costmaps | `global_costmap`, `local_costmap` `plugins` | nothing aboard detects obstacles |
+| Geofence | `geofence_layer`: `nav2_costmap_2d::KeepoutFilter`, `filter_info_topic: /geofence/filter_info` | both costmaps | outside the polygon is lethal: nothing is planned or followed out of it |
+| Geofence polygon | `/data/setup/geofence.yaml` (`geofence_file`), lat/lon corners | `sensors/geofence_mask_node`, example `src/bringup/config/geofence.example.yaml` | site-specific; the mask is placed in the `map` frame once the Pixhawk home position is known (the same origin `datum_sync` uses) |
+| Lethal ring around the fence | 30 m (`margin_m`), mask 1 m cells (`resolution_m`) | `geofence_mask_node` parameters | beyond the mask Nav2 applies no keep-out; the ring is what blocks a path that would leave and come back |
+| Inflation | 5 m global, 2 m local, `cost_scaling_factor` 3 | `inflation_layer` | keeps the path off the fence line |
+| Cruise speed | `desired_linear_vel: 0.8` m/s | `controller_server.FollowPath` (Regulated Pure Pursuit) | survey pace with nobody aboard and no obstacle detection |
+| Speed cap (hard) | `max_velocity: [0.8, 0.0, 0.6]`, `min_velocity: [0.0, 0.0, -0.6]` | `velocity_smoother` | after the controller: ≤ 0.8 m/s, no reverse, ≤ 0.6 rad/s |
+| Acceleration | `max_accel: [0.3, 0.0, 0.5]`, `max_decel: [-0.5, 0.0, -0.5]` | `velocity_smoother` | gentle on the props and the ESCs |
+| Slow in turns / near the fence | `use_regulated_linear_velocity_scaling` (min radius 3 m, min 0.25 m/s), `use_cost_regulated_linear_velocity_scaling` | `FollowPath` | |
+| Reverse | `allow_reversing: false` | `FollowPath` | |
+| collision_monitor | in the chain, every polygon and source **disabled** | `collision_monitor` | passes commands through; it is **not** a safety layer in this profile |
+
+Measured in a Nav2 Jazzy (1.3.13) image with a fence edge 60 m east of the
+home: all nine Nav2 nodes active; a cell 70 m east is lethal; a plan to 30 m
+east succeeds, a plan to 100 m east is refused (no valid path); 2 m/s and
+2 rad/s in come out as 0.80 m/s and 0.60 rad/s.
+
+Pre-flight: `nav.geofence` is **critical** when the survey profile runs — no
+fence (or no home position yet) is NO-GO, because Nav2 would then have no area
+limit at all. It reads "Not checked" with `enable_nav2:=false` or
+`nav2_profile:=full`.
+
+Operating rules this profile assumes: draw the fence around open water only
+(not over moorings, jetties or the shore); start every mission inside it; keep
+the boat in sight with the transmitter in hand — Ch8 low, or a lost RC link,
+stops it in firmware (`pico-node_v5`).
+
+Two faults in `nav2_params.yaml`, found while testing this and fixed in both
+files, had kept Nav2 from starting at all: collision_monitor polygon `points`
+written as a nested YAML list (Jazzy wants a string — the generated params file
+was unparseable and every Nav2 node exited), and a `KeepOutFilter` class that
+does not exist (`KeepoutFilter`).
+
 ## 5. Risks to keep in front of everybody
 
 * **No obstacle detection at all.** No lidar, no working camera pipeline.
   Nav2's only enabled obstacle layer (`sam2_obstacle_layer`) reads the SAM2
   pipeline, which is not running. Autonomous operation needs a human watch and
   a clear area. The pre-flight reports this as a warning on every run.
-* **Safety chain not complete:** relay and E-stop feedback are not wired; the
-  RC failsafe behaviour with ExpressLRS-over-SBUS is not verified; the
-  firmware does not trigger ESTOP if SBUS frames simply stop while in
-  AUTONOMOUS (see Phase B in the PR description).
-* **Default motor path is still the Pixhawk** (`use_pico_bridge:=false`) while
-  the ESCs are wired to the Pico. Changing that is Phase B.
+* **Safety chain not complete:** relay and E-stop feedback (GPIO20) are not
+  wired; the RC failsafe behaviour with ExpressLRS-over-SBUS is not verified.
+  `pico-node_v5` (Phase B c) now stops the boat when SBUS frames stop in any
+  mode, including AUTONOMOUS, and does not re-arm on its own after a
+  failsafe — **once flashed**: until then the Pico runs whatever is on it, and
+  the pre-flight fails on anything but `ver=5`. See `firmware/README.md`.
+* **No obstacle detection.** The Nav2 survey profile (§4b) is contained by a
+  geofence and a speed limit only; anything in the water inside the fence is
+  invisible to the stack.
+* **Default motor path is now the Pico** (`use_pico_bridge:=true`, Phase B a),
+  on `/dev/pico`. `actuator_driver` (Pixhawk RC override) runs only with
+  `use_pico_bridge:=false`. A simulation (`use_sim:=true`) no longer starts the
+  bridge unless `pico_bridge_in_sim:=true` is also given.
 
 ## 6. TO VERIFY / OPEN
 

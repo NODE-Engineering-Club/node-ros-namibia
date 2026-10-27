@@ -2,6 +2,7 @@ import { Panel, Row, Rows, Chip } from '../components/Panel.jsx';
 import { streamPayload } from '../lib/connection.js';
 import { bytes, int, num } from '../lib/format.js';
 import { LINK_LABELS, PROFILE_LABELS } from '../lib/labels.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * The shore link, always visible.
@@ -11,11 +12,16 @@ import { LINK_LABELS, PROFILE_LABELS } from '../lib/labels.js';
  * being sent it" will eventually act on the wrong one.
  */
 export function LinkStatus({ state, connection }) {
+  const details = useDetails();
   const link = streamPayload(state, 'link');
   const profile = state.profile || {};
   const degraded = Object.values(state.subscriptions).filter((s) => s.reason);
 
-  const quality = link?.quality;
+  // Null on the boat: nothing measures it there (see RosSource).
+  const quality = link?.quality ?? undefined;
+  // This browser's own round trip when the server sends it, else the best
+  // across clients.
+  const latency = link?.client_rtt_ms ?? link?.rtt_ms;
   // Half the quoted beamwidth: the angle at which the boat reaches the edge of
   // the sector. Absent rather than zero when the backend did not send it —
   // zero would draw as "dead centre", which is a claim.
@@ -49,8 +55,6 @@ export function LinkStatus({ state, connection }) {
     <Panel
       title="Link"
       id="link"
-      collapsible
-      forceOpen={Boolean(forced)}
       forceReason={forced}
       aside={
         <Chip level={level}>
@@ -59,16 +63,21 @@ export function LinkStatus({ state, connection }) {
       }
       summary={
         <Rows>
-          <Row label="Detail level">
-            {PROFILE_LABELS[profile.profile] || profile.profile}
-            {profile.manual ? ' (manual)' : ''}
-          </Row>
+          <Row label="Latency">{num(latency, 0, ' ms')}</Row>
         </Rows>
       }
     >
+      {/* Everything below explains the link rather than asks for action:
+          Details only. */}
+      {details && (<>
       <Rows>
-        <Row label="Quality">{quality === undefined ? '—' : num(quality * 100, 0, '%')}</Row>
-        <Row label="Latency">{num(link?.rtt_ms, 0, ' ms')}</Row>
+        <Row label="Detail level">
+          {PROFILE_LABELS[profile.profile] || profile.profile}
+          {profile.manual ? ' (manual)' : ''}
+        </Row>
+        {quality !== undefined && (
+          <Row label="Quality">{num(quality * 100, 0, '%')}</Row>
+        )}
         <Row label="Carrying">{bytes(link?.rate_bytes_per_s)}/s</Row>
         <Row label="This client">≈ {bytes(state.estimatedBytesPerS)}/s</Row>
       </Rows>
@@ -168,6 +177,7 @@ export function LinkStatus({ state, connection }) {
           </Rows>
         </details>
       )}
+      </>)}
 
       {!state.connected && (
         <p className="errline" style={{ marginBottom: 0 }}>

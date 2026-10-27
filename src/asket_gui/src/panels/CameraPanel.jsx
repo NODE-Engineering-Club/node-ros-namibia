@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Panel, Chip } from '../components/Panel.jsx';
-import { cameraAgeMs, cameraSilenceMs } from '../lib/connection.js';
+import { cameraAgeMs, cameraReceivedFps, cameraSilenceMs } from '../lib/connection.js';
+import { useDetails } from '../lib/details.js';
 import { bytes, num } from '../lib/format.js';
 
 /**
@@ -69,7 +70,8 @@ const BLANK_MS = 3000;
 //: 5 Hz this is ten missed status frames, so it does not fire on a hiccup.
 const LINK_SILENT_MS = 2000;
 
-export function CameraPanel({ state, subscribed = true }) {
+export function CameraPanel({ state, subscribed = true, fitted = true }) {
+  const details = useDetails();
   // Age is wall-clock, not event-driven: nothing arrives to tell the panel
   // that the picture has got older, which is the entire problem. Without this
   // the display would freeze in exactly the case it exists to catch.
@@ -86,7 +88,17 @@ export function CameraPanel({ state, subscribed = true }) {
   const interval = 1000 / (camera?.rateHz || 5);
 
   const linkSilent = silenceMs !== null && silenceMs > LINK_SILENT_MS;
-  const level = cameraLevel({ camera, ageMs, interval, linkSilent, state });
+  // Refused by the link profile (the beacon carries no picture), with the
+  // server's own sentence.
+  const refusal = state.subscriptions.camera && !state.subscriptions.camera.granted
+    ? state.subscriptions.camera.reason || 'not carried on this link'
+    : '';
+  const level = !fitted
+    ? 'not-fitted'
+    : refusal
+      ? 'refused'
+      : cameraLevel({ camera, ageMs, interval, linkSilent, state });
+  const receivedFps = cameraReceivedFps(state);
 
   useEffect(() => {
     if (level !== 'blank') setShowStale(false);
@@ -97,7 +109,7 @@ export function CameraPanel({ state, subscribed = true }) {
       title="Camera"
       id="camera"
       collapsible
-      forceOpen={level === 'blank' || level === 'dead'}
+      forceOpen={details && (level === 'blank' || level === 'dead')}
       forceReason={level === 'blank' ? 'the picture is no longer current' : ''}
       aside={
         <Chip level={chipLevel(level)} title={CHIP_TITLES[level]}>
@@ -107,7 +119,8 @@ export function CameraPanel({ state, subscribed = true }) {
       summary={
         <>
           <div className="camera-frame">
-            {camera?.url && (level !== 'blank' || showStale) ? (
+            {camera?.url && level !== 'not-fitted' && level !== 'refused'
+              && (level !== 'blank' || showStale) ? (
               <>
                 <img
                   src={camera.url}
@@ -131,7 +144,7 @@ export function CameraPanel({ state, subscribed = true }) {
             ) : (
               <div className="camera-blank">
                 <p className="camera-blank-headline">{BLANK_HEADLINE[level]}</p>
-                <p className="hint">{blankDetail(level, camera, ageMs, silenceMs)}</p>
+                <p className="hint">{blankDetail(level, camera, ageMs, silenceMs, refusal)}</p>
                 {level === 'blank' && camera?.url && (
                   <button type="button" onClick={() => setShowStale(true)}>
                     Show the last frame ({ageText(ageMs)} old)
@@ -140,6 +153,14 @@ export function CameraPanel({ state, subscribed = true }) {
               </div>
             )}
           </div>
+          {/* The rate actually received, never only the rate asked for: a
+              picture every five seconds must not be mistaken for video. */}
+          {camera?.url && level !== 'not-fitted' && level !== 'refused' && (
+            <p className="hint camera-rate" style={{ margin: '4px 0 0' }}>
+              {receivedFps === null ? '—' : num(receivedFps, receivedFps < 1 ? 1 : 0, ' fps')} received
+              {camera.width ? ` · ${camera.width}×${camera.height}` : ''}
+            </p>
+          )}
           {showStale && (
             <button
               type="button"
@@ -201,6 +222,8 @@ const CHIP_LEVELS = {
   'link-silent': 'alarm',
   waiting: '',
   disconnected: 'alarm',
+  'not-fitted': '',
+  refused: '',
 };
 
 const CHIP_TITLES = {
@@ -214,13 +237,19 @@ const CHIP_TITLES = {
     + 'the link rather than the camera. The boat may be fine.',
   waiting: 'Subscribed; nothing has arrived yet.',
   disconnected: 'No connection to the vessel.',
+  'not-fitted': 'No camera driver is running on the boat.',
+  refused: 'The current link profile does not carry pictures.',
 };
 
 const BLANK_HEADLINE = {
+  'not-fitted': 'Camera not connected',
+  refused: 'No picture on this link',
   blank: 'Picture hidden — no longer current',
-  dead: 'No camera',
+  dead: 'Camera not connected',
   'link-silent': 'No word from the vessel',
-  waiting: 'Waiting for the first frame',
+  // Fitted and subscribed, nothing ever received: to an operator that is a
+  // camera that is not connected; the detail says what to check.
+  waiting: 'Camera not connected',
   disconnected: 'Disconnected',
   live: '',
   late: '',
@@ -238,6 +267,8 @@ function chipText(level, ageMs) {
     case 'stale': return `${ageText(ageMs)} old`;
     case 'blank': return `Stopped ${ageText(ageMs)} ago`;
     case 'dead': return 'No camera';
+    case 'not-fitted': return 'Not connected';
+    case 'refused': return 'Not on this link';
     case 'link-silent': return 'Link silent';
     case 'waiting': return 'No frames yet';
     default: return 'Disconnected';
@@ -252,8 +283,13 @@ function chipText(level, ageMs) {
  * link, or nothing-is-wrong-yet. Collapsing them into "no video" would throw
  * away the only actionable part.
  */
-function blankDetail(level, camera, ageMs, silenceMs) {
+function blankDetail(level, camera, ageMs, silenceMs, refusal = '') {
   switch (level) {
+    case 'not-fitted':
+      return 'No camera driver runs on the boat. The OAK-D-LR is started with '
+        + 'enable_oak:=true (docs/CAMERA_OAK.md).';
+    case 'refused':
+      return `The vessel is not sending pictures: ${refusal}.`;
     case 'dead':
       return 'The driver could not open the device and has published nothing. '
         + 'Check the camera cable and the vessel log — this is a boat-side fault, '
@@ -270,7 +306,8 @@ function blankDetail(level, camera, ageMs, silenceMs) {
         : 'Frames stopped arriving. The last picture is kept below, but it is '
           + `${ageText(ageMs)} old and does not show where the boat is now.`;
     case 'waiting':
-      return 'The camera is subscribed and the vessel has not sent a picture yet.';
+      return 'The vessel has not sent a picture yet. If this lasts, check the '
+        + 'camera cable / PoE switch and that the driver is running.';
     case 'disconnected':
       return 'Everything on screen is the last value received.';
     default:

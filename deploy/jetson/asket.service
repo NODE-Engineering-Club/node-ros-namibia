@@ -12,6 +12,12 @@
 Description=ASKET ROS 2 stack (mission GUI on :8090)
 After=network-online.target
 Wants=network-online.target
+# This unit REPLACES njord.service (scripts/init.sh, the Raspberry Pi + BlueOS
+# installer) on the Jetson: both run njord.launch.py, and two copies would
+# fight over /dev/pico (two pico_bridge) and publish every topic twice.
+# Conflicts= makes systemd stop the other one whenever this one starts, and
+# the reverse.
+Conflicts=njord.service
 
 [Service]
 Environment=IMAGE=ghcr.io/node-engineering-club/node-ros-2026:latest
@@ -21,6 +27,9 @@ RestartSec=5
 SuccessExitStatus=143
 ExecStartPre=/usr/bin/mkdir -p ${DATA}/missions ${DATA}/maps ${DATA}/setup
 ExecStartPre=-/usr/bin/podman rm -f asket
+# Belt and braces for a container started by hand or by another unit: refuse
+# to start while a "njord" container (init.sh's name) is running.
+ExecStartPre=/bin/sh -c '! /usr/bin/podman container exists njord || { echo "a njord container is running (scripts/init.sh njord.service?) - stop it first: sudo systemctl disable --now njord.service" >&2; exit 1; }'
 # --privileged + the host's live /dev and udev database, so /dev/pico,
 # /dev/bms_pack1/2 and /dev/pixhawk (deploy/udev/) are seen as they are now,
 # including after a device re-enumerates. A --device flag would be resolved

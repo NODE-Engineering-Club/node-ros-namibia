@@ -243,9 +243,11 @@ def test_the_report_adapter_matches_what_sim_sends():
 
 
 def test_the_report_adapter_reads_the_status_enum_by_name():
-    """SystemTestItem counts 0..3 and the panel reads words. An off-by-one here
+    """SystemTestItem counts 0..4 and the panel reads words. An off-by-one here
     would show a FAIL as a WARN, which is the wrong direction to be wrong in."""
-    for value, expected in ((0, "PASS"), (1, "WARN"), (2, "FAIL"), (3, "SKIPPED")):
+    for value, expected in (
+        (0, "PASS"), (1, "WARN"), (2, "FAIL"), (3, "SKIPPED"), (4, "NOTE"),
+    ):
         item = _report_msg().items[0]
         item.status = value
         assert adapters.preflight_from_ros(_report_msg(items=[item]))["items"][0][

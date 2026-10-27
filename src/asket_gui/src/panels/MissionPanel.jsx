@@ -5,6 +5,7 @@ import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { PanelAge } from '../components/Value.jsx';
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
 import { bytes, duration, int } from '../lib/format.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * Mission recording, and the missions already on the disk.
@@ -17,6 +18,7 @@ import { bytes, duration, int } from '../lib/format.js';
  * control with no explanation is the thing that wastes an hour on a beach.
  */
 export function MissionPanel({ state, connection }) {
+  const details = useDetails();
   const mission = streamPayload(state, 'mission');
   const ageMs = streamAgeMs(state, 'mission');
   const rateHz = state.subscriptions.mission?.rate_hz;
@@ -58,8 +60,6 @@ export function MissionPanel({ state, connection }) {
     <Panel
       title="Recording"
       id="recording"
-      collapsible
-      forceOpen={Boolean(forced)}
       forceReason={forced}
       aside={
         <>
@@ -79,15 +79,19 @@ export function MissionPanel({ state, connection }) {
         <>
           <Rows>
             <Row label="Mission">{mission.name}</Row>
-            <Row label="Elapsed">{duration(mission.elapsed_s)}</Row>
-            <Row label="Written">{bytes(mission.bytes_written)}</Row>
-            <Row label="Trajectory">{int(mission.trajectory_records, ' samples')}</Row>
+            <Row label="Duration">{duration(mission.elapsed_s)}</Row>
+            {details && <Row label="Written">{bytes(mission.bytes_written)}</Row>}
+            {details && (
+              <Row label="Trajectory">{int(mission.trajectory_records, ' samples')}</Row>
+            )}
             <Row label="Disk free">{bytes(mission.disk_free_bytes)}</Row>
-            <Row label="Recording left">
-              {mission.estimated_remaining_s === null
-                ? '—'
-                : duration(mission.estimated_remaining_s)}
-            </Row>
+            {details && (
+              <Row label="Recording left">
+                {mission.estimated_remaining_s === null
+                  ? '—'
+                  : duration(mission.estimated_remaining_s)}
+              </Row>
+            )}
           </Rows>
           <div className="button-row" style={{ marginTop: 8 }}>
             <ConfirmButton
@@ -106,6 +110,11 @@ export function MissionPanel({ state, connection }) {
             placeholder="Mission name"
             onChange={(e) => setName(e.target.value)}
           />
+          {mission?.disk_free_bytes !== undefined && mission?.disk_free_bytes !== null && (
+            <p className="hint" style={{ margin: '6px 0 0' }}>
+              Disk free: {bytes(mission.disk_free_bytes)}
+            </p>
+          )}
           <div className="button-row" style={{ marginTop: 8 }}>
             <ConfirmButton
               label="Start recording"
@@ -125,6 +134,8 @@ export function MissionPanel({ state, connection }) {
         <p className="errline" style={{ marginBottom: 0 }}>{latest.detail}</p>
       )}
 
+      {/* The stored missions, their export and deletion: Details. */}
+      {details && (<>
       <h2 style={{ marginTop: 14 }}>
         <span>Stored missions</span>
         <span className="age">{missions.length}</span>
@@ -205,6 +216,7 @@ export function MissionPanel({ state, connection }) {
           )}
         </div>
       ))}
+      </>)}
     </Panel>
   );
 }

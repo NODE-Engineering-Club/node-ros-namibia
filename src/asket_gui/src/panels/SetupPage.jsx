@@ -97,7 +97,21 @@ export function SetupPage({ state, connection, onClose }) {
   }, [doc, focusField]);
 
   const gate = useMemo(() => gateDecision(state), [state]);
-  const byTier = useMemo(() => fieldsByTier(doc), [doc]);
+  // With SonarView running the sonar (sonar_panel: health) the sonar
+  // bridge's geometry fields are not applied by anything on this boat, so
+  // they are hidden — kept, one press away, for when the bridge runs it.
+  const sonarViewOwns = state.hello?.source?.sonar_panel === 'health';
+  const [showSonarGeometry, setShowSonarGeometry] = useState(false);
+  const hideBridgeFields = sonarViewOwns && !showSonarGeometry;
+  const byTierAll = useMemo(() => fieldsByTier(doc), [doc]);
+  const byTier = useMemo(() => {
+    if (!hideBridgeFields) return byTierAll;
+    const out = new Map();
+    for (const [tier, specs] of byTierAll) {
+      out.set(tier, specs.filter((spec) => spec.applied_by !== 'omniscan_bridge'));
+    }
+    return out;
+  }, [byTierAll, hideBridgeFields]);
   const outstanding = useMemo(() => outstandingIds(doc), [doc]);
   const stale = useMemo(() => staleById(doc), [doc]);
   const dirty = Object.keys(edits);
@@ -168,6 +182,22 @@ export function SetupPage({ state, connection, onClose }) {
             />
           </h2>
           <p className="hint setup-tier-blurb">{tier.blurb}</p>
+          {sonarViewOwns && tier.id === 'vessel' && (
+            <p className="hint">
+              {hideBridgeFields
+                ? 'Sonar mounting geometry is hidden: SonarView runs the sonar, '
+                  + 'and nothing on this boat applies these values. '
+                : 'Sonar mounting geometry: applied only by omniscan_bridge, '
+                  + 'which SonarView replaces on this boat. '}
+              <button
+                type="button"
+                className="link"
+                onClick={() => setShowSonarGeometry((v) => !v)}
+              >
+                {hideBridgeFields ? 'Show them' : 'Hide them'}
+              </button>
+            </p>
+          )}
           <div className="setup-fields">
             {(byTier.get(tier.id) ?? []).map((spec) => (
               <SetupField

@@ -102,6 +102,10 @@
           "detail": "full",
           "max_rate_hz": 1.0
         },
+        "camera": {
+          "detail": "minimal",
+          "max_rate_hz": 0.2
+        },
         "coverage": {
           "detail": "reduced",
           "max_rate_hz": 0.2

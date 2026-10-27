@@ -30,9 +30,15 @@ PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
 SKIPPED = "SKIPPED"
+#: A standing fact worth knowing, not a fault and not something to act on
+#: before launch: the GUI shows it grey. Used for the two limitations that
+#: were amber on every single run (the STATE format not yet checked against
+#: real output, the GPIO20 feedback not wired) — an amber that never changes
+#: teaches people to read past amber.
+NOTE = "NOTE"
 
 #: Ordering for the overall verdict: any FAIL is NO-GO.
-_SEVERITY = {PASS: 0, SKIPPED: 1, WARN: 2, FAIL: 3}
+_SEVERITY = {PASS: 0, NOTE: 0, SKIPPED: 1, WARN: 2, FAIL: 3}
 
 
 @dataclass
@@ -180,8 +186,10 @@ def _pico_link(state: dict, t: Thresholds) -> CheckResult:
 
 #: The firmware protocol this stack is built to read. Kept in step with
 #: ``gui_backend.core.pico_state.PROTOCOL_VERSION`` and with ``FW_VERSION`` in
-#: ``firmware/pico-node_v4/``; a test asserts all three agree.
-EXPECTED_FIRMWARE_VERSION = 4
+#: ``firmware/pico-node_v5/``; a test asserts all three agree. A Pico still on
+#: pico-node_v4 fails this check: v4 stays armed when SBUS goes silent in
+#: AUTONOMOUS (docs/HARDWARE_DECISIONS.md).
+EXPECTED_FIRMWARE_VERSION = 5
 
 
 @check("pico.firmware_version", "Pico firmware version", critical=True)
@@ -210,7 +218,7 @@ def _firmware_version(state: dict, t: Thresholds) -> CheckResult:
             "pico.firmware_version", "Pico firmware version", FAIL,
             f"The Pico is running firmware v{int(reported)}; this software "
             f"reads v{EXPECTED_FIRMWARE_VERSION}",
-            "Flash firmware/pico-node_v4/ to the Pico, or check out the "
+            "Flash firmware/pico-node_v5/ to the Pico, or check out the "
             "Jetson software that matches what is flashed. Do not fly on a "
             "mismatch: the fields will be read against the wrong layout and "
             "the vessel panel will be confidently wrong.",
@@ -232,7 +240,7 @@ def _state_format(state: dict, t: Thresholds) -> CheckResult:
     text.
 
     The format is now transcribed field by field from
-    ``firmware/pico-node_v4/pico-node_v4.ino`` rather than guessed — but
+    ``firmware/pico-node_v5/pico-node_v5.ino`` rather than guessed — but
     reading a firmware's source is not the same as reading its output, and no
     line has yet been captured off real hardware. A parser reading the wrong
     format does not look broken; it looks like a vessel that is not reporting
@@ -245,7 +253,7 @@ def _state_format(state: dict, t: Thresholds) -> CheckResult:
 
     if not reported:
         return CheckResult(
-            "pico.state_format", "Pico status format", WARN,
+            "pico.state_format", "Pico status format", NOTE,
             "Unverified: the STATE line format has never been checked against "
             "real firmware output",
             "Run `ros2 topic echo /pico/status --field data` on the Jetson, "
@@ -304,12 +312,12 @@ def _estop_feedback(state: dict, t: Thresholds) -> CheckResult:
 
     if not enabled:
         return CheckResult(
-            "pico.estop_feedback", "E-stop power feedback", WARN,
+            "pico.estop_feedback", "E-stop power feedback", NOTE,
             "Not verified: nothing confirms the ESC rail actually collapsed "
             "when the relay was commanded open",
-            "ESTOP_FEEDBACK_ENABLED is 0 in firmware/pico-node_v4 and the "
+            "ESTOP_FEEDBACK_ENABLED is 0 in firmware/pico-node_v5 and the "
             "GPIO20 divider trace is cut for bench testing. Set it to 1, and "
-            "ESTOP_FEEDBACK_ENABLED in gui_backend/core/pico_state.py to True "
+            "ESTOP_FEEDBACK_ENABLED in asket_common/mode_arbitration.py to True "
             "in the same change, once the hardware is ready. Until then the "
             "hardware killswitch and RC channel 8 are the only propulsion cuts "
             "with any confirmation behind them.",
@@ -781,6 +789,40 @@ def _mounting(state: dict, t: Thresholds) -> CheckResult:
 # -- resources ------------------------------------------------------------
 
 
+# -- navigation limits ------------------------------------------------------
+
+
+@check("nav.geofence", "Geofence", critical=True)
+def _geofence(state: dict, t: Thresholds) -> CheckResult:
+    """Is the survey area fenced? In the survey profile it is the only limit.
+
+    Nothing aboard detects obstacles, so Nav2's survey profile knows one thing
+    about the world: the polygon it may not leave. Without it Nav2 has no area
+    limit at all, which is a reason not to start autonomous lines — hence
+    critical. Reported by ``sensors/geofence_mask_node`` on /diagnostics.
+    """
+    level = state.get("geofence_level")
+    message = state.get("geofence_message") or ""
+    if level is None:
+        return _missing("nav.geofence", "Geofence", "geofence_mask_node is not reporting")
+    if level == "OK":
+        return CheckResult("nav.geofence", "Geofence", PASS, f"Active: {message}", "")
+    if level == "WARN":
+        return CheckResult(
+            "nav.geofence", "Geofence", FAIL,
+            f"Not active yet: {message}",
+            "The fence is loaded but the mask is placed only once the Pixhawk's "
+            "home position is known. Check MAVROS and the GNSS fix, then re-run.",
+        )
+    return CheckResult(
+        "nav.geofence", "Geofence", FAIL,
+        f"No geofence: {message}",
+        "Without it Nav2 has no area limit, and nothing aboard detects "
+        "obstacles. Put the day's survey polygon in /data/setup/geofence.yaml "
+        "(example: src/bringup/config/geofence.example.yaml) and restart.",
+    )
+
+
 @check("disk.space", "Disk space", critical=True)
 def _disk(state: dict, t: Thresholds) -> CheckResult:
     """Hours of *recording*, which is not hours of survey.
@@ -866,6 +908,14 @@ def _battery(state: dict, t: Thresholds) -> CheckResult:
 def _link(state: dict, t: Thresholds) -> CheckResult:
     rtt = state.get("link_rtt_ms")
     bearer = state.get("link_active")
+    if state.get("link_clients") == 0:
+        # Only a browser on the other end can measure the link; with none,
+        # the round trip reads 0 ms, which used to pass as a perfect link.
+        return CheckResult(
+            "link.quality", "Shore link", SKIPPED,
+            "Not measured: no browser is connected",
+            "Open the GUI from the shore laptop and run the pre-flight again.",
+        )
     if rtt is None:
         return _missing("link.quality", "Shore link", "no client connected")
     if rtt > t.max_link_rtt_ms:
@@ -939,6 +989,7 @@ REQUIRES = {
     "sonar.link": "sonar_bridge",
     "sonar.clock": "sonar_bridge",
     "sonar.mounting": "sonar_bridge",
+    "nav.geofence": "survey_nav",
 }
 
 #: What the operator is told for each kind of absent equipment.
@@ -948,11 +999,19 @@ ABSENT_REASON = {
         "the sonar is run from SonarView, and omniscan_bridge is not started, "
         "so this stack does not watch it"
     ),
+    "survey_nav": (
+        "the Nav2 survey profile is not running (enable_nav2:=false or "
+        "nav2_profile:=full), so there is no fence to check"
+    ),
 }
 
 
 #: The launch argument that brings each kind of equipment back into the checks.
-ENABLE_ARG = {"lidar": "enable_lidar:=true", "sonar_bridge": "enable_sonar:=true"}
+ENABLE_ARG = {
+    "lidar": "enable_lidar:=true",
+    "sonar_bridge": "enable_sonar:=true",
+    "survey_nav": "enable_nav2:=true nav2_profile:=survey",
+}
 
 
 def _not_fitted(check: Registered, equipment: str) -> CheckResult:

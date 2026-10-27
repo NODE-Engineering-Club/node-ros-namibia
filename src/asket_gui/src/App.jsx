@@ -10,11 +10,10 @@ import { isFitted } from './lib/fitted.js';
 import { LinkStatus } from './panels/LinkStatus.jsx';
 import { MissionMap } from './panels/MissionMap.jsx';
 import { MissionPanel } from './panels/MissionPanel.jsx';
-import { ModeCommands } from './panels/ModeCommands.jsx';
 import { PowerPanel } from './panels/PowerPanel.jsx';
 import { SetupPage } from './panels/SetupPage.jsx';
 import { SonarPanel } from './panels/SonarPanel.jsx';
-import { VesselState } from './panels/VesselState.jsx';
+import { BoatPanel } from './panels/BoatPanel.jsx';
 import { Chip } from './components/Panel.jsx';
 import { MockControls } from './components/MockControls.jsx';
 import { StatusStrip } from './components/StatusStrip.jsx';
@@ -22,6 +21,8 @@ import { streamPayload } from './lib/connection.js';
 import { useStore } from './lib/useStore.js';
 import { MODE_LABELS } from './lib/labels.js';
 import { duration } from './lib/format.js';
+import { DetailsContext, useDetailsPreference } from './lib/details.js';
+import { readiness } from './lib/readiness.js';
 
 //: A socket can stay open long after the link behind it has gone. TCP takes
 //: tens of seconds to notice, and for all of that time `connected` is true
@@ -87,6 +88,7 @@ export function App({ connection }) {
   // Closed by default: the dev panel stays valuable, but the default view has
   // to be what an operator actually sees, not the review rig around it.
   const [mockOpen, setMockOpen] = useState(false);
+  const [details, toggleDetails] = useDetailsPreference();
 
   // A sensor the boat does not carry is never asked for: its stream would
   // only ever be empty, and empty reads as "nothing there".
@@ -110,6 +112,15 @@ export function App({ connection }) {
   const pico = streamPayload(state, 'pico');
   const sinceMessageMs = state.lastMessageAt ? Date.now() - state.lastMessageAt : null;
   const receiving = sinceMessageMs !== null && sinceMessageMs < NO_DATA_AFTER_MS;
+  const ready = readiness({
+    connected: state.connected,
+    receiving,
+    report: streamPayload(state, 'diagnostics'),
+    pico,
+    link: streamPayload(state, 'link'),
+    profile: state.profile?.profile,
+    nowMs: Date.now(),
+  });
   const worstAlarm = useMemo(() => {
     const alarms = state.alarms || [];
     if (alarms.some((a) => a.severity === 'alarm')) return 'alarm';
@@ -163,9 +174,12 @@ export function App({ connection }) {
   }
 
   return (
+    <DetailsContext.Provider value={details}>
     <div className={layoutClass}>
       <header className="topbar">
         <strong>Asket</strong>
+        {/* The answer to "can I go?", before anything else on the screen. */}
+        <span className={`readiness ${ready.level}`} role="status">{ready.text}</span>
         <Chip
           level={receiving ? 'ok' : 'alarm'}
           title={
@@ -191,16 +205,31 @@ export function App({ connection }) {
 
         {/* Battery, recording and link, in the horizontal space that was empty.
             These three answer questions nobody should have to scroll for. */}
-        <StatusStrip state={state} />
+        <StatusStrip state={state} details={details} />
 
         <div className="spacer" />
+        {details && (
+          <button
+            type="button"
+            className="link topbar-link"
+            onClick={() => { window.location.hash = '#setup'; }}
+            title="What this vessel has been told about itself and about today's site"
+          >
+            Setup
+          </button>
+        )}
         <button
           type="button"
-          className="link topbar-link"
-          onClick={() => { window.location.hash = '#setup'; }}
-          title="What this vessel has been told about itself and about today's site"
+          className={`details-toggle ${details ? 'on' : ''}`}
+          aria-pressed={details}
+          onClick={toggleDetails}
+          title={
+            details
+              ? 'Back to the simple view: only what you need to act on.'
+              : 'Show every value, the pre-flight rows that pass, the link budget and Setup.'
+          }
         >
-          Setup
+          {details ? 'Simple view' : 'Details'}
         </button>
         {state.hello?.source?.mode === 'sim' && (
           <Chip level="mock-banner" title="Every value on this screen is simulated.">
@@ -251,26 +280,23 @@ export function App({ connection }) {
               arriving at the site, and the most useful panel to somebody who
               did not write the system. It does not belong at the bottom. */}
           <DiagnosticsPanel state={state} connection={connection} />
-          <VesselState state={state} />
-          <ModeCommands state={state} connection={connection} />
-          <HeadingPanel state={state} />
+          {/* Vessel and Mode, merged (VesselState and ModeCommands are kept
+              and built from the same pieces). The full heading analysis is a
+              Details panel: the Boat panel carries the heading itself. */}
+          <BoatPanel state={state} connection={connection} />
+          {details && <HeadingPanel state={state} />}
         </div>
         <div className="sidebar-col">
-          <PowerPanel state={state} />
+          <PowerPanel state={state} connection={connection} />
           {/* Above the sonar and lidar on purpose: this is the panel somebody
               turns to when the lidar says there is something there and they
               need to know what it is. */}
-          {cameraFitted ? (
-            <CameraPanel
-              state={state}
-              subscribed={Boolean(state.subscriptions.camera?.granted)}
-            />
-          ) : (
-            <NotFitted title="Camera" id="camera">
-              No camera is shown here. The OAK-D-LR is aboard but has no driver
-              in this stack yet.
-            </NotFitted>
-          )}
+          {/* Always shown: "Camera not connected" is itself the answer. */}
+          <CameraPanel
+            state={state}
+            fitted={cameraFitted}
+            subscribed={Boolean(state.subscriptions.camera?.granted)}
+          />
           <SonarPanel state={state} connection={connection} />
           {lidarFitted ? (
             <LidarPanel
@@ -278,7 +304,9 @@ export function App({ connection }) {
               showRaw={showRawLidar}
               onShowRawChange={setShowRawLidar}
             />
-          ) : (
+          ) : details && (
+            // No lidar: nothing to show on a beach. Details keeps the
+            // explanation.
             <NotFitted title="Obstacles" id="obstacles">
               No lidar is fitted, so nothing aboard detects obstacles. Keep the
               boat in sight and the RC transmitter in hand.
@@ -293,5 +321,6 @@ export function App({ connection }) {
         <MockControls connection={connection} open={mockOpen} onOpenChange={setMockOpen} />
       )}
     </div>
+    </DetailsContext.Provider>
   );
 }

@@ -14,9 +14,10 @@
 # checked against namibia's sources and already has the same name and type
 # here, so no entry was renamed. Two namibia-specific notes:
 #
-#   * /pico/status and /pico/mode_request exist only when the stack is
-#     launched with use_pico_bridge:=true (default false: the Pixhawk path,
-#     actuator_driver). Without it the vessel panel reads "not sent".
+#   * /pico/status and /pico/mode_request exist only while pico_bridge runs
+#     (use_pico_bridge, default true since hw-alignment Phase B). With
+#     use_pico_bridge:=false (actuator_driver, the Pixhawk path) the vessel
+#     panel reads "not sent".
 #   * The battery is /battery/state, produced by sensors/battery_aggregator
 #     from the two BMS readers (launched with enable_bms:=true). Its
 #     `percentage` is estimated from cell voltages (asket_common/battery.py)
@@ -39,6 +40,22 @@ sources:
   odom_filtered:
     topic: /odometry/filtered
     type: nav_msgs/msg/Odometry
+  # Satellites, HDOP and the RTK state (fix_type 5 float, 6 fixed). Only
+  # MAVROS's GPSRAW carries them; it exists once the Pixhawk link is up
+  # (Phase B d). Until then the GUI says "not provided" rather than guessing.
+  gps_raw:
+    topic: /mavros/gpsstatus/gps1/raw
+    type: mavros_msgs/msg/GPSRAW
+    optional: true
+  # The Camera panel: a compressed (JPEG) image, sent to the browser as it
+  # comes on the full link profile and scaled down on the reduced one. For the
+  # OAK-D-LR through depthai_ros_driver (njord.launch.py enable_oak:=true)
+  # this is the RGB stream's image_transport "compressed" topic; check the
+  # name with `ros2 topic list` on the boat. Read only when camera_fitted.
+  camera_image:
+    topic: /oak/rgb/image_raw/compressed
+    type: sensor_msgs/msg/CompressedImage
+    optional: true
   imu:
     topic: /imu_driver/imu_raw
     type: sensor_msgs/msg/Imu
@@ -67,7 +84,7 @@ sources:
     # core/pico_state.py.
     #
     # The format is transcribed field by field from
-    # firmware/pico-node_v4/pico-node_v4.ino, and the parser reads THAT VERSION
+    # firmware/pico-node_v5/pico-node_v5.ino, and the parser reads THAT VERSION
     # ONLY. Every line carries ver= first; anything else fails the pre-flight
     # rather than being half-read. Accepting several formats was considered and
     # rejected — a parser branch nobody exercises is a parser branch nobody
@@ -129,6 +146,13 @@ sources:
 fitted:
   lidar: false
   camera: false
+
+# The day's survey-area geofence: the same lat/lon polygon file the Nav2
+# keep-out mask is built from (bringup/config/geofence.example.yaml). Drawn on
+# the map when it exists; re-read when the file changes. gui.launch.py
+# overrides the path from its geofence_file argument.
+geofence:
+  file: /data/setup/geofence.yaml
 
 # How the Sonar panel behaves. `health`: SonarView operates and records the
 # Omniscan on its own screen, so the panel shows only whether the sonar is
@@ -219,8 +243,10 @@ estop:
 # predicted — nothing reads the radio yet). The same module and the same
 # arithmetic the simulator uses: asket_common/link_budget.py.
 #
-# These values belong on the mission setup page beside the sonar mounting
-# geometry. This entry is the interim. See docs/open_questions.md Q11.
+# The Setup page overrides this block: once the station's latitude, longitude
+# and bearing are entered there, gui_backend uses them (and the tripod height,
+# sea state, channel width and boat antenna height whenever they are entered),
+# re-read live from the setup file. This block is the fallback.
 shore_station:
   configured: false
   lat: 0.0

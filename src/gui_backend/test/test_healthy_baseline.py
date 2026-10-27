@@ -108,24 +108,25 @@ def test_nothing_is_failing(healthy):
 
 
 def test_the_warnings_that_remain_are_the_ones_that_should(healthy):
-    """Two warnings are correct and permanent, and must not be tuned away.
+    """Two reminders are correct and permanent, and must not be tuned away.
 
     ``pico.estop_feedback`` — nothing confirms the ESC rail collapsed when the
-    relay was commanded open, and it will warn until the firmware flag is set.
-    ``sonar.mounting`` — nobody has measured the transducer geometry.
+    relay was commanded open. It is a grey NOTE now (it was amber on every
+    run, which taught people to read past amber), but it is still listed and
+    never a pass until the firmware flag is set.
+    ``sonar.mounting`` — nobody has measured the transducer geometry: amber.
 
-    A baseline that silenced them would be teaching the crew that amber means
-    nothing. If this test fails because a warning disappeared, check that it
-    was fixed rather than hidden.
+    If this test fails because a reminder disappeared, check that it was
+    fixed rather than hidden.
     """
-    warned = {i["id"] for i in payload(healthy, "diagnostics")["items"] if i["status"] == "WARN"}
-    assert "pico.estop_feedback" in warned
-    assert "sonar.mounting" in warned
+    items = {i["id"]: i["status"] for i in payload(healthy, "diagnostics")["items"]}
+    assert items["pico.estop_feedback"] == "NOTE"
+    assert items["sonar.mounting"] == "WARN"
 
 
 def test_every_check_that_is_not_passing_says_what_to_do(healthy):
     for item in payload(healthy, "diagnostics")["items"]:
-        if item["status"] in ("WARN", "FAIL", "SKIPPED"):
+        if item["status"] in ("WARN", "FAIL", "SKIPPED", "NOTE"):
             assert item["remedy"], f"{item['id']} is amber with no remedy"
 
 

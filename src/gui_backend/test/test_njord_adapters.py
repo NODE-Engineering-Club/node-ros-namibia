@@ -98,11 +98,58 @@ def test_a_missing_satellite_count_is_absent_rather_than_zero():
 
 
 def test_position_accuracy_comes_from_the_covariance_when_there_is_one():
-    assert adapters.vessel_from_odometry(fix(cov0=4.0), odom()).hdop == pytest.approx(2.0)
+    # A standard deviation in metres, under its own name. It used to be put in
+    # `hdop` and printed as "HDOP", which it is not.
+    record = adapters.vessel_from_odometry(fix(cov0=4.0), odom())
+    assert record.position_sigma_m == pytest.approx(2.0)
+    assert record.hdop is None
 
 
 def test_no_covariance_means_no_figure_invented():
-    assert adapters.vessel_from_odometry(fix(cov0=0.0), odom()).hdop is None
+    record = adapters.vessel_from_odometry(fix(cov0=0.0), odom())
+    assert record.position_sigma_m is None
+    assert record.hdop is None
+
+
+def gpsraw(fix_type=6, sats=17, eph=70):
+    return SimpleNamespace(fix_type=fix_type, satellites_visible=sats, eph=eph)
+
+
+@pytest.mark.parametrize(
+    "fix_type,expected",
+    [(0, "none"), (1, "none"), (2, "gps"), (3, "gps"), (4, "gps"),
+     (5, "rtk_float"), (6, "rtk_fixed"), (8, "gps")],
+)
+def test_gpsraw_fix_type_becomes_a_quality_word(fix_type, expected):
+    record = adapters.vessel_from_odometry(fix(), odom(), gps_raw=gpsraw(fix_type))
+    assert record.fix_quality == expected
+
+
+def test_gpsraw_carries_the_real_satellites_and_hdop():
+    record = adapters.vessel_from_odometry(fix(), odom(), gps_raw=gpsraw(sats=17, eph=70))
+    assert record.num_sats == 17
+    assert record.hdop == pytest.approx(0.7)
+
+
+def test_gpsraw_unknown_sentinels_stay_absent():
+    record = adapters.vessel_from_odometry(fix(), odom(), gps_raw=gpsraw(sats=255, eph=65535))
+    assert record.num_sats is None
+    assert record.hdop is None
+
+
+def test_without_gpsraw_navsatfix_can_only_say_fix_or_no_fix():
+    # MAVROS reports RTK as STATUS_FIX too, so RTK is never claimed from it.
+    assert adapters.vessel_from_odometry(fix(status=0), odom()).fix_quality == "gps"
+    assert adapters.vessel_from_odometry(fix(status=2), odom()).fix_quality == "gps"
+    assert adapters.vessel_from_odometry(fix(status=-1), odom()).fix_quality == "none"
+
+
+def test_fix_quality_reaches_the_reduced_payload():
+    from gui_backend.core import payloads
+
+    record = adapters.vessel_from_odometry(fix(), odom(), gps_raw=gpsraw(6))
+    assert payloads.vessel_payload(record, "reduced")["fix_quality"] == "rtk_fixed"
+    assert "fix_quality" not in payloads.vessel_payload(record, "minimal")
 
 
 def test_heading_is_absent_without_the_ekf_rather_than_defaulting_to_north():
@@ -116,7 +163,7 @@ def test_heading_is_absent_without_the_ekf_rather_than_defaulting_to_north():
 def test_a_string_status_is_parsed_and_stamped_with_our_receipt_time():
     """std_msgs/String has no header, so there is no sample time to use. The
     receipt time is honest about being ours."""
-    msg = SimpleNamespace(data="STATE ver=4 mode=2 armed=0 ch8=1811 sbusfs=0")
+    msg = SimpleNamespace(data="STATE ver=5 mode=2 armed=0 ch8=1811 sbusfs=0")
     record = adapters.pico_from_ros(msg, received_utc_ms=1_800_000_000_000)
     assert record.utc_ms == 1_800_000_000_000
     # mode=2 on the wire is the firmware's MANUAL; 1 is the GUI's. The two
@@ -131,7 +178,7 @@ def test_a_string_status_is_parsed_and_stamped_with_our_receipt_time():
 def test_fields_the_line_does_not_carry_stay_absent():
     """None says "not reported". False would be a claim about something never
     sent — and for the killswitch that claim is the dangerous direction."""
-    record = adapters.pico_from_ros(SimpleNamespace(data="STATE ver=4 mode=3 armed=1"), 0)
+    record = adapters.pico_from_ros(SimpleNamespace(data="STATE ver=5 mode=3 armed=1"), 0)
     assert record.estop_latched is None
     assert record.hardware_killswitch_engaged is None
     assert record.rc_channel8_raw is None
@@ -146,7 +193,7 @@ def test_the_pico_does_report_an_estop_latch_when_it_has_one():
     """``estoplatch`` is a real field in pico-node_v4, and it explains the most
     common "why will it not arm"."""
     record = adapters.pico_from_ros(
-        SimpleNamespace(data="STATE ver=4 mode=1 armed=0 estoplatch=1"), 0)
+        SimpleNamespace(data="STATE ver=5 mode=1 armed=0 estoplatch=1"), 0)
     assert record.estop_latched is True
 
 
@@ -161,7 +208,7 @@ def test_a_structured_picostatus_still_works():
     msg = SimpleNamespace(
         header=header(), mode=2, armed=True, estop_latched=False,
         relay_states=[True, True], esc_status=[0, 0], rc_link_ok=True,
-        rc_channel8_raw=1811, rc_channel7_raw=1811, firmware_version=4,
+        rc_channel8_raw=1811, rc_channel7_raw=1811, firmware_version=5,
         hardware_killswitch_engaged=False,
     )
     record = adapters.pico_from_ros(msg)
