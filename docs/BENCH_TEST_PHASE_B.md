@@ -166,7 +166,7 @@ disarmed / E-stop, yellow = MANUAL armed, green = AUTONOMOUS).
 | 1.2 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2 relay=1`, yellow light, 2 beeps |
 | 1.3 | Ch8 low | `mode=1 armed=0 relay=0`, red light, long beep |
 | 1.4 | `ros2 node list \| grep -E "pico_bridge\|actuator_driver"` | **only** `/pico_bridge` (a) |
-| 1.5 | pico_bridge log (`journalctl -u asket.service` or the launch terminal) | `Pico firmware : v5, as expected` (b) |
+| 1.5 | pico_bridge log (`journalctl -u asket.service`, `sudo podman logs asket`, or the launch terminal) | `Pico firmware : v5, as expected` (b) |
 | 1.6 | GUI → Pre-flight → Run | `Pico firmware version: v5, matching this software` |
 | 1.7 | Ch8 high, Ch7 cycled low→high, request AUTO (box above: GUI force, or `ros2 topic pub … "{data: AUTO}"`) | `mode=3`, green light |
 | 1.8 | `ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.2}}"` and `ros2 topic echo /pico_bridge/motor_cmd` | numbers (e.g. `0.200,0.200`), not `PING` (b) |
@@ -175,7 +175,7 @@ disarmed / E-stop, yellow = MANUAL armed, green = AUTONOMOUS).
 | 1.11 | Request AUTO while latched (box above) | not applied (Pico answers `[NAK] MODE AUTO refused`), stays disarmed |
 | 1.12 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2` (MANUAL, not AUTONOMOUS) |
 | 1.13 | **RC lost, SBUS silent:** AUTONOMOUS again (1.7), then **unplug the receiver's SBUS lead** | same as 1.9 (`sbusfs` irrelevant: no frames). Re-plug, repeat 1.10–1.12 |
-| 1.14 | **Serial never blocks:** stop the stack (`sudo systemctl stop asket.service`), then hold the port open without reading it: `sudo sh -c 'sleep 60 < /dev/pico'` (opening the port raises DTR, so the Pico sees a host that stopped reading) | during those 60 s the RC still works: Ch8 low turns the light red at once (watch the lights: nothing reads `STATE` while the port is held); Ch7 low→high re-arms (yellow light). Check `relay=` in the first `STATE` lines after 1.15 |
+| 1.14 | **Serial never blocks:** stop the stack (`sudo systemctl stop asket.service`, or `sudo podman stop asket` when started by hand), then hold the port open without reading it: `sudo sh -c 'sleep 60 < /dev/pico'` (opening the port raises DTR, so the Pico sees a host that stopped reading) | during those 60 s the RC still works: Ch8 low turns the light red at once (watch the lights: nothing reads `STATE` while the port is held); Ch7 low→high re-arms (yellow light). Check `relay=` in the first `STATE` lines after 1.15 |
 | 1.15 | After the 60 s, restart the stack | `STATE … txdrop=N` with N > 0 (lines dropped while nobody read), everything else normal |
 | 1.16 | Re-plug test: with the stack running, unplug the Pico USB 5 s, plug it back | bridge log: port lost, then within ~2 s `Pico connecte`, `Pico firmware : v5` (b) |
 | 1.17 | Banner / pre-flight | `E-STOP feedback: DISABLED (not wired)`; pre-flight `E-stop power feedback` is a grey **note** (GPIO20 not wired — expected) |
