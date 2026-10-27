@@ -16,5 +16,6 @@ export function isFitted(state, sensor) {
  * lists those layers only in that case.
  */
 export function isSimulated(state, connection) {
-  return Boolean(connection?.isMock) || state.hello?.source?.mode === 'sim';
+  const mode = state.hello?.source?.mode;
+  return Boolean(connection?.isMock) || mode === 'sim' || mode === 'mock';
 }

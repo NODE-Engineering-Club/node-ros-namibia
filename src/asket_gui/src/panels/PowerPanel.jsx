@@ -2,6 +2,8 @@ import { Chip, Panel, Row, Rows } from '../components/Panel.jsx';
 import { PanelAge, Value } from '../components/Value.jsx';
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
 import { duration, num, pct } from '../lib/format.js';
+import { useDetails } from '../lib/details.js';
+import { isSimulated } from '../lib/fitted.js';
 
 /**
  * Battery, and the comparison that actually matters.
@@ -11,7 +13,11 @@ import { duration, num, pct } from '../lib/format.js';
  * there enough to finish", and the panel answers that directly rather than
  * leaving an operator to do the arithmetic on a beach.
  */
-export function PowerPanel({ state }) {
+export function PowerPanel({ state, connection }) {
+  const details = useDetails();
+  // The survey comparison needs a planned survey, which only the simulator
+  // has; on the boat it could only ever say "needs the vessel to be moving".
+  const simulated = isSimulated(state, connection);
   const power = streamPayload(state, 'power');
   const ageMs = streamAgeMs(state, 'power');
   const rateHz = state.subscriptions.power?.rate_hz;
@@ -29,18 +35,17 @@ export function PowerPanel({ state }) {
       : 'Not enough charge to finish the planned survey. Shorten the pattern or plan a battery swap.')
     : 'Remaining survey distance needs the vessel to be moving before it can be compared against endurance.';
 
-  const forced = canFinish === false
+  const forced = canFinish === false && simulated
     ? 'not enough charge to finish the planned survey'
     : soc !== undefined && soc < 0.25
       ? 'battery below 25%'
       : '';
+  const minutesLeft = power?.endurance_s ? Math.floor(power.endurance_s / 60) : null;
 
   return (
     <Panel
       title="Power"
       id="power"
-      collapsible
-      forceOpen={Boolean(forced)}
       forceReason={forced}
       aside={<PanelAge ageMs={ageMs} rateHz={rateHz} />}
       summary={
@@ -53,24 +58,36 @@ export function PowerPanel({ state }) {
             </span>
             <Chip level={level}>{level === 'alarm' ? 'critical' : level === 'warn' ? 'low' : 'ok'}</Chip>
           </div>
-          <p
-            className={canFinish === false ? 'errline' : 'hint'}
-            style={{ marginBottom: 0, marginTop: 4 }}
-          >
-            {verdict}
+          {/* Voltage and time left in minutes: the two numbers asked for
+              on a beach, with the percentage above. */}
+          <p className="motion-line" style={{ margin: '4px 0 0' }}>
+            <Value ageMs={ageMs} rateHz={rateHz} showAge={false}>
+              {num(power?.voltage, 1, ' V')}
+              {' · '}
+              {minutesLeft === null ? 'time left not known' : `about ${minutesLeft} min left`}
+            </Value>
           </p>
+          {simulated && (
+            <p
+              className={canFinish === false ? 'errline' : 'hint'}
+              style={{ marginBottom: 0, marginTop: 4 }}
+            >
+              {verdict}
+            </p>
+          )}
         </>
       }
     >
-      <Rows>
-        <Row label="Voltage">{num(power?.voltage, 1, ' V')}</Row>
-        <Row label="Current">{num(power?.current, 1, ' A')}</Row>
-        <Row label="Draw">{num(power?.power_w, 0, ' W')}</Row>
-        <Row label="Energy left">{num(power?.remaining_wh, 0, ' Wh')}</Row>
-        <Row label="Endurance">{duration(power?.endurance_s)}</Row>
-      </Rows>
+      {details && (
+        <Rows>
+          <Row label="Current">{num(power?.current, 1, ' A')}</Row>
+          <Row label="Draw">{num(power?.power_w, 0, ' W')}</Row>
+          <Row label="Energy left">{num(power?.remaining_wh, 0, ' Wh')}</Row>
+          <Row label="Endurance">{duration(power?.endurance_s)}</Row>
+        </Rows>
+      )}
 
-      {power?.survey_remaining_m !== undefined && (
+      {simulated && power?.survey_remaining_m !== undefined && (
         <Rows>
           <Row label="Survey left">{num(power.survey_remaining_m / 1000, 2, ' km')}</Row>
           <Row label="Time to finish">{duration(power.survey_remaining_s)}</Row>

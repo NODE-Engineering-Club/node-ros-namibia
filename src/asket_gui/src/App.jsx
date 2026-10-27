@@ -287,7 +287,7 @@ export function App({ connection }) {
           {details && <HeadingPanel state={state} />}
         </div>
         <div className="sidebar-col">
-          <PowerPanel state={state} />
+          <PowerPanel state={state} connection={connection} />
           {/* Above the sonar and lidar on purpose: this is the panel somebody
               turns to when the lidar says there is something there and they
               need to know what it is. */}
@@ -304,7 +304,9 @@ export function App({ connection }) {
               showRaw={showRawLidar}
               onShowRawChange={setShowRawLidar}
             />
-          ) : (
+          ) : details && (
+            // No lidar: nothing to show on a beach. Details keeps the
+            // explanation.
             <NotFitted title="Obstacles" id="obstacles">
               No lidar is fitted, so nothing aboard detects obstacles. Keep the
               boat in sight and the RC transmitter in hand.

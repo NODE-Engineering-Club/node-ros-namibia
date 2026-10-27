@@ -449,13 +449,16 @@ class RosSource:
             return Sample(stream, utc or self.now_utc_ms(), payload)
 
         if stream == "link":
-            return Sample(
-                stream, self.now_utc_ms(),
-                payloads.link_payload(
-                    self._link, profile="", profile_manual=False, clients=0,
-                    rate_bytes_per_s=0.0, detail=detail,
-                ),
+            payload = payloads.link_payload(
+                self._link, profile="", profile_manual=False, clients=0,
+                rate_bytes_per_s=0.0, detail=detail,
             )
+            # Nothing on the boat measures link quality: the node feeds 1.0
+            # whenever a browser is connected, which the panel printed as
+            # "Quality 100 %". Sent as unknown rather than as that number.
+            if "quality" in payload:
+                payload["quality"] = None
+            return Sample(stream, self.now_utc_ms(), payload)
 
         if stream == "track":
             step = {"full": 1, "reduced": 3, "minimal": 10}[detail]

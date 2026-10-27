@@ -1002,6 +1002,9 @@ class Hub:
             "profile": self.selector.profile,
             "profile_manual": self.selector.manual,
             "connected_clients": len(self.clients),
+            # This browser's own round trip, in ms — the latency the person
+            # looking at the page is actually getting. None until measured.
+            "client_rtt_ms": None if session.rtt_ms is None else round(session.rtt_ms),
             "rate_bytes_per_s": round(
                 sum(c.bytes_estimate_per_s for c in self.clients.values())
             ),
