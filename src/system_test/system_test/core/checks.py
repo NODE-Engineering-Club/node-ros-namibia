@@ -118,7 +118,21 @@ class Thresholds:
     #: clock now. A reference from five minutes ago cannot report on a drift
     #: that started four minutes ago.
     max_gps_time_age_s: float = 30.0
-    min_disk_free_bytes: int = 20 * 1024**3
+    #: The floor below which the pre-flight is NO-GO. 10 GB, not 20: on this
+    #: boat mission_recorder writes navigation only (about 10 MB an hour —
+    #: trajectory at 10 Hz, diagnostics at 1 Hz) because SonarView records the
+    #: sonar. What can still fill the disk is SonarView itself if it saves to
+    #: the same disk (2-5 GB an hour), and 10 GB covers that for longer than
+    #: the battery lasts. The recorder stops itself at 1 GiB and warns at
+    #: 5 GiB (recorder.yaml), so this is the margin above those. Set with the
+    #: system_test parameter min_disk_free_gb.
+    min_disk_free_bytes: int = 10 * 1024**3
+    #: What a recording costs, for the "hours of recording" figure. 3.5 GB/h
+    #: is the Omniscan raw stream (2-5 GB/h), which only applies when
+    #: omniscan_bridge feeds the recorder; system_test_node picks 0.05 GB/h
+    #: (navigation only, measured 10 MB/h, with margin) otherwise. Set with
+    #: recording_gb_per_h.
+    recording_bytes_per_h: float = 3.5 * 1024**3
     min_disk_write_mbps: float = 20.0
     max_link_rtt_ms: float = 400.0
     max_pico_age_s: float = 2.0
@@ -835,7 +849,7 @@ def _disk(state: dict, t: Thresholds) -> CheckResult:
     free = state.get("disk_free_bytes")
     if free is None:
         return _missing("disk.space", "Disk space", "cannot read the missions disk")
-    hours = free / (3.5 * 1024**3)          # 2-5 GB per hour; 3.5 is the middle
+    hours = free / t.recording_bytes_per_h
     if free < t.min_disk_free_bytes:
         return CheckResult(
             "disk.space", "Disk space", FAIL,

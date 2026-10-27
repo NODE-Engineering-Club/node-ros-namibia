@@ -497,3 +497,24 @@ def test_the_link_is_not_measured_without_a_browser():
     assert "Not measured" in result.message
     measured = item(run_checks(dict(HEALTHY, link_rtt_ms=20.0, link_clients=1)), "link.quality")
     assert measured.status == PASS
+
+
+# -- the disk floor, sized to what this boat records -------------------------
+
+
+def test_the_disk_floor_is_ten_gb_and_settable():
+    assert item(run_checks(dict(HEALTHY, disk_free_bytes=12 * 1024**3)), "disk.space").status == PASS
+    assert item(run_checks(dict(HEALTHY, disk_free_bytes=8 * 1024**3)), "disk.space").status == FAIL
+    strict = Thresholds(min_disk_free_bytes=20 * 1024**3)
+    assert item(run_checks(dict(HEALTHY, disk_free_bytes=12 * 1024**3), strict),
+                "disk.space").status == FAIL
+
+
+def test_hours_of_recording_follow_the_configured_rate():
+    """Navigation only (SonarView records the sonar) is ~10 MB/h, so the same
+    disk lasts hundreds of hours, and the battery is what binds."""
+    nav_only = Thresholds(recording_bytes_per_h=0.05 * 1024**3)
+    result = item(run_checks(dict(HEALTHY, disk_free_bytes=50 * 1024**3,
+                                  battery_endurance_s=2 * 3600), nav_only), "disk.space")
+    assert "1000 hours" in result.message
+    assert "battery gives 2.0" in result.message

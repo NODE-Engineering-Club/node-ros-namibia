@@ -17,6 +17,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 import os
 
 
@@ -83,6 +84,11 @@ def generate_launch_description():
             "geofence_expected",
             default_value="false",
             description="The Nav2 survey profile runs, so the pre-flight requires its geofence.",
+        ),
+        DeclareLaunchArgument(
+            "min_disk_free_gb",
+            default_value="10.0",
+            description="Pre-flight NO-GO below this much free space on /data.",
         ),
         DeclareLaunchArgument(
             "mavros_expected",
@@ -159,6 +165,8 @@ def generate_launch_description():
                     # Plus mavros when it is started, and the Nav2 survey
                     # nodes when geofence_expected (system_test_node adds them).
                     "mavros_expected": LaunchConfiguration("mavros_expected"),
+                    "min_disk_free_gb": ParameterValue(
+                        LaunchConfiguration("min_disk_free_gb"), value_type=float),
                     # Equipment absent on purpose is "not checked", not a
                     # NO-GO: no lidar unless lidar_fitted, and the sonar is
                     # watched only when omniscan_bridge is started.

@@ -119,7 +119,19 @@ class SystemTestNode(Node):
         self.declare_parameter("mavros_expected", False)
 
         self.history = PreflightHistory(self.get_parameter("history_path").value)
-        self.thresholds = Thresholds()
+        # Disk: the floor, and what a recording costs here. 0 = automatic:
+        # 3.5 GB/h when omniscan_bridge feeds the sonar stream to the recorder
+        # (sonar_monitored), else 0.05 GB/h — navigation only, SonarView
+        # records the sonar (core/checks.py Thresholds).
+        self.declare_parameter("min_disk_free_gb", 10.0)
+        self.declare_parameter("recording_gb_per_h", 0.0)
+        rate_gb = float(self.get_parameter("recording_gb_per_h").value) or (
+            3.5 if self.get_parameter("sonar_monitored").value else 0.05
+        )
+        self.thresholds = Thresholds(
+            min_disk_free_bytes=int(float(self.get_parameter("min_disk_free_gb").value) * 1024**3),
+            recording_bytes_per_h=rate_gb * 1024**3,
+        )
 
         self._fix: NavSatFix | None = None
         self._imu: Imu | None = None
