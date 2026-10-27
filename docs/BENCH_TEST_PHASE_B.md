@@ -9,12 +9,45 @@ floor; one person on the transmitter, one on the laptop. T200 thrusters are
 water-lubricated: out of the water, spin them **only in short bursts (a few
 seconds) at low throttle**.
 
-## 0. Prepare
+## 0. Flash pico-node_v5 from a Windows laptop
 
-1. Flash `firmware/pico-node_v5/` (see `firmware/README.md`, "Flashing"), ESC
-   power **off**. Serial Monitor: first line `[VER] pico-node 5`.
-2. On the Jetson: udev links (`deploy/udev/README.md`) — `ls -l /dev/pico`.
-3. Start the stack with the defaults (Pico path, GUI):
+The Pico is unplugged from the Jetson and plugged into a Windows laptop for
+this, so the stack on the Jetson does not need stopping (pico_bridge logs the
+port as lost and reopens it when the Pico comes back). ESC power **off**.
+
+1. Install the [Arduino IDE 2](https://www.arduino.cc/en/software) (Windows
+   installer). The Pico needs no Windows driver: it appears as a USB serial
+   port (`COMx`), or as a drive named `RP2350` in BOOTSEL mode.
+2. *File → Preferences → Additional boards manager URLs*:
+   `https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json`
+3. *Tools → Board → Boards Manager*, search **Raspberry Pi Pico/RP2040/RP2350**
+   (Earle F. Philhower), install **4.0.1 or newer**. 4.0.0 is the first release
+   with RP2350 (Pico 2) support and 4.0.1 fixed its tool downloads; an older
+   3.x core does not list the Pico 2 at all. The latest 4.x is fine.
+4. *Tools → Board* → **Raspberry Pi Pico 2** (RP2350). A Pico 1 (RP2040):
+   **Raspberry Pi Pico**.
+5. *Tools → USB Stack* → **Adafruit TinyUSB** (the sketch uses it). `Servo`
+   ships with the core.
+6. Open `firmware/pico-node_v5/pico-node_v5.ino` (the folder keeps that name).
+7. **Verify** (✓). This is the first real arduino-pico build of v5; if it
+   fails, keep the full error text.
+8. Plug the Pico into the laptop, pick its `COMx` in *Tools → Port*,
+   **Upload** (→). No port: unplug, hold **BOOTSEL** while plugging back in,
+   then Upload (the `RP2350` drive appears; the IDE writes to it).
+9. *Tools → Serial Monitor*, 115200 baud: first line `[VER] pico-node 5`, then
+   `STATE ver=5 … rclatch=1 … txdrop=0` lines (`rclatch=1` is normal at
+   power-up: Ch7 has to be cycled).
+10. Close the Serial Monitor, unplug the Pico from the laptop and plug it back
+    into the Jetson's hub.
+
+Rolling back: the same steps with `firmware/pico-node_v4/pico-node_v4.ino`,
+**and** the pre-Phase B (c) software on the Jetson: this stack refuses to
+drive a v4 Pico on purpose.
+
+## 0b. Prepare
+
+1. On the Jetson: udev links (`deploy/udev/README.md`) — `ls -l /dev/pico`.
+2. Start the stack with the defaults (Pico path, GUI):
    `ros2 launch bringup njord.launch.py enable_gui:=true` (or
    `sudo systemctl start asket.service`). GUI at `http://<jetson>:8090`.
 4. A terminal to watch the Pico: `ros2 topic echo /pico/status --field data`.
