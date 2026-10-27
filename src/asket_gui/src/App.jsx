@@ -291,17 +291,12 @@ export function App({ connection }) {
           {/* Above the sonar and lidar on purpose: this is the panel somebody
               turns to when the lidar says there is something there and they
               need to know what it is. */}
-          {cameraFitted ? (
-            <CameraPanel
-              state={state}
-              subscribed={Boolean(state.subscriptions.camera?.granted)}
-            />
-          ) : (
-            <NotFitted title="Camera" id="camera">
-              No camera is shown here. The OAK-D-LR is aboard but has no driver
-              in this stack yet.
-            </NotFitted>
-          )}
+          {/* Always shown: "Camera not connected" is itself the answer. */}
+          <CameraPanel
+            state={state}
+            fitted={cameraFitted}
+            subscribed={Boolean(state.subscriptions.camera?.granted)}
+          />
           <SonarPanel state={state} connection={connection} />
           {lidarFitted ? (
             <LidarPanel

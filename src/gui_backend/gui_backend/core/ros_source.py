@@ -35,6 +35,7 @@ from asket_common.heading import (
 )
 
 from . import adapters, payloads
+from .ros_camera import CompressedCamera
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
 
 from .commands import (
@@ -185,6 +186,7 @@ class RosSource:
         self._publishers: dict[str, object] = {}
         self._service_clients: dict[str, object] = {}
         self._radio, self._station_origin = _radio_from_config(config)
+        self._camera = CompressedCamera()
         self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
         self._link = adapters.link_from_measurements("wifi", 1.0, 0.0, 800_000.0)
 
@@ -218,6 +220,16 @@ class RosSource:
             )
 
     def _make_callback(self, name: str):
+        if name == "camera_image":
+            def on_frame(msg) -> None:
+                self.latest[name] = LatestMessage(msg, time.monotonic())
+                # Stamped with the driver's capture time when it sets one, so
+                # a frame that queued shows its true age.
+                stamp = adapters._stamp_to_utc_ms(msg.header)
+                self._camera.on_message(msg, stamp or self.now_utc_ms())
+
+            return on_frame
+
         def callback(msg) -> None:
             self.latest[name] = LatestMessage(msg, time.monotonic())
 
@@ -415,6 +427,14 @@ class RosSource:
             if not self.describe()["fitted"]["lidar"]:
                 return None
             return self._lidar_sample(detail)
+
+        if stream == "camera":
+            # Not fitted: no stream at all, and the panel says "Camera not
+            # connected". Fitted: a picture, or the reason there is none.
+            if not self.describe()["fitted"].get("camera"):
+                return None
+            utc, payload = self._camera.payload(detail)
+            return Sample(stream, utc or self.now_utc_ms(), payload)
 
         if stream == "link":
             return Sample(

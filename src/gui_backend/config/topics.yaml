@@ -47,6 +47,15 @@ sources:
     topic: /mavros/gpsstatus/gps1/raw
     type: mavros_msgs/msg/GPSRAW
     optional: true
+  # The Camera panel: a compressed (JPEG) image, sent to the browser as it
+  # comes on the full link profile and scaled down on the reduced one. For the
+  # OAK-D-LR through depthai_ros_driver (njord.launch.py enable_oak:=true)
+  # this is the RGB stream's image_transport "compressed" topic; check the
+  # name with `ros2 topic list` on the boat. Read only when camera_fitted.
+  camera_image:
+    topic: /oak/rgb/image_raw/compressed
+    type: sensor_msgs/msg/CompressedImage
+    optional: true
   imu:
     topic: /imu_driver/imu_raw
     type: sensor_msgs/msg/Imu

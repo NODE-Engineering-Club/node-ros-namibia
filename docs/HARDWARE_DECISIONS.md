@@ -22,7 +22,7 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | Energy | 2× LiPo 4S 8000 mAh **in parallel** ≈ 2 × 14.8 V × 8 Ah ≈ **237 Wh**. Probably **2 BQ76920 BMS** boards, one per pack — **TO VERIFY**. |
 | GNSS | Holybro H-RTK Unicore UM982 (dual antenna, heading) **on the Pixhawk**. RTK base Holybro F9P ashore; corrections wanted along base → shore laptop → WiFi → Jetson → MAVROS → Pixhawk (**not implemented**, see Phase B). |
 | Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. |
-| Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver yet.** |
+| Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver in the image yet**; prepared behind `enable_oak` (off), see `docs/CAMERA_OAK.md`. |
 | Lidars | **No Livox and no RPLidar on board for now.** ⇒ **The boat has no obstacle detection.** |
 | BlueOS / Raspberry Pi 5 | **Not used.** |
 | Network | MikroTik CSS610 switch + NetMetal 5 ax (boat) + mANTBox ax 15s (shore). IP plan below. |
@@ -91,7 +91,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | 2× LiPo 4S 8000 mAh (parallel) | — | GUI capacity 237 Wh (`src/gui_backend/config/topics.yaml`) | — | — | Power | ✅ config |
 | Omniscan 3D 450 SS Modular | Ethernet | 10.10.20.31 (`src/omniscan_bridge/config/omniscan.yaml`), UDP 62312 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
 | SonarView | Docker on the Jetson (OPEN) | SonarLink `ws://127.0.0.1:7077` (`src/comms/cloud_bridge/config/cloud_bridge_params.yaml`) | `sonar_bridge_node` → `/sonar/decimated` (cloud) | no | — | ⚠️ |
-| OAK-D-LR | PoE Ethernet | 10.10.20.21 (no driver) | expected `/camera/front/image_raw` (SAM2) | — | Camera: "not fitted" | ❌ no driver |
+| OAK-D-LR | PoE Ethernet | 10.10.20.21 (`enable_oak`, off) | `/oak/rgb/image_raw/compressed` for the GUI (to verify); SAM2 expects `/camera/front/image_raw` | — | Camera: "Camera not connected" | ❌ driver not installed |
 | USB camera | — (not used) | `/dev/video0` | `camera_driver` | **no** (`enable_usb_camera:=false`) | — | — |
 | RPLidar S2 | — (not on board) | `/dev/ttyUSB0` | `sllidar_node` | **no** (`enable_lidar:=false`) | Obstacles: "not fitted" | — |
 | Livox Mid-360S | — (not on board) | 10.10.20.22 reserved | none | — | — | ❌ no driver |

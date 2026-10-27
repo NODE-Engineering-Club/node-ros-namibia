@@ -82,6 +82,13 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_usb_camera",    default_value="false",
                               description="Start camera_driver on camera_device (USB/V4L2). "
                                           "The boat now carries an OAK-D-LR (PoE), not a USB camera."),
+        # The OAK-D-LR (PoE, 10.10.20.21) through Luxonis' depthai_ros_driver.
+        # Off by default: the driver is NOT in the image yet
+        # (ros-jazzy-depthai-ros-driver, plus ros-jazzy-compressed-image-
+        # transport for the GUI's JPEG topic). See docs/CAMERA_OAK.md.
+        DeclareLaunchArgument("enable_oak",           default_value="false",
+                              description="Start depthai_ros_driver for the OAK-D-LR (config/oak.yaml). "
+                                          "The package must be installed; it is not in the image yet."),
         DeclareLaunchArgument("use_sim",         default_value="false"),
         DeclareLaunchArgument(
             "headless",
@@ -333,6 +340,25 @@ def generate_launch_description():
                 "topic":           "/front_camera_driver/image_raw",
                 "camera_info_url": "package://bringup/config/front_camera.yaml",
             }, sim_time],
+        ),
+        # OAK-D-LR. FindPackageShare is resolved only when the include runs,
+        # so with enable_oak:=false a missing depthai_ros_driver costs nothing.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("depthai_ros_driver"), "launch", "camera.launch.py"]
+                )
+            ),
+            launch_arguments={
+                "name": "oak",
+                "params_file": PathJoinSubstitution(
+                    [FindPackageShare("bringup"), "config", "oak.yaml"]
+                ),
+            }.items(),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_oak"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
         ),
         # RPLIDAR S2M1-R2L via Slamtec's official driver (vendored as the
         # src/sllidar_ros2 submodule). The A-series custom driver that used to
@@ -791,7 +817,14 @@ def generate_launch_description():
                 # The GUI shows the lidar and camera panels as "not fitted"
                 # rather than empty when their driver is not started.
                 "lidar_fitted": LaunchConfiguration("enable_lidar"),
-                "camera_fitted": LaunchConfiguration("enable_usb_camera"),
+                # The panel's picture is the OAK's compressed RGB topic
+                # (topics.yaml camera_image); the USB driver publishes raw
+                # images only, so it fills the panel only once a compressed
+                # republisher is added.
+                "camera_fitted": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_oak"), "' == 'true' or '",
+                    LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
+                ]),
                 "geofence_file": LaunchConfiguration("geofence_file"),
                 "geofence_expected": PythonExpression([
                     "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",

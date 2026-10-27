@@ -9,6 +9,7 @@ No ROS here: the methods under test touch only ``self.config`` and
 ``self.latest``.
 """
 
+import re
 from pathlib import Path
 
 import yaml
@@ -51,10 +52,15 @@ def test_the_cockpit_reads_fitted_and_withdraws_the_streams():
 def test_launch_files_default_to_not_fitted():
     njord = (PACKAGE.parent / "bringup" / "launch" / "njord.launch.py").read_text()
     gui = (PACKAGE / "launch" / "gui.launch.py").read_text()
-    for arg in ("enable_lidar", "enable_usb_camera"):
+    for arg in ("enable_lidar", "enable_usb_camera", "enable_oak"):
         assert f'DeclareLaunchArgument("{arg}",' in njord
+        assert re.search(rf'DeclareLaunchArgument\("{arg}",\s+default_value="false"', njord)
     assert '"lidar_fitted": LaunchConfiguration("enable_lidar")' in njord
-    assert '"camera_fitted": LaunchConfiguration("enable_usb_camera")' in njord
+    # The camera is fitted when either driver is started: the OAK-D-LR (the
+    # camera aboard) or the old USB one.
+    camera = njord.split('"camera_fitted":', 1)[1].split("]),", 1)[0]
+    assert 'LaunchConfiguration("enable_oak")' in camera
+    assert 'LaunchConfiguration("enable_usb_camera")' in camera
     for arg in ("lidar_fitted", "camera_fitted"):
         assert f'"{arg}",\n            default_value="false"' in gui
 
