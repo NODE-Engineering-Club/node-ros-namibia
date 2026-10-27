@@ -99,7 +99,23 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument("enable_foxglove",      default_value="true"),
-        DeclareLaunchArgument("fcu_url",              default_value="tcp://localhost:5777"),
+        # Phase B (d): MAVROS straight to the Pixhawk over USB, no BlueOS.
+        # /dev/pixhawk is the udev link (deploy/udev/99-asket.rules); the
+        # baud rate is ignored on a USB CDC port but MAVROS's URL needs one.
+        DeclareLaunchArgument("fcu_url",              default_value="/dev/pixhawk:115200",
+                              description="MAVROS link to the flight controller. Ignored with "
+                                          "use_blueos:=true."),
+        DeclareLaunchArgument("use_blueos",           default_value="false",
+                              description="Go through BlueOS's MAVLink router (tcp://localhost:5777) "
+                                          "instead of fcu_url, as before Phase B (d)."),
+        # PX4 or ArduPilot: not yet known for this Pixhawk 4. Selects
+        # config/mavros_<autopilot>.yaml and whether MAVROS asks for stream
+        # rates; the pre-flight's autopilot.match check fails if the Pixhawk
+        # turns out to run the other one. ArduPilot by default: the
+        # set_stream_rate workaround below was confirmed against this
+        # Pixhawk, and REQUEST_DATA_STREAM is an ArduPilot-only request.
+        DeclareLaunchArgument("autopilot",            default_value="ardupilot",
+                              description="Firmware on the Pixhawk: 'ardupilot' or 'px4'."),
         DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
         # Phase B (a): the ESCs are wired to the Pico, so the Pico is the motor
         # path by default. false selects actuator_driver (MAVROS RC override
@@ -199,7 +215,10 @@ def generate_launch_description():
             ])),
             arguments=[
                 "--ros-args",
-                "-p", ["fcu_url:=", LaunchConfiguration("fcu_url")],
+                "-p", ["fcu_url:=", PythonExpression([
+                    "'tcp://localhost:5777' if '", LaunchConfiguration("use_blueos"),
+                    "' == 'true' else '", LaunchConfiguration("fcu_url"), "'",
+                ])],
                 "-p", ["gcs_url:=", LaunchConfiguration("gcs_url")],
                 "-p", "tgt_system:=1",
                 "-p", "tgt_component:=1",
@@ -213,8 +232,12 @@ def generate_launch_description():
             # use_sim, and adding it back (even as a single-key dict) forces
             # launch_ros to emit a second --params-file, which alone is enough
             # to reproduce the race described above.
+            # One file, chosen by autopilot (see config/mavros_ardupilot.yaml).
             parameters=[
-                cfg + "/mavros_denylist.yaml",
+                PythonExpression([
+                    "'", cfg, "/mavros_' + {'px4': 'px4', 'ardupilot': 'ardupilot'}['",
+                    LaunchConfiguration("autopilot"), "'] + '.yaml'",
+                ]),
             ],
         ),
         # This particular FCU/link doesn't auto-stream position or extended-
@@ -228,11 +251,16 @@ def generate_launch_description():
         # plugin loading and have an FCU connection), fixes it for the rest of
         # the session. This is a workaround for FCU/link stream-rate config,
         # not a bug in this repo's code.
+        #
+        # ArduPilot only: REQUEST_DATA_STREAM (what set_stream_rate sends) is
+        # an ArduPilot message, which PX4 ignores — PX4's rates come from its
+        # own MAVLink instance settings (docs/HARDWARE_DECISIONS.md §4c).
         TimerAction(
             period=10.0,
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
-                LaunchConfiguration("use_sim"), "' != 'true'"
+                LaunchConfiguration("use_sim"), "' != 'true' and '",
+                LaunchConfiguration("autopilot"), "' == 'ardupilot'"
             ])),
             actions=[
                 ExecuteProcess(

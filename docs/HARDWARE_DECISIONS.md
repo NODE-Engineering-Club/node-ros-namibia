@@ -78,7 +78,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 
 | Component | Link | Port / IP in code | Node → topics | Launched by default? | GUI | Status |
 |---|---|---|---|---|---|---|
-| Pixhawk 4 | USB (via hub) — today MAVLink via `fcu_url` `tcp://localhost:5777`, a BlueOS router (`src/bringup/launch/njord.launch.py:67`) | `/dev/pixhawk` (udev) — not yet used by the launch (Phase B) | `mavros` → `imu_gps_driver` → `/imu_driver/imu_raw`, `/gps_driver/gps_raw`; EKF → `/odometry/filtered` | yes (`enable_mavros`) | Vessel, Heading, map | ⚠️ needs a serial `fcu_url` without BlueOS (Phase B) |
+| Pixhawk 4 | USB (via hub), MAVROS straight to it since Phase B (d): `fcu_url` `/dev/pixhawk:115200`, `autopilot:=ardupilot\|px4`; `use_blueos:=true` goes back through BlueOS (`tcp://localhost:5777`) | `/dev/pixhawk` (udev) | `mavros` → `imu_gps_driver` → `/imu_driver/imu_raw`, `/gps_driver/gps_raw`; EKF → `/odometry/filtered` | yes (`enable_mavros`) | Vessel, Heading, map | ⚠️ firmware (PX4 / ArduPilot) still to confirm: §4c |
 | UM982 GNSS (dual antenna) | to the Pixhawk | — | via MAVROS as above | — | Heading (source shown as EKF) | ⚠️ ArduPilot/PX4 GPS-yaw config to verify |
 | F9P RTK base | shore laptop → WiFi → Jetson | — | none (MAVROS `gps_rtk` plugin not fed) | — | — | ❌ (Phase B) |
 | Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/pico` (udev, `deploy/udev/`) | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **yes** (`use_pico_bridge:=true` is the default since Phase B a) | Mode, Vessel, pre-flight | ⚠️ bench test first |
