@@ -35,25 +35,26 @@ DAY_MS = 24 * 60 * 60 * 1000
 
 MOUNTING = "vessel.sonar.mounting.tilt_deg"
 STATION_LAT = "deployment.station.lat"
-SONAR_RANGE = "deployment.sonar.range_m"
+HEIGHT = "deployment.station.height_m"
 
 
 # -- the inventory ---------------------------------------------------------
 
 
-def test_the_sonar_appears_in_both_tiers_and_that_is_correct():
+def test_the_sonar_geometry_is_vessel_tier_and_its_settings_are_not_here():
     """Mounting geometry is Vessel: offset and angle depend on how the head is
     bolted on, not on where you are surveying, so it is measured once on a
-    given hull and kept. Range and gain are Deployment: they follow the
-    expected depth, so they change with the beach.
+    given hull and kept.
 
-    Two different kinds of fact about the same instrument, and putting them in
-    one tier would make the staleness rule wrong for one of them.
+    Range and gain used to be Deployment fields here, and nothing read them:
+    the sonar is set in SonarView (or live from the full Sonar panel). A field
+    that is saved and never used is worse than no field.
     """
     assert FIELD_BY_ID[MOUNTING].tier == TIER_VESSEL
     assert FIELD_BY_ID["vessel.sonar.side"].tier == TIER_VESSEL
-    assert FIELD_BY_ID[SONAR_RANGE].tier == TIER_DEPLOYMENT
-    assert FIELD_BY_ID["deployment.sonar.gain"].tier == TIER_DEPLOYMENT
+    for removed in ("deployment.sonar.range_m", "deployment.sonar.gain",
+                    "deployment.origin.lat", "deployment.origin.lon"):
+        assert removed not in FIELD_BY_ID
 
 
 def test_only_deployment_values_go_stale():
@@ -79,9 +80,8 @@ def test_the_silently_corrupting_group_is_the_narrow_one():
     perfectly fine."""
     corrupting = {spec.id for spec in FIELDS if spec.silently_corrupts}
     assert MOUNTING in corrupting
-    assert "deployment.origin.lat" in corrupting
     assert "vessel.sonar.side" in corrupting
-    assert SONAR_RANGE not in corrupting
+    assert HEIGHT not in corrupting
     assert "vessel.battery.capacity_wh" not in corrupting
 
 
@@ -92,7 +92,7 @@ def test_a_field_with_no_sensible_default_is_marked_as_having_none():
     assert not FIELD_BY_ID[STATION_LAT].has_default
     assert not FIELD_BY_ID["deployment.station.boresight_deg"].has_default
     assert FIELD_BY_ID[MOUNTING].has_default
-    assert FIELD_BY_ID[SONAR_RANGE].has_default
+    assert FIELD_BY_ID[HEIGHT].has_default
 
 
 def test_choice_fields_offer_words_rather_than_numbers():
@@ -116,7 +116,7 @@ def test_a_fresh_vessel_has_answered_nothing():
 def test_the_shipped_default_is_still_readable_before_anybody_answers():
     """The vessel has to run on something. The point is not to withhold the
     value, it is to be honest that nobody has checked it."""
-    assert default_profile().get(SONAR_RANGE) == 30.0
+    assert default_profile().get(HEIGHT) == 2.9
 
 
 def test_answering_records_who_and_when_and_how():
@@ -240,7 +240,6 @@ def test_capturing_the_station_clears_the_blocking_group():
     for field_id in (
         STATION_LAT, "deployment.station.lon",
         "deployment.station.boresight_deg",
-        "deployment.origin.lat", "deployment.origin.lon",
     ):
         profile = profile.set(field_id, 1.0, CAPTURED, utc_ms=NOW)
 
@@ -250,8 +249,6 @@ def test_capturing_the_station_clears_the_blocking_group():
 
 def test_measuring_the_hull_clears_the_corrupting_group():
     profile = answer_all(default_profile(), TIER_VESSEL)
-    profile = profile.set("deployment.origin.lat", 1.0, CAPTURED, utc_ms=NOW)
-    profile = profile.set("deployment.origin.lon", 1.0, CAPTURED, utc_ms=NOW)
 
     assert "ruin a survey" not in profile.headline()
     assert "nobody has checked" in profile.headline()

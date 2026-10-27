@@ -68,7 +68,50 @@ class LatestMessage:
         return time.monotonic() - self.received_monotonic
 
 
-def _radio_from_config(config: dict):
+#: Setup fields that, when answered, take precedence over topics.yaml's
+#: shore_station block. Read by gui_backend itself, live.
+_STATION_FIELDS = (
+    "deployment.station.lat", "deployment.station.lon", "deployment.station.boresight_deg",
+)
+
+
+def _station_config(config: dict, setup) -> dict:
+    """topics.yaml's shore_station, with the Setup page's answers laid over it.
+
+    The station counts as configured from Setup only when its position AND
+    its bearing have been entered: a position without a bearing would draw a
+    confident sector pointing north. The other values (heights, sea state,
+    channel width) apply whenever they are answered.
+    """
+    from asket_common.link_budget import SEA_STATE_WAVE_HEIGHT_M
+
+    station = dict(config.get("shore_station") or {})
+    if setup is None:
+        return station
+    if all(setup.answered(f) for f in _STATION_FIELDS):
+        station.update(
+            configured=True,
+            lat=float(setup.get("deployment.station.lat")),
+            lon=float(setup.get("deployment.station.lon")),
+            boresight_deg=float(setup.get("deployment.station.boresight_deg")),
+        )
+    if setup.answered("deployment.station.height_m"):
+        station["height_m"] = float(setup.get("deployment.station.height_m"))
+    if setup.answered("deployment.radio.channel_width_mhz"):
+        station["channel_width_mhz"] = float(setup.get("deployment.radio.channel_width_mhz"))
+    if setup.answered("deployment.sea.state"):
+        wave = SEA_STATE_WAVE_HEIGHT_M.get(str(setup.get("deployment.sea.state")))
+        if wave is not None:
+            station["wave_height_m"] = wave
+    if setup.answered("vessel.radio.antenna_height_m"):
+        station["vessel_radio"] = dict(
+            station.get("vessel_radio") or {},
+            height_m=float(setup.get("vessel.radio.antenna_height_m")),
+        )
+    return station
+
+
+def _radio_from_config(config: dict, setup=None):
     """Build the link budget from ``topics.yaml``, or return nothing.
 
     Nothing is the honest answer when the station has not been entered. The
@@ -81,7 +124,7 @@ def _radio_from_config(config: dict):
     This is the interim. These values belong on the mission setup page beside
     the sonar mounting geometry — see ``docs/open_questions.md`` Q11.
     """
-    station_cfg = (config.get("shore_station") or {})
+    station_cfg = _station_config(config, setup)
     if not station_cfg.get("configured"):
         return None, None
 
@@ -187,6 +230,7 @@ class RosSource:
         self._publishers: dict[str, object] = {}
         self._service_clients: dict[str, object] = {}
         self._radio, self._station_origin = _radio_from_config(config)
+        self._radio_profile = None
         self._camera = CompressedCamera()
 
         self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
@@ -194,6 +238,11 @@ class RosSource:
 
         self._subscribe_all()
         self._prepare_commands()
+
+    def _setup_or_config(self, field_id: str, config_value):
+        if self.setup.answered(field_id) or config_value is None:
+            return float(self.setup.get(field_id))
+        return float(config_value)
 
     @property
     def setup(self) -> SetupValues:
@@ -358,10 +407,23 @@ class RosSource:
         that differs, and here it comes from the GNSS fix instead of from a
         simulated vessel.
         """
+        self._refresh_radio()
         self._link = adapters.link_from_measurements(
             active_link, quality, rtt_ms, capacity,
             radio=self._radio, **self._vessel_enu(),
         )
+
+    def _refresh_radio(self) -> None:
+        """Rebuild the link budget when the Setup file has changed."""
+        profile = self.setup.refresh()
+        if profile is self._radio_profile:
+            return
+        self._radio_profile = profile
+        try:
+            self._radio, self._station_origin = _radio_from_config(self.config, self.setup)
+        except (KeyError, TypeError, ValueError) as exc:
+            self.node.get_logger().error(f"shore station not usable: {exc}")
+            self._radio, self._station_origin = None, None
 
     def _vessel_enu(self) -> dict:
         """The boat in the station's local ENU frame, or nothing.
@@ -413,8 +475,12 @@ class RosSource:
             vessel_cfg = self.config.get("vessel") or {}
             record = adapters.battery_from_ros(
                 msg,
-                capacity_wh=vessel_cfg.get("battery_capacity_wh", 237.0),
-                hotel_load_w=vessel_cfg.get("hotel_load_w", 85.0),
+                # The Setup page's answer when there is one, else topics.yaml,
+                # else the field's shipped default.
+                capacity_wh=self._setup_or_config(
+                    "vessel.battery.capacity_wh", vessel_cfg.get("battery_capacity_wh")),
+                hotel_load_w=self._setup_or_config(
+                    "vessel.battery.hotel_load_w", vessel_cfg.get("hotel_load_w")),
             )
             vessel = self._vessel_record()
             return Sample(

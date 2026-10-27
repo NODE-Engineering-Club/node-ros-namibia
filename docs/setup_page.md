@@ -635,3 +635,25 @@ Closes the *mechanism* for Q2 (mounting geometry) and Q11 (station position
 and bearing) — both become fields somebody can fill in rather than files
 somebody cannot open. It does not close either question: that still needs a
 tape measure and a beach. What it removes is the excuse.
+
+## Which fields are applied, and by what (simple-GUI pass)
+
+Every field on the page is now read by something; the ones that were not are
+gone.
+
+| Field | Applied by | When |
+|---|---|---|
+| Sonar mounting (6) and side | `omniscan_bridge` | on reload (`~/reload_mounting`). Hidden on the page while SonarView runs the sonar (`sonar_panel: health`), with a "Show them" link: nothing on the boat applies them then. |
+| Battery capacity, hotel load | `gui_backend` (`RosSource`, power stream) | live — the answered value wins over `topics.yaml` `vessel`, which wins over the field default |
+| Boat antenna height; station latitude, longitude, bearing, tripod height; sea state; channel width | `gui_backend` (link budget) | live. The station counts as entered from the page only once position **and** bearing are in; until then `topics.yaml` `shore_station` applies. Sea state maps to a wave height (`asket_common.link_budget.SEA_STATE_WAVE_HEIGHT_M`). |
+| SonarView address | `gui_backend` (`hello.source.sonarview_url`) | live |
+
+"Live" means `core/setup_values.py`: the file is re-read when it changes (at
+most every 2 s), the save handler forces a re-read, and the hub re-sends
+`hello` to every open page after a save.
+
+Removed: **local origin** latitude/longitude (nothing read them — the map frame
+is anchored to the Pixhawk home by `sensors/datum_sync`), and **sonar range and
+gain** (set in SonarView, or live from the full Sonar panel with
+`set_ping_parameters`). A setup file that still holds them loads normally and
+lists them as unrecognised entries.

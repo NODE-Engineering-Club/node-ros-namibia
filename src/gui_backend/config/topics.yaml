@@ -243,8 +243,10 @@ estop:
 # predicted — nothing reads the radio yet). The same module and the same
 # arithmetic the simulator uses: asket_common/link_budget.py.
 #
-# These values belong on the mission setup page beside the sonar mounting
-# geometry. This entry is the interim. See docs/open_questions.md Q11.
+# The Setup page overrides this block: once the station's latitude, longitude
+# and bearing are entered there, gui_backend uses them (and the tripod height,
+# sea state, channel width and boat antenna height whenever they are entered),
+# re-read live from the setup file. This block is the fallback.
 shore_station:
   configured: false
   lat: 0.0
