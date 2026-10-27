@@ -116,6 +116,33 @@ Do not start the bench until every line here is true.
 6. A terminal to watch the Pico:
    `sudo podman exec -it asket bash -c 'source /opt/ros/jazzy/setup.bash && source /opt/njord/setup.bash && ros2 topic echo /pico/status --field data'`.
 
+### Requesting AUTO without the Pixhawk
+
+Every `ros2 …` command in this document runs **inside the container**:
+`sudo podman exec -it asket bash`, then
+`source /opt/ros/jazzy/setup.bash && source /opt/njord/setup.bash`.
+
+With no Pixhawk the pre-flight is **NO-GO** (no GNSS, no heading), and the
+GUI refuses **Autonomous** while it is ("Autonomous is blocked: the
+pre-flight is NO-GO…"). Where a step says *request AUTO*, use one of:
+
+- **GUI:** Boat panel → **Autonomous** (twice: the second click confirms). It
+  is refused; tick **I have read the pre-flight and accept the NO-GO**, then
+  **I know it is NO-GO, force** (twice). The forced press is logged
+  (`asket_overrides.jsonl` next to the setup file).
+- **Command line** (bypasses the GUI's check, which is an aid, not a
+  safety):
+
+  ```bash
+  ros2 topic pub --once -w 1 /pico/mode_request std_msgs/msg/String "{data: AUTO}"
+  ```
+
+  and back: `"{data: MANUAL}"`. `-w 1` waits for pico_bridge to be
+  subscribed, so the single message is not lost.
+
+Either way the Pico still decides: AUTONOMOUS only with Ch8 high, armed, and
+the latch clear.
+
 ## 1. ESC unpowered (battery disconnected from the ESC rail)
 
 **The relay (GPIO21) and the E-stop feedback (GPIO20) are not wired yet.**
@@ -131,11 +158,11 @@ disarmed / E-stop, yellow = MANUAL armed, green = AUTONOMOUS).
 | 1.4 | `ros2 node list \| grep -E "pico_bridge\|actuator_driver"` | **only** `/pico_bridge` (a) |
 | 1.5 | pico_bridge log (`journalctl -u asket.service` or the launch terminal) | `Pico firmware : v5, as expected` (b) |
 | 1.6 | GUI → Pre-flight → Run | `Pico firmware version: v5, matching this software` |
-| 1.7 | Ch8 high, Ch7 cycled low→high, GUI: request AUTO | `mode=3`, green light |
+| 1.7 | Ch8 high, Ch7 cycled low→high, request AUTO (box above: GUI force, or `ros2 topic pub … "{data: AUTO}"`) | `mode=3`, green light |
 | 1.8 | `ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.2}}"` and `ros2 topic echo /pico_bridge/motor_cmd` | numbers (e.g. `0.200,0.200`), not `PING` (b) |
 | 1.9 | **RC lost, receiver failsafe:** still AUTONOMOUS (1.7–1.8 running), switch the **transmitter off** | in < 0.5 s: `relay=0`, red light, `mode=1 armed=0 rclatch=1 wantauto=0`; GUI arming reason "the RC link was lost…". Note `sbusfs=` (1 = the RP4TD reports failsafe; if it stays 0 the receiver stops sending, also covered) |
 | 1.10 | **No auto re-arm:** transmitter back on, **Ch7 still high**, wait 10 s | stays `armed=0 rclatch=1 relay=0`, red light |
-| 1.11 | GUI: request AUTO while latched | not applied (Pico answers `[NAK] MODE AUTO refused`), stays disarmed |
+| 1.11 | Request AUTO while latched (box above) | not applied (Pico answers `[NAK] MODE AUTO refused`), stays disarmed |
 | 1.12 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2` (MANUAL, not AUTONOMOUS) |
 | 1.13 | **RC lost, SBUS silent:** AUTONOMOUS again (1.7), then **unplug the receiver's SBUS lead** | same as 1.9 (`sbusfs` irrelevant: no frames). Re-plug, repeat 1.10–1.12 |
 | 1.14 | **Serial never blocks:** stop the stack (`sudo systemctl stop asket.service`), then hold the port open without reading it: `sudo sh -c 'sleep 60 < /dev/pico'` (opening the port raises DTR, so the Pico sees a host that stopped reading) | during those 60 s the RC still works: Ch8 low turns the light red at once (watch the lights: nothing reads `STATE` while the port is held); Ch7 low→high re-arms (yellow light). Check `relay=` in the first `STATE` lines after 1.15 |
@@ -168,7 +195,7 @@ Connect the battery to the ESC rail. Keep throttle low, bursts short.
 | 2.1 | Arm in MANUAL (Ch8 middle, Ch7 low→high) | `relay=1` (the relay clicks closed), ESC start-up tones, **no spin for 2 s** (arm window) |
 | 2.2 | Throttle a little forward, then yaw | both thrusters forward; yaw spins them opposite. Wrong way? `thr_invert`/`yaw_invert` (pico_bridge) and `THR_INVERT`/`YAW_INVERT` (firmware) |
 | 2.3 | Ch8 low while spinning | thrusters stop at once, relay opens (ESC power-down tones) |
-| 2.4 | AUTONOMOUS (Ch8 high, Ch7 cycled, GUI AUTO), `ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.15}}"` | both spin slowly forward |
+| 2.4 | AUTONOMOUS (Ch8 high, Ch7 cycled, request AUTO as in the box before section 1), `ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.15}}"` | both spin slowly forward |
 | 2.5 | Stop the `ros2 topic pub` | neutral within ~0.5 s (bridge sends PING after 0.3 s, Pico neutral after 0.5 s); relay stays closed |
 | 2.6 | Restart 2.4, then **transmitter off** | thrusters stop in < 0.5 s, relay opens |
 | 2.7 | Transmitter on, Ch7 still high | nothing spins, even with `/control/effort` still published |
