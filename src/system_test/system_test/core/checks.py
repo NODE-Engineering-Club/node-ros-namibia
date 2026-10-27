@@ -391,6 +391,36 @@ def _rc(state: dict, t: Thresholds) -> CheckResult:
 # -- navigation -----------------------------------------------------------
 
 
+@check("autopilot.match", "Flight controller firmware", critical=True)
+def _autopilot(state: dict, t: Thresholds) -> CheckResult:
+    """Is the Pixhawk running the autopilot the stack was launched for?
+
+    njord.launch.py's `autopilot:=ardupilot|px4` picks MAVROS's parameters
+    and whether it asks for stream rates; launched for the wrong one, half of
+    what the GUI and the pre-flight read never arrives, and it looks like a
+    broken sensor. The answer is in the flight controller's own HEARTBEAT
+    (sensors/autopilot_probe → /autopilot/detected).
+    """
+    expected = state.get("autopilot_expected")
+    detected = state.get("autopilot_detected")
+    if not detected:
+        return _missing("autopilot.match", "Flight controller firmware",
+                        "no heartbeat from the flight controller")
+    from asket_common.autopilot import label
+
+    if expected and detected != expected:
+        return CheckResult(
+            "autopilot.match", "Flight controller firmware", FAIL,
+            f"The Pixhawk runs {label(detected)}, the stack was started for {label(expected)}",
+            f"Restart the stack with autopilot:={detected} (asket.service launch line), "
+            "or flash the Pixhawk with the intended firmware.",
+        )
+    return CheckResult(
+        "autopilot.match", "Flight controller firmware", PASS,
+        f"{label(detected)}" + (", as launched" if expected else ""), "",
+    )
+
+
 @check("gnss.fix", "GNSS fix", critical=True)
 def _gnss(state: dict, t: Thresholds) -> CheckResult:
     sats = state.get("num_sats")
@@ -1004,6 +1034,7 @@ REQUIRES = {
     "sonar.clock": "sonar_bridge",
     "sonar.mounting": "sonar_bridge",
     "nav.geofence": "survey_nav",
+    "autopilot.match": "mavros",
 }
 
 #: What the operator is told for each kind of absent equipment.
@@ -1012,6 +1043,10 @@ ABSENT_REASON = {
     "sonar_bridge": (
         "the sonar is run from SonarView, and omniscan_bridge is not started, "
         "so this stack does not watch it"
+    ),
+    "mavros": (
+        "MAVROS is not started (enable_mavros:=false, or the simulator), so "
+        "there is no flight controller to check"
     ),
     "survey_nav": (
         "the Nav2 survey profile is not running (enable_nav2:=false or "
@@ -1025,6 +1060,7 @@ ENABLE_ARG = {
     "lidar": "enable_lidar:=true",
     "sonar_bridge": "enable_sonar:=true",
     "survey_nav": "enable_nav2:=true nav2_profile:=survey",
+    "mavros": "enable_mavros:=true",
 }
 
 

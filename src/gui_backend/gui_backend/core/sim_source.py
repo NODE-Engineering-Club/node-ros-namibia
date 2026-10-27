@@ -623,8 +623,9 @@ class SimSource:
         report = run_checks(
             self._preflight_state(), only=only, run_utc_ms=self.world.utc_ms,
             # The simulator runs no Nav2, so there is no survey geofence to
-            # check; the item says so instead of grounding the simulated boat.
-            absent={"survey_nav"},
+            # check, and no flight controller (MAVROS) whose firmware to
+            # check; the items say so instead of grounding the simulated boat.
+            absent={"survey_nav", "mavros"},
         )
         self.last_report = report
         self.preflight.append(report)

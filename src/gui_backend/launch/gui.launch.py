@@ -91,6 +91,11 @@ def generate_launch_description():
             description="Pre-flight NO-GO below this much free space on /data.",
         ),
         DeclareLaunchArgument(
+            "autopilot",
+            default_value="ardupilot",
+            description="The Pixhawk's firmware the stack was started for (njord.launch.py autopilot).",
+        ),
+        DeclareLaunchArgument(
             "mavros_expected",
             default_value="false",
             description="MAVROS is started, so the pre-flight expects its node.",
@@ -144,6 +149,7 @@ def generate_launch_description():
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "camera_fitted": LaunchConfiguration("camera_fitted"),
                     "geofence_file": LaunchConfiguration("geofence_file"),
+                    "autopilot": LaunchConfiguration("autopilot"),
                 },
                 sim_time,
             ],
@@ -165,6 +171,7 @@ def generate_launch_description():
                     # Plus mavros when it is started, and the Nav2 survey
                     # nodes when geofence_expected (system_test_node adds them).
                     "mavros_expected": LaunchConfiguration("mavros_expected"),
+                    "autopilot_expected": LaunchConfiguration("autopilot"),
                     "min_disk_free_gb": ParameterValue(
                         LaunchConfiguration("min_disk_free_gb"), value_type=float),
                     # Equipment absent on purpose is "not checked", not a

@@ -40,6 +40,7 @@ HEALTHY = dict(
     expected_nodes=["omniscan_bridge"], present_nodes=["omniscan_bridge"],
     pico_state_format_verified=True, pico_state_parsed=True, pico_state_unknown_keys=[],
     pico_estop_feedback_enabled=True,
+    autopilot_detected="ardupilot", autopilot_expected="ardupilot",
     mounting=dict(
         path="/etc/asket/mounting.yaml", found=True, measured=True,
         measured_by="AD", measured_utc="2026-03-02", error="", unknown_fields=[],
@@ -518,3 +519,32 @@ def test_hours_of_recording_follow_the_configured_rate():
                                   battery_endurance_s=2 * 3600), nav_only), "disk.space")
     assert "1000 hours" in result.message
     assert "battery gives 2.0" in result.message
+
+
+# -- the flight controller's firmware ----------------------------------------
+
+
+def test_the_autopilot_must_be_the_one_launched_for():
+    ok = item(run_checks(HEALTHY), "autopilot.match")
+    assert ok.status == PASS
+    assert "ArduPilot" in ok.message
+    wrong = run_checks(dict(HEALTHY, autopilot_detected="px4"))
+    result = item(wrong, "autopilot.match")
+    assert result.status == FAIL
+    assert "PX4" in result.message and "ArduPilot" in result.message
+    assert "autopilot:=px4" in result.remedy
+    assert not wrong.go
+
+
+def test_no_heartbeat_is_unknown_and_blocks_because_it_is_critical():
+    report = run_checks(dict(HEALTHY, autopilot_detected=None))
+    assert item(report, "autopilot.match").status == SKIPPED
+    assert not report.go
+
+
+def test_without_mavros_the_autopilot_is_not_checked():
+    report = run_checks(dict(HEALTHY, autopilot_detected=None), absent={"mavros"})
+    result = item(report, "autopilot.match")
+    assert result.status == SKIPPED
+    assert "MAVROS is not started" in result.message
+    assert report.go

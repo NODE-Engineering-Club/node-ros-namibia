@@ -284,6 +284,17 @@ def generate_launch_description():
                 ),
             ],
         ),
+        # Which autopilot actually answers (HEARTBEAT off MAVROS's raw
+        # stream) → /autopilot/detected, for the pre-flight's autopilot.match.
+        Node(
+            package="sensors",
+            executable="autopilot_probe",
+            name="autopilot_probe",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
+        ),
         # Localization — EKF + NavSat transform
         Node(
             package="robot_localization",
@@ -865,6 +876,7 @@ def generate_launch_description():
                     LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
                 ]),
                 "geofence_file": LaunchConfiguration("geofence_file"),
+                "autopilot": LaunchConfiguration("autopilot"),
                 "mavros_expected": PythonExpression([
                     "'true' if '", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
                     LaunchConfiguration("use_sim"), "' != 'true' else 'false'",

@@ -117,6 +117,9 @@ class SystemTestNode(Node):
         self.declare_parameter("geofence_expected", False)
         # MAVROS was started (enable_mavros, not in simulation): expect its node.
         self.declare_parameter("mavros_expected", False)
+        # What njord.launch.py was started for ("ardupilot" / "px4"); the
+        # autopilot.match check compares it with the heartbeat.
+        self.declare_parameter("autopilot_expected", "")
 
         self.history = PreflightHistory(self.get_parameter("history_path").value)
         # Disk: the floor, and what a recording costs here. 0 = automatic:
@@ -147,6 +150,8 @@ class SystemTestNode(Node):
         self._odom_at: float = 0.0
         self._sats: int | None = None
         self._time_ref: TimeReference | None = None
+        self._autopilot = ""
+        self._autopilot_at = 0.0
         self._time_ref_at: float = 0.0
         self._link: LinkStatus | None = None
         self._mission: MissionState | None = None
@@ -177,6 +182,7 @@ class SystemTestNode(Node):
         if GPSRAW is not None:
             self.create_subscription(GPSRAW, "/mavros/gpsstatus/gps1/raw",
                                      self._on_gpsraw, SENSOR_QOS)
+        self.create_subscription(String, "/autopilot/detected", self._on_autopilot, 10)
         self.create_subscription(TimeReference, "/mavros/time_reference",
                                  self._on_time_ref, SENSOR_QOS)
         self.create_subscription(SonarStatus, "/sonar/status", self._set("_sonar"), 10)
@@ -231,6 +237,10 @@ class SystemTestNode(Node):
         self._odom = msg
         self._odom_at = time.monotonic()
 
+    def _on_autopilot(self, msg) -> None:
+        self._autopilot = msg.data
+        self._autopilot_at = time.monotonic()
+
     def _on_gpsraw(self, msg) -> None:
         self._gpsraw = msg
         self._gpsraw_at = time.monotonic()
@@ -250,6 +260,8 @@ class SystemTestNode(Node):
             absent.add("sonar_bridge")
         if not self.get_parameter("geofence_expected").value:
             absent.add("survey_nav")
+        if not self.get_parameter("mavros_expected").value:
+            absent.add("mavros")
         return absent
 
     def _real_vessel_facts(self) -> dict:
@@ -281,6 +293,10 @@ class SystemTestNode(Node):
                 facts["num_sats"] = int(raw.satellites_visible)
             if int(raw.eph) not in (0, 65535):
                 facts["hdop"] = int(raw.eph) / 100.0
+        # The probe publishes every second; older than 5 s means it is gone.
+        if self._autopilot_at and now - self._autopilot_at < 5.0:
+            facts["autopilot_detected"] = self._autopilot or None
+        facts["autopilot_expected"] = self.get_parameter("autopilot_expected").value or None
         if self._time_ref is not None:
             ref = self._time_ref
             facts.update(gps_time_facts(
@@ -346,7 +362,7 @@ class SystemTestNode(Node):
         expected = list(self.get_parameter("expected_nodes").value)
         # What else this launch started, so it is missed if it dies.
         if self.get_parameter("mavros_expected").value:
-            expected.append("mavros")
+            expected.extend(["mavros", "autopilot_probe"])
         if self.get_parameter("geofence_expected").value:
             expected.extend(NAV2_SURVEY_NODES)
         # The ROS graph first: a node that publishes no /diagnostics of its

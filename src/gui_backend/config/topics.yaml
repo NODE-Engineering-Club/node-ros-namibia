@@ -56,6 +56,12 @@ sources:
     topic: /oak/rgb/image_raw/compressed
     type: sensor_msgs/msg/CompressedImage
     optional: true
+  # Which firmware the flight controller's heartbeat says it runs
+  # ("ardupilot" / "px4" / "" for none), from sensors/autopilot_probe.
+  autopilot_detected:
+    topic: /autopilot/detected
+    type: std_msgs/msg/String
+    optional: true
   imu:
     topic: /imu_driver/imu_raw
     type: sensor_msgs/msg/Imu

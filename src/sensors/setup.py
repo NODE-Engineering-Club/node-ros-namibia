@@ -24,6 +24,7 @@ setup(
             "bms_reader = sensors.bms_reader:main",
             "battery_aggregator = sensors.battery_aggregator:main",
             "geofence_mask_node = sensors.geofence_mask_node:main",
+            "autopilot_probe = sensors.autopilot_probe:main",
             "sensors_all = sensors.launch_all:main",
         ],
     },

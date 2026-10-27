@@ -88,6 +88,15 @@ export function BoatPanel({ state, connection }) {
               </Value>
             </Row>
             <GnssRows vessel={vessel} ageMs={vesselAge} rateHz={vesselRate} />
+            {/* Only the real boat sends these (RosSource, full detail). */}
+            {(vessel?.autopilot_expected || vessel?.autopilot_detected !== undefined) && (
+              <Row label="Autopilot">
+                <AutopilotValue
+                  detected={vessel.autopilot_detected}
+                  expected={vessel.autopilot_expected}
+                />
+              </Row>
+            )}
           </Rows>
           <HullDetail hull={hull} />
         </>
@@ -110,4 +119,22 @@ export function fixQuality(vessel) {
     text: FIX_QUALITY_LABELS[q] || q,
     level: q === 'none' ? 'errline' : q === 'gps' ? '' : 'okline',
   };
+}
+
+const AUTOPILOT_LABELS = { ardupilot: 'ArduPilot', px4: 'PX4' };
+
+/** What the heartbeat says, against what the stack was launched for. */
+function AutopilotValue({ detected, expected }) {
+  const name = (id) => AUTOPILOT_LABELS[id] || id;
+  if (!detected) {
+    return <span className="dim-value">no heartbeat (launched for {name(expected) || '—'})</span>;
+  }
+  if (expected && detected !== expected) {
+    return (
+      <span className="errline">
+        {name(detected)} — but launched for {name(expected)}
+      </span>
+    );
+  }
+  return <span>{name(detected)}</span>;
 }
