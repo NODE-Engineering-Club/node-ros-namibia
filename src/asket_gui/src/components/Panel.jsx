@@ -24,6 +24,10 @@ export function Panel({
   defaultOpen = false,
   forceOpen = false,
   forceReason = '',
+  // The forced-open note under the header. A panel whose own verdict says
+  // the same thing louder (the pre-flight's NO-GO badge) turns it off in the
+  // simple view; the reason stays on the disclosure button's tooltip.
+  showForceNote = true,
 }) {
   const [openPref, toggle] = usePanelOpen(id, defaultOpen);
   const open = forceOpen || openPref;
@@ -67,7 +71,7 @@ export function Panel({
         {aside}
       </h2>
       {summary}
-      {forceOpen && forceReason && <p className="forced-note">{forceReason}</p>}
+      {showForceNote && forceOpen && forceReason && <p className="forced-note">{forceReason}</p>}
       {open && <div className="panel-detail">{children}</div>}
     </section>
   );

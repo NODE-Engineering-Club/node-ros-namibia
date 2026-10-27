@@ -82,6 +82,7 @@ export function DiagnosticsPanel({ state, connection }) {
       collapsible
       forceOpen={Boolean(forced)}
       forceReason={forced}
+      showForceNote={details}
       aside={
         report ? (
           <Chip level={report.go ? 'ok' : 'alarm'}>{report.go ? 'GO' : 'NO-GO'}</Chip>
@@ -128,10 +129,12 @@ export function DiagnosticsPanel({ state, connection }) {
         </>
       }
     >
-      <p className="hint" style={{ marginTop: 6, marginBottom: 0 }}>
-        Passive checks only. Motor tests never run automatically and are not
-        available from this panel.
-      </p>
+      {details && (
+        <p className="hint" style={{ marginTop: 6, marginBottom: 0 }}>
+          Passive checks only. Motor tests never run automatically and are not
+          available from this panel.
+        </p>
+      )}
 
       {/*
         "Nobody has told us this yet" is not the same problem as "this is
