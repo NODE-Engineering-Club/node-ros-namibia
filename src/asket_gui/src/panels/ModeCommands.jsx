@@ -2,6 +2,7 @@ import { Panel } from '../components/Panel.jsx';
 import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { streamPayload } from '../lib/connection.js';
 import { COMMAND_LABELS, COMMAND_STATUS_LABELS, CONFIRM_PROMPTS } from '../lib/labels.js';
+import { useDetails } from '../lib/details.js';
 
 /**
  * The three mode commands.
@@ -16,6 +17,16 @@ import { COMMAND_LABELS, COMMAND_STATUS_LABELS, CONFIRM_PROMPTS } from '../lib/l
  *   a confirmation from the Pico or an explicit failure.
  */
 export function ModeCommands({ state, connection }) {
+  return (
+    <Panel title="Mode">
+      <ModeButtons state={state} connection={connection} />
+    </Panel>
+  );
+}
+
+/** The buttons and their outcome line, shared with the Boat panel. */
+export function ModeButtons({ state, connection }) {
+  const details = useDetails();
   const pico = streamPayload(state, 'pico');
   const mode = pico?.mode;
 
@@ -58,7 +69,7 @@ export function ModeCommands({ state, connection }) {
   };
 
   return (
-    <Panel title="Mode">
+    <>
       {/* Standing, above the buttons, because the state exists before
           anybody presses one. Without it an operator who presses
           Autonomous, sees the vessel confirm AUTONOMOUS, and watches
@@ -120,14 +131,16 @@ export function ModeCommands({ state, connection }) {
         </p>
       )}
 
-      <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
-        {estop.isModeRequest
-          ? 'This is a mode request, not a latch.'
-          : 'This is a software latch.'}{' '}
-        The hardware killswitch and RC channel&nbsp;8 cut propulsion independently
-        and always work.
-      </p>
-    </Panel>
+      {details && (
+        <p className="hint" style={{ marginBottom: 0, marginTop: 8 }}>
+          {estop.isModeRequest
+            ? 'This is a mode request, not a latch.'
+            : 'This is a software latch.'}{' '}
+          The hardware killswitch and RC channel&nbsp;8 cut propulsion independently
+          and always work.
+        </p>
+      )}
+    </>
   );
 }
 

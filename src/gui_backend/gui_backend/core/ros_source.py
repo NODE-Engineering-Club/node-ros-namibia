@@ -266,10 +266,18 @@ class RosSource:
         odom_age = self.latest.get("odom_filtered", LatestMessage()).age_s
         heading_valid = odom is not None and odom_age < 2.0
 
+        # Satellites, HDOP and RTK state exist only in MAVROS's GPSRAW, so
+        # only while the Pixhawk link is up. A stale one is dropped rather
+        # than letting a frozen "RTK fixed" outlive the link that said it.
+        gps_raw = self._msg("gps_raw")
+        if self.latest.get("gps_raw", LatestMessage()).age_s > 5.0:
+            gps_raw = None
+
         return adapters.vessel_from_odometry(
             fix,
             odom,
             self._msg("imu"),
+            gps_raw=gps_raw,
             extra={
                 "heading_source": SOURCE_EKF if heading_valid else SOURCE_NONE,
                 "heading_valid": heading_valid,

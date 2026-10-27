@@ -40,6 +40,13 @@ sources:
   odom_filtered:
     topic: /odometry/filtered
     type: nav_msgs/msg/Odometry
+  # Satellites, HDOP and the RTK state (fix_type 5 float, 6 fixed). Only
+  # MAVROS's GPSRAW carries them; it exists once the Pixhawk link is up
+  # (Phase B d). Until then the GUI says "not provided" rather than guessing.
+  gps_raw:
+    topic: /mavros/gpsstatus/gps1/raw
+    type: mavros_msgs/msg/GPSRAW
+    optional: true
   imu:
     topic: /imu_driver/imu_raw
     type: sensor_msgs/msg/Imu

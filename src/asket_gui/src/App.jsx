@@ -10,11 +10,10 @@ import { isFitted } from './lib/fitted.js';
 import { LinkStatus } from './panels/LinkStatus.jsx';
 import { MissionMap } from './panels/MissionMap.jsx';
 import { MissionPanel } from './panels/MissionPanel.jsx';
-import { ModeCommands } from './panels/ModeCommands.jsx';
 import { PowerPanel } from './panels/PowerPanel.jsx';
 import { SetupPage } from './panels/SetupPage.jsx';
 import { SonarPanel } from './panels/SonarPanel.jsx';
-import { VesselState } from './panels/VesselState.jsx';
+import { BoatPanel } from './panels/BoatPanel.jsx';
 import { Chip } from './components/Panel.jsx';
 import { MockControls } from './components/MockControls.jsx';
 import { StatusStrip } from './components/StatusStrip.jsx';
@@ -281,9 +280,11 @@ export function App({ connection }) {
               arriving at the site, and the most useful panel to somebody who
               did not write the system. It does not belong at the bottom. */}
           <DiagnosticsPanel state={state} connection={connection} />
-          <VesselState state={state} />
-          <ModeCommands state={state} connection={connection} />
-          <HeadingPanel state={state} />
+          {/* Vessel and Mode, merged (VesselState and ModeCommands are kept
+              and built from the same pieces). The full heading analysis is a
+              Details panel: the Boat panel carries the heading itself. */}
+          <BoatPanel state={state} connection={connection} />
+          {details && <HeadingPanel state={state} />}
         </div>
         <div className="sidebar-col">
           <PowerPanel state={state} />

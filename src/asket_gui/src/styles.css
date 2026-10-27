@@ -874,3 +874,7 @@ button.link,
 }
 .details-toggle.on { background: var(--info-fill); color: #fff; border-color: var(--info-fill); }
 .map-note-top { bottom: auto; top: 44px; }
+
+/* The Boat panel's one line of speed, heading and position quality. */
+.motion-line { margin: 8px 0; font-weight: 600; }
+.motion-line .errline, .motion-line .okline { font-size: inherit; }

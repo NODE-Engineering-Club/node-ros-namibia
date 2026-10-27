@@ -33,6 +33,7 @@ export function vesselPayload(world, detail) {
     cog_deg: round(world.cogDeg(), 1),
     sog_ms: round(world.sogMs(), 2),
     heading_source: world.headingSource(),
+    fix_quality: fixQuality(world.gnss().fixType),
   });
   if (detail === 'reduced') return out;
 
@@ -45,10 +46,19 @@ export function vesselPayload(world, detail) {
     gnss_fix_type: gnss.fixType,
     num_sats: gnss.numSats,
     hdop: round(gnss.hdop, 2),
+    position_sigma_m: null,
     distance_travelled_m: round(world.distanceTravelled, 1),
     on_survey: world.onSurvey(),
   });
   return out;
+}
+
+// MAVLink GPS_FIX_TYPE to the cockpit's four words, as adapters.py maps it.
+function fixQuality(fixType) {
+  if (fixType === 6) return 'rtk_fixed';
+  if (fixType === 5) return 'rtk_float';
+  if (fixType >= 2) return 'gps';
+  return 'none';
 }
 
 export function headingPayload(world, detail) {

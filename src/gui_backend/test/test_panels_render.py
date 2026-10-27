@@ -60,6 +60,7 @@ PANELS = (
     ("PowerPanel", "panels/PowerPanel.jsx"),
     ("SonarPanel", "panels/SonarPanel.jsx"),
     ("VesselState", "panels/VesselState.jsx"),
+    ("BoatPanel", "panels/BoatPanel.jsx"),
     ("StatusStrip", "components/StatusStrip.jsx"),
     ("NotFitted", "components/NotFitted.jsx"),
     # Not a cockpit panel, but the largest surface here and the one most worth
