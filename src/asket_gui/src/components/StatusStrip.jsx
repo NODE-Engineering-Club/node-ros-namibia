@@ -1,5 +1,5 @@
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
-import { duration, pct } from '../lib/format.js';
+import { duration, endurance, pct } from '../lib/format.js';
 import { LINK_LABELS, PROFILE_LABELS } from '../lib/labels.js';
 import { staleness, thresholdsForRate } from '../lib/staleness.js';
 
@@ -33,7 +33,7 @@ export function StatusStrip({ state, details = false }) {
         level={soc === undefined ? '' : soc < 0.12 ? 'alarm' : soc < 0.25 ? 'warn' : 'ok'}
         age={ageLevel(state, 'power')}
         value={soc === undefined ? 'not sent' : pct(soc)}
-        detail={power?.endurance_s ? duration(power.endurance_s) : ''}
+        detail={power?.endurance_s ? endurance(power.endurance_s) : ''}
       />
       <Item
         label="Recording"

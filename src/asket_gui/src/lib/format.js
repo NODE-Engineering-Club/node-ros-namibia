@@ -36,6 +36,20 @@ export function duration(seconds) {
   return `${s} s`;
 }
 
+/**
+ * Battery time left, the one format used in the top bar and the Power panel:
+ * "2 h 05 min", or "45 min" under an hour. Whole minutes: seconds on an
+ * endurance estimate are false precision.
+ */
+export function endurance(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return DASH;
+  if (seconds < 0) return DASH;
+  const minutes = Math.floor(seconds / 60);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+}
+
 export function bytes(value) {
   if (value === null || value === undefined) return DASH;
   const units = ['B', 'kB', 'MB', 'GB', 'TB'];

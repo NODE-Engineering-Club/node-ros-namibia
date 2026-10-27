@@ -1,7 +1,7 @@
 import { Chip, Panel, Row, Rows } from '../components/Panel.jsx';
 import { PanelAge, Value } from '../components/Value.jsx';
 import { streamAgeMs, streamPayload } from '../lib/connection.js';
-import { duration, num, pct } from '../lib/format.js';
+import { duration, endurance, num, pct } from '../lib/format.js';
 import { useDetails } from '../lib/details.js';
 import { isSimulated } from '../lib/fitted.js';
 
@@ -40,7 +40,6 @@ export function PowerPanel({ state, connection }) {
     : soc !== undefined && soc < 0.25
       ? 'battery below 25%'
       : '';
-  const minutesLeft = power?.endurance_s ? Math.floor(power.endurance_s / 60) : null;
 
   return (
     <Panel
@@ -64,7 +63,7 @@ export function PowerPanel({ state, connection }) {
             <Value ageMs={ageMs} rateHz={rateHz} showAge={false}>
               {num(power?.voltage, 1, ' V')}
               {' · '}
-              {minutesLeft === null ? 'time left not known' : `about ${minutesLeft} min left`}
+              {power?.endurance_s ? `${endurance(power.endurance_s)} left` : 'time left not known'}
             </Value>
           </p>
           {simulated && (
@@ -83,7 +82,7 @@ export function PowerPanel({ state, connection }) {
           <Row label="Current">{num(power?.current, 1, ' A')}</Row>
           <Row label="Draw">{num(power?.power_w, 0, ' W')}</Row>
           <Row label="Energy left">{num(power?.remaining_wh, 0, ' Wh')}</Row>
-          <Row label="Endurance">{duration(power?.endurance_s)}</Row>
+          <Row label="Endurance">{endurance(power?.endurance_s)}</Row>
         </Rows>
       )}
 
