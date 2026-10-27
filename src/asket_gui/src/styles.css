@@ -454,7 +454,8 @@ input[type="range"] { accent-color: var(--info-fill); }
 .map-legend {
   position: absolute;
   right: 8px;
-  bottom: 58px;
+  /* Clear of the scale bar, which sits above the attribution. */
+  bottom: 72px;
   background: #fff;
   border: 1px solid var(--line);
   padding: 5px 8px;
@@ -617,6 +618,10 @@ details.advanced { border-top: 1px solid var(--line); margin-top: 6px; }
   text-align: center;
   max-width: 34ch;
 }
+
+/* The sentence under "Camera not connected" is the actionable part; on the
+   dark frame it needs a light colour, not the page's ink. */
+.camera-blank .hint { color: #b8c4cf; }
 
 .camera-blank-headline {
   margin: 0 0 6px;

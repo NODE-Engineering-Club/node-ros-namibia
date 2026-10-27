@@ -153,6 +153,18 @@ class SystemTestNode(Node):
         self.create_subscription(Odometry, "/odometry/filtered", self._on_odom, SENSOR_QOS)
         self.create_subscription(UInt32, "/mavros/global_position/raw/satellites",
                                  self._on_sats, SENSOR_QOS)
+        # The real HDOP and fix type, from MAVROS's GPSRAW, when mavros_msgs
+        # is installed. The same source the GUI's Boat panel reads, so the
+        # two never quote different HDOPs.
+        self._gpsraw = None
+        self._gpsraw_at = 0.0
+        try:
+            from mavros_msgs.msg import GPSRAW
+        except ImportError:
+            GPSRAW = None
+        if GPSRAW is not None:
+            self.create_subscription(GPSRAW, "/mavros/gpsstatus/gps1/raw",
+                                     self._on_gpsraw, SENSOR_QOS)
         self.create_subscription(TimeReference, "/mavros/time_reference",
                                  self._on_time_ref, SENSOR_QOS)
         self.create_subscription(SonarStatus, "/sonar/status", self._set("_sonar"), 10)
@@ -207,6 +219,10 @@ class SystemTestNode(Node):
         self._odom = msg
         self._odom_at = time.monotonic()
 
+    def _on_gpsraw(self, msg) -> None:
+        self._gpsraw = msg
+        self._gpsraw_at = time.monotonic()
+
     def _on_sats(self, msg: UInt32) -> None:
         self._sats = int(msg.data)
 
@@ -244,6 +260,15 @@ class SystemTestNode(Node):
             )))
         if self._sats is not None:
             facts["num_sats"] = self._sats
+        if self._gpsraw is not None and now - self._gpsraw_at < 5.0:
+            raw = self._gpsraw
+            # MAVLink GPS_FIX_TYPE (3 = 3D, 5/6 = RTK) is the scale the GNSS
+            # check reads. 255 / 0 / 65535 are GPSRAW's "unknown".
+            facts["gnss_fix_type"] = int(raw.fix_type)
+            if int(raw.satellites_visible) != 255:
+                facts["num_sats"] = int(raw.satellites_visible)
+            if int(raw.eph) not in (0, 65535):
+                facts["hdop"] = int(raw.eph) / 100.0
         if self._time_ref is not None:
             ref = self._time_ref
             facts.update(gps_time_facts(
