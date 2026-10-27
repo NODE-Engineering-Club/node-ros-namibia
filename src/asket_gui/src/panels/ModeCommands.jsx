@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { Panel } from '../components/Panel.jsx';
 import { ConfirmButton } from '../components/ConfirmButton.jsx';
 import { streamPayload } from '../lib/connection.js';
@@ -53,6 +55,12 @@ export function ModeButtons({ state, connection }) {
   const armingBlock = pico?.arming_block || '';
 
   const withArmingBlock = (prompt) => (armingBlock ? `${prompt} ${armingBlock}.` : prompt);
+
+  // Refused by the backend's NO-GO gate. The way past it is two deliberate
+  // acts — tick the box, then the two-step button — and the backend logs it.
+  // An aid, not a safety: the transmitter remains the authority.
+  const nogoRefused = latest?.name === 'set_mode' && latest?.status === 'failed' && latest?.nogo;
+  const [nogoAcknowledged, setNogoAcknowledged] = useState(false);
 
   // The vessel declares what a propulsion cut can do here; the GUI does not
   // assume it. Falls back to the honest minimum before the hello arrives.
@@ -118,6 +126,30 @@ export function ModeButtons({ state, connection }) {
         <p className="warnline" style={{ marginBottom: 0, marginTop: 6 }}>
           {estop.effect}
         </p>
+      )}
+
+      {nogoRefused && mode !== 'AUTONOMOUS' && (
+        <div className="nogo-force">
+          <label>
+            <input
+              type="checkbox"
+              checked={nogoAcknowledged}
+              onChange={(e) => setNogoAcknowledged(e.target.checked)}
+            />{' '}
+            I have read the pre-flight and accept the NO-GO
+          </label>
+          <ConfirmButton
+            danger
+            label="I know it is NO-GO, force"
+            prompt="Send the boat autonomous over a NO-GO pre-flight? This is logged."
+            disabled={offline || !nogoAcknowledged}
+            pending={pendingFor('set_mode', 'AUTONOMOUS')}
+            onConfirm={() => {
+              setNogoAcknowledged(false);
+              connection.command('set_mode', { mode: 'AUTONOMOUS', force_nogo: true });
+            }}
+          />
+        </div>
       )}
 
       {latest && (

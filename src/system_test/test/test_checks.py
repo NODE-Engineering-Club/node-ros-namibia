@@ -9,6 +9,7 @@ from system_test.core.checks import (
     MOUNTING_FIELD,
     CHECKS,
     FAIL,
+    NOTE,
     PASS,
     SKIPPED,
     WARN,
@@ -388,10 +389,13 @@ def test_a_disk_smaller_than_the_battery_is_the_binding_one_and_says_so():
 # that is not reporting much — so the pre-flight has to say so out loud.
 
 
-def test_an_unverified_state_format_warns_on_every_run():
+def test_an_unverified_state_format_is_a_standing_note_on_every_run():
+    # Grey, not amber: it was amber on every single run, and an amber that
+    # never changes teaches people to read past amber.
     report = run_checks(dict(HEALTHY, pico_state_format_verified=False))
     result = item(report, "pico.state_format")
-    assert result.status == WARN
+    assert result.status == NOTE
+    assert "warning" not in report.summary
     assert "never been checked" in result.message
     assert "ros2 topic echo /pico/status" in result.remedy
     # A warning, not a blocker: the vessel is fine, our reading of it is what
@@ -426,7 +430,7 @@ def test_no_pico_status_at_all_is_unknown_not_a_pass():
 # -- the e-stop feedback that does not exist yet ---------------------------
 
 
-def test_the_estop_feedback_warns_on_every_run_while_it_is_compiled_out():
+def test_the_estop_feedback_is_a_standing_note_while_it_is_compiled_out():
     """What the repository ships with today.
 
     ESTOP_FEEDBACK_ENABLED is 0, so nothing in the firmware confirms the ESC
@@ -437,7 +441,7 @@ def test_the_estop_feedback_warns_on_every_run_while_it_is_compiled_out():
     """
     report = run_checks(dict(HEALTHY, pico_estop_feedback_enabled=False))
     result = item(report, "pico.estop_feedback")
-    assert result.status == WARN
+    assert result.status == NOTE
     # The message has to say what is *not verified*, not merely that a flag is
     # off. A crew reading "ESTOP_FEEDBACK_ENABLED is 0" learns nothing.
     assert "collapsed" in result.message or "verified" in result.message.lower()
@@ -480,3 +484,16 @@ def test_a_pico_still_on_v4_grounds_the_vessel():
     result = item(run_checks(dict(HEALTHY, pico_firmware_version=4)), "pico.firmware_version")
     assert result.status == FAIL
     assert "v4" in result.message
+
+
+# -- the shore link with nobody on the other end ----------------------------
+
+
+def test_the_link_is_not_measured_without_a_browser():
+    """With no client the round trip reads 0 ms, which passed as a perfect
+    link. Not measured is what it is."""
+    result = item(run_checks(dict(HEALTHY, link_rtt_ms=0.0, link_clients=0)), "link.quality")
+    assert result.status == SKIPPED
+    assert "Not measured" in result.message
+    measured = item(run_checks(dict(HEALTHY, link_rtt_ms=20.0, link_clients=1)), "link.quality")
+    assert measured.status == PASS

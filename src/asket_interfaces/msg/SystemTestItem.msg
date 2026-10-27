@@ -2,6 +2,7 @@ uint8 PASS=0
 uint8 WARN=1
 uint8 FAIL=2
 uint8 SKIPPED=3
+uint8 NOTE=4               # a standing fact, shown grey: neither a fault nor a pass
 
 string id                  # stable identifier, e.g. "gnss.fix"
 string name                # human name, e.g. "GNSS fix"

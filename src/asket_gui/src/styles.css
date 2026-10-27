@@ -894,3 +894,19 @@ button.link,
 
 .alarm-sound { margin: 0; gap: 6px; }
 .alarm-sound button { padding: 2px 8px; font-size: 12px; }
+
+/* Pre-flight grey notes: standing facts, neither a fault nor a pass. */
+.chip.note { color: var(--absent); border-style: dashed; }
+.chip.note .dot { background: var(--absent); }
+
+/* The deliberate way past a NO-GO: boxed, so it is not mistaken for the
+   ordinary buttons above it. */
+.nogo-force {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--alarm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}

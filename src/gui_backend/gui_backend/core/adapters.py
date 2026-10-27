@@ -456,7 +456,7 @@ def _nearest(ranges, angle_min_deg, increment_deg):
 #: Mapped by name rather than by index arithmetic, for the same reason the
 #: Pico's mode numbering is: the two scales are allowed to diverge, and an
 #: off-by-one would turn a FAIL into a WARN on screen.
-_PREFLIGHT_STATUS = {0: "PASS", 1: "WARN", 2: "FAIL", 3: "SKIPPED"}
+_PREFLIGHT_STATUS = {0: "PASS", 1: "WARN", 2: "FAIL", 3: "SKIPPED", 4: "NOTE"}
 
 
 def preflight_from_ros(msg) -> dict:

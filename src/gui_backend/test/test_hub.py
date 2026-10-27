@@ -471,7 +471,7 @@ def test_the_preflight_runs_and_reaches_the_client(hub, client):
     assert "go" in payload and "summary" in payload
     assert payload["items"], "a report with no items is not a report"
     for item in payload["items"]:
-        assert item["status"] in ("PASS", "WARN", "FAIL", "SKIPPED")
+        assert item["status"] in ("PASS", "WARN", "FAIL", "SKIPPED", "NOTE")
         assert item["message"]
 
 

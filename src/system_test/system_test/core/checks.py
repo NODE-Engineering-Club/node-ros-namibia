@@ -30,9 +30,15 @@ PASS = "PASS"
 WARN = "WARN"
 FAIL = "FAIL"
 SKIPPED = "SKIPPED"
+#: A standing fact worth knowing, not a fault and not something to act on
+#: before launch: the GUI shows it grey. Used for the two limitations that
+#: were amber on every single run (the STATE format not yet checked against
+#: real output, the GPIO20 feedback not wired) — an amber that never changes
+#: teaches people to read past amber.
+NOTE = "NOTE"
 
 #: Ordering for the overall verdict: any FAIL is NO-GO.
-_SEVERITY = {PASS: 0, SKIPPED: 1, WARN: 2, FAIL: 3}
+_SEVERITY = {PASS: 0, NOTE: 0, SKIPPED: 1, WARN: 2, FAIL: 3}
 
 
 @dataclass
@@ -247,7 +253,7 @@ def _state_format(state: dict, t: Thresholds) -> CheckResult:
 
     if not reported:
         return CheckResult(
-            "pico.state_format", "Pico status format", WARN,
+            "pico.state_format", "Pico status format", NOTE,
             "Unverified: the STATE line format has never been checked against "
             "real firmware output",
             "Run `ros2 topic echo /pico/status --field data` on the Jetson, "
@@ -306,7 +312,7 @@ def _estop_feedback(state: dict, t: Thresholds) -> CheckResult:
 
     if not enabled:
         return CheckResult(
-            "pico.estop_feedback", "E-stop power feedback", WARN,
+            "pico.estop_feedback", "E-stop power feedback", NOTE,
             "Not verified: nothing confirms the ESC rail actually collapsed "
             "when the relay was commanded open",
             "ESTOP_FEEDBACK_ENABLED is 0 in firmware/pico-node_v5 and the "
@@ -902,6 +908,14 @@ def _battery(state: dict, t: Thresholds) -> CheckResult:
 def _link(state: dict, t: Thresholds) -> CheckResult:
     rtt = state.get("link_rtt_ms")
     bearer = state.get("link_active")
+    if state.get("link_clients") == 0:
+        # Only a browser on the other end can measure the link; with none,
+        # the round trip reads 0 ms, which used to pass as a perfect link.
+        return CheckResult(
+            "link.quality", "Shore link", SKIPPED,
+            "Not measured: no browser is connected",
+            "Open the GUI from the shore laptop and run the pre-flight again.",
+        )
     if rtt is None:
         return _missing("link.quality", "Shore link", "no client connected")
     if rtt > t.max_link_rtt_ms:

@@ -826,6 +826,10 @@ def generate_launch_description():
                     LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
                 ]),
                 "geofence_file": LaunchConfiguration("geofence_file"),
+                "mavros_expected": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
+                    LaunchConfiguration("use_sim"), "' != 'true' else 'false'",
+                ]),
                 "geofence_expected": PythonExpression([
                     "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
                     LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",

@@ -43,7 +43,7 @@ from asket_common.diagnostic_level import level_int
 from asket_common.heading import compass_deg_from_enu_quaternion, heading_from_odometry
 from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
-from system_test.core.checks import FAIL, PASS, SKIPPED, WARN, Thresholds, run_checks
+from system_test.core.checks import FAIL, NOTE, PASS, SKIPPED, WARN, Thresholds, run_checks
 from system_test.core.history import PreflightHistory
 from system_test.core.live_inputs import gps_time_facts, heading_facts, pico_facts
 
@@ -51,11 +51,18 @@ SENSOR_QOS = QoSProfile(depth=5, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 #: Latched, so a client connecting later still gets the boot-time verdict.
 LATCHED_QOS = QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
 
+#: The Nav2 survey profile's nodes worth naming (njord.launch.py).
+NAV2_SURVEY_NODES = (
+    "controller_server", "planner_server", "bt_navigator",
+    "velocity_smoother", "collision_monitor", "geofence_mask_node",
+)
+
 _STATUS_VALUES = {
     PASS: SystemTestItem.PASS,
     WARN: SystemTestItem.WARN,
     FAIL: SystemTestItem.FAIL,
     SKIPPED: SystemTestItem.SKIPPED,
+    NOTE: SystemTestItem.NOTE,
 }
 
 
@@ -108,6 +115,8 @@ class SystemTestNode(Node):
         self.declare_parameter("sonar_monitored", False)
         # The Nav2 survey profile is running, so its geofence must be active.
         self.declare_parameter("geofence_expected", False)
+        # MAVROS was started (enable_mavros, not in simulation): expect its node.
+        self.declare_parameter("mavros_expected", False)
 
         self.history = PreflightHistory(self.get_parameter("history_path").value)
         self.thresholds = Thresholds()
@@ -298,6 +307,11 @@ class SystemTestNode(Node):
             disk_free = None
 
         expected = list(self.get_parameter("expected_nodes").value)
+        # What else this launch started, so it is missed if it dies.
+        if self.get_parameter("mavros_expected").value:
+            expected.append("mavros")
+        if self.get_parameter("geofence_expected").value:
+            expected.extend(NAV2_SURVEY_NODES)
         # The ROS graph first: a node that publishes no /diagnostics of its
         # own (gui_backend, for one) is running all the same, and reporting
         # it missing turned a working stack NO-GO.
@@ -347,6 +361,7 @@ class SystemTestNode(Node):
             "battery_endurance_s": _endurance_s(battery),
             "link_rtt_ms": float(link.rtt_ms) if link else None,
             "link_active": link.active_link if link else None,
+            "link_clients": int(link.connected_clients) if link else None,
             "expected_nodes": expected,
             "present_nodes": present,
             "mounting": self._mounting(),
