@@ -112,6 +112,7 @@ export function ModeButtons({ state, connection }) {
           prompt={estop.prompt}
           pending={pendingFor('cut_propulsion')}
           disabled={offline || !estop.available}
+          title={estop.effect}
           onConfirm={() => connection.command('cut_propulsion', {})}
         />
       </div>
@@ -122,7 +123,9 @@ export function ModeButtons({ state, connection }) {
           propulsion" that quietly drops the mode instead would be the single
           most dangerous thing on this screen, so it is labelled with what it
           actually does and the effect is spelled out underneath. */}
-      {estop.effect && (
+      {/* Simple view: the effect is the button's tooltip and its
+          confirmation prompt; the paragraph is a Details line. */}
+      {details && estop.effect && (
         <p className="warnline" style={{ marginBottom: 0, marginTop: 6 }}>
           {estop.effect}
         </p>
