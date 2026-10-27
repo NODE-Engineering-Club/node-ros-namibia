@@ -845,3 +845,31 @@ button.link,
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* -- simple view / Details ----------------------------------------------
+ *
+ * The readiness line is the largest thing in the top bar on purpose: it is
+ * the first question asked on a beach.
+ */
+.readiness {
+  font-weight: 800;
+  font-size: 15px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  letter-spacing: 0.02em;
+}
+.readiness.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+.readiness.warn { background: var(--warn-fill); color: #000; border-color: var(--warn-fill); }
+.readiness.alarm { background: var(--alarm-fill); color: #fff; border-color: var(--alarm-fill); }
+
+.details-toggle {
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: inherit;
+  cursor: pointer;
+}
+.details-toggle.on { background: var(--info-fill); color: #fff; border-color: var(--info-fill); }

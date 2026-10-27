@@ -22,6 +22,8 @@ import { streamPayload } from './lib/connection.js';
 import { useStore } from './lib/useStore.js';
 import { MODE_LABELS } from './lib/labels.js';
 import { duration } from './lib/format.js';
+import { DetailsContext, useDetailsPreference } from './lib/details.js';
+import { readiness } from './lib/readiness.js';
 
 //: A socket can stay open long after the link behind it has gone. TCP takes
 //: tens of seconds to notice, and for all of that time `connected` is true
@@ -87,6 +89,7 @@ export function App({ connection }) {
   // Closed by default: the dev panel stays valuable, but the default view has
   // to be what an operator actually sees, not the review rig around it.
   const [mockOpen, setMockOpen] = useState(false);
+  const [details, toggleDetails] = useDetailsPreference();
 
   // A sensor the boat does not carry is never asked for: its stream would
   // only ever be empty, and empty reads as "nothing there".
@@ -110,6 +113,15 @@ export function App({ connection }) {
   const pico = streamPayload(state, 'pico');
   const sinceMessageMs = state.lastMessageAt ? Date.now() - state.lastMessageAt : null;
   const receiving = sinceMessageMs !== null && sinceMessageMs < NO_DATA_AFTER_MS;
+  const ready = readiness({
+    connected: state.connected,
+    receiving,
+    report: streamPayload(state, 'diagnostics'),
+    pico,
+    link: streamPayload(state, 'link'),
+    profile: state.profile?.profile,
+    nowMs: Date.now(),
+  });
   const worstAlarm = useMemo(() => {
     const alarms = state.alarms || [];
     if (alarms.some((a) => a.severity === 'alarm')) return 'alarm';
@@ -163,9 +175,12 @@ export function App({ connection }) {
   }
 
   return (
+    <DetailsContext.Provider value={details}>
     <div className={layoutClass}>
       <header className="topbar">
         <strong>Asket</strong>
+        {/* The answer to "can I go?", before anything else on the screen. */}
+        <span className={`readiness ${ready.level}`} role="status">{ready.text}</span>
         <Chip
           level={receiving ? 'ok' : 'alarm'}
           title={
@@ -191,16 +206,31 @@ export function App({ connection }) {
 
         {/* Battery, recording and link, in the horizontal space that was empty.
             These three answer questions nobody should have to scroll for. */}
-        <StatusStrip state={state} />
+        <StatusStrip state={state} details={details} />
 
         <div className="spacer" />
+        {details && (
+          <button
+            type="button"
+            className="link topbar-link"
+            onClick={() => { window.location.hash = '#setup'; }}
+            title="What this vessel has been told about itself and about today's site"
+          >
+            Setup
+          </button>
+        )}
         <button
           type="button"
-          className="link topbar-link"
-          onClick={() => { window.location.hash = '#setup'; }}
-          title="What this vessel has been told about itself and about today's site"
+          className={`details-toggle ${details ? 'on' : ''}`}
+          aria-pressed={details}
+          onClick={toggleDetails}
+          title={
+            details
+              ? 'Back to the simple view: only what you need to act on.'
+              : 'Show every value, the pre-flight rows that pass, the link budget and Setup.'
+          }
         >
-          Setup
+          {details ? 'Simple view' : 'Details'}
         </button>
         {state.hello?.source?.mode === 'sim' && (
           <Chip level="mock-banner" title="Every value on this screen is simulated.">
@@ -293,5 +323,6 @@ export function App({ connection }) {
         <MockControls connection={connection} open={mockOpen} onOpenChange={setMockOpen} />
       )}
     </div>
+    </DetailsContext.Provider>
   );
 }

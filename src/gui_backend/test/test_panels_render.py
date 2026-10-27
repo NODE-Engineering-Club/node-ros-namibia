@@ -85,6 +85,7 @@ def _entry_source() -> str:
         import {{ createMockConnection }} from './src/lib/mock/index.js';
         import {{ initialState }} from './src/lib/connection.js';
         import {{ SUBSCRIPTIONS }} from './src/App.jsx';
+        import {{ DetailsContext }} from './src/lib/details.js';
         {imports}
 
         const PANELS = [{listed}];
@@ -117,20 +118,29 @@ def _entry_source() -> str:
         for (const [label, state] of [
           ['live', live], ['empty', initialState()], ['boat', boat], ['boat-empty', boatEmpty],
         ]) {{
-          for (const [name, Panel] of PANELS) {{
-            try {{
-              renderToStaticMarkup(
-                <Panel
-                  state={{state}}
-                  connection={{connection}}
-                  subscribed={{false}}
-                  showRaw={{false}}
-                  onShowRawChange={{() => {{}}}}
-                  onClose={{() => {{}}}}
-                />,
-              );
-            }} catch (err) {{
-              out.errors.push(`${{name}} (${{label}} state): ${{err && err.message}}`);
+          // Every panel in the simple view and in Details: the two draw
+          // different branches, and the hidden one must not rot unseen.
+          for (const details of [false, true]) {{
+            for (const [name, Panel] of PANELS) {{
+              try {{
+                renderToStaticMarkup(
+                  <DetailsContext.Provider value={{details}}>
+                    <Panel
+                      state={{state}}
+                      connection={{connection}}
+                      subscribed={{false}}
+                      showRaw={{false}}
+                      onShowRawChange={{() => {{}}}}
+                      onClose={{() => {{}}}}
+                    />
+                  </DetailsContext.Provider>,
+                );
+              }} catch (err) {{
+                out.errors.push(
+                  `${{name}} (${{label}} state, ${{details ? 'details' : 'simple'}}): `
+                  + `${{err && err.message}}`,
+                );
+              }}
             }}
           }}
         }}
