@@ -9,6 +9,16 @@ floor; one person on the transmitter, one on the laptop. T200 thrusters are
 water-lubricated: out of the water, spin them **only in short bursts (a few
 seconds) at low throttle**.
 
+## Before powering anything — every time
+
+- [ ] Killswitch / E-stop button **within reach** of the person at the laptop.
+- [ ] Thrusters **clear**: no hands, cables, tools or floor within reach of
+      the blades.
+- [ ] **One person on the transmitter**, transmitter on, doing nothing else.
+- [ ] **Ch8 down** (E-stop zone) before power is applied; it is moved up only
+      when a step says so.
+- [ ] ESC battery **disconnected** unless the step is in section 2.
+
 ## 0. Flash pico-node_v5 from a Windows laptop
 
 The Pico is unplugged from the Jetson and plugged into a Windows laptop for
@@ -152,7 +162,7 @@ disarmed / E-stop, yellow = MANUAL armed, green = AUTONOMOUS).
 
 | # | Do | Expect |
 |---|---|---|
-| 1.1 | Power the Pico with **Ch7 already high**, Ch8 middle | `STATE ver=5 … armed=0 … rclatch=1`, red light. **Does not arm** (v4 armed here). |
+| 1.1 | Power the Pico with **Ch7 already high** and Ch8 down (checklist), then Ch8 to the middle | `STATE ver=5 … armed=0 … rclatch=1`, red light. **Does not arm** (v4 armed here). |
 | 1.2 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2 relay=1`, yellow light, 2 beeps |
 | 1.3 | Ch8 low | `mode=1 armed=0 relay=0`, red light, long beep |
 | 1.4 | `ros2 node list \| grep -E "pico_bridge\|actuator_driver"` | **only** `/pico_bridge` (a) |
