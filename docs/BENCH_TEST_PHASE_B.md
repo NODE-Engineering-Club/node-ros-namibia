@@ -118,25 +118,30 @@ Do not start the bench until every line here is true.
 
 ## 1. ESC unpowered (battery disconnected from the ESC rail)
 
+**The relay (GPIO21) and the E-stop feedback (GPIO20) are not wired yet.**
+Nothing clicks: the relay state is read from the `relay=` field of the
+`STATE` line (`relay=1` closed, `relay=0` open) and from the lights (red =
+disarmed / E-stop, yellow = MANUAL armed, green = AUTONOMOUS).
+
 | # | Do | Expect |
 |---|---|---|
 | 1.1 | Power the Pico with **Ch7 already high**, Ch8 middle | `STATE ver=5 … armed=0 … rclatch=1`, red light. **Does not arm** (v4 armed here). |
-| 1.2 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2`, yellow light, relay clicks (`relay=1`), 2 beeps |
-| 1.3 | Ch8 low | `mode=1 armed=0 relay=0`, relay clicks open, red, long beep |
+| 1.2 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2 relay=1`, yellow light, 2 beeps |
+| 1.3 | Ch8 low | `mode=1 armed=0 relay=0`, red light, long beep |
 | 1.4 | `ros2 node list \| grep -E "pico_bridge\|actuator_driver"` | **only** `/pico_bridge` (a) |
 | 1.5 | pico_bridge log (`journalctl -u asket.service` or the launch terminal) | `Pico firmware : v5, as expected` (b) |
 | 1.6 | GUI → Pre-flight → Run | `Pico firmware version: v5, matching this software` |
 | 1.7 | Ch8 high, Ch7 cycled low→high, GUI: request AUTO | `mode=3`, green light |
 | 1.8 | `ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.2}}"` and `ros2 topic echo /pico_bridge/motor_cmd` | numbers (e.g. `0.200,0.200`), not `PING` (b) |
-| 1.9 | **RC lost, receiver failsafe:** still AUTONOMOUS (1.7–1.8 running), switch the **transmitter off** | in < 0.5 s: relay clicks open, red, `mode=1 armed=0 rclatch=1 wantauto=0`; GUI arming reason "the RC link was lost…". Note `sbusfs=` (1 = the RP4TD reports failsafe; if it stays 0 the receiver stops sending, also covered) |
-| 1.10 | **No auto re-arm:** transmitter back on, **Ch7 still high**, wait 10 s | stays `armed=0 rclatch=1`, relay open |
+| 1.9 | **RC lost, receiver failsafe:** still AUTONOMOUS (1.7–1.8 running), switch the **transmitter off** | in < 0.5 s: `relay=0`, red light, `mode=1 armed=0 rclatch=1 wantauto=0`; GUI arming reason "the RC link was lost…". Note `sbusfs=` (1 = the RP4TD reports failsafe; if it stays 0 the receiver stops sending, also covered) |
+| 1.10 | **No auto re-arm:** transmitter back on, **Ch7 still high**, wait 10 s | stays `armed=0 rclatch=1 relay=0`, red light |
 | 1.11 | GUI: request AUTO while latched | not applied (Pico answers `[NAK] MODE AUTO refused`), stays disarmed |
 | 1.12 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2` (MANUAL, not AUTONOMOUS) |
 | 1.13 | **RC lost, SBUS silent:** AUTONOMOUS again (1.7), then **unplug the receiver's SBUS lead** | same as 1.9 (`sbusfs` irrelevant: no frames). Re-plug, repeat 1.10–1.12 |
-| 1.14 | **Serial never blocks:** stop the stack (`sudo systemctl stop asket.service`), then hold the port open without reading it: `sudo sh -c 'sleep 60 < /dev/pico'` (opening the port raises DTR, so the Pico sees a host that stopped reading) | during those 60 s the RC still works: Ch8 low opens the relay at once; Ch7 low→high re-arms (relay clicks) |
+| 1.14 | **Serial never blocks:** stop the stack (`sudo systemctl stop asket.service`), then hold the port open without reading it: `sudo sh -c 'sleep 60 < /dev/pico'` (opening the port raises DTR, so the Pico sees a host that stopped reading) | during those 60 s the RC still works: Ch8 low turns the light red at once (watch the lights: nothing reads `STATE` while the port is held); Ch7 low→high re-arms (yellow light). Check `relay=` in the first `STATE` lines after 1.15 |
 | 1.15 | After the 60 s, restart the stack | `STATE … txdrop=N` with N > 0 (lines dropped while nobody read), everything else normal |
 | 1.16 | Re-plug test: with the stack running, unplug the Pico USB 5 s, plug it back | bridge log: port lost, then within ~2 s `Pico connecte`, `Pico firmware : v5` (b) |
-| 1.17 | Banner / pre-flight | `E-STOP feedback: DISABLED (not wired)`; pre-flight `E-stop power feedback` amber (GPIO20 not wired — expected) |
+| 1.17 | Banner / pre-flight | `E-STOP feedback: DISABLED (not wired)`; pre-flight `E-stop power feedback` is a grey **note** (GPIO20 not wired — expected) |
 
 Optional (b): flash `pico-node_v4/` once — the bridge logs
 `Pico firmware : v4, but this stack drives v5 only`, `/pico_bridge/motor_cmd`
@@ -144,11 +149,23 @@ shows only `PING`, AUTO is refused, the pre-flight fails. Flash v5 back.
 
 ## 2. ESC powered, props out of the water
 
+> **STOP — do not do this section unless both are true:**
+> 1. the **relay is wired on GPIO21** and section 1 showed it opening
+>    (`relay=0`) on Ch8 low and on RC loss, measured on the relay's output
+>    with a multimeter;
+> 2. a **physical E-stop button is wired in the ESC power line** (it cuts the
+>    battery to the ESCs without any software) and has been **tested**: press
+>    it, the ESC rail reads 0 V.
+>
+> Today neither is wired, so this section is not done. With no relay the
+> Pico cannot cut ESC power at all, and a wrong throttle sign or a stuck
+> command would spin the thrusters until someone pulls the battery.
+
 Connect the battery to the ESC rail. Keep throttle low, bursts short.
 
 | # | Do | Expect |
 |---|---|---|
-| 2.1 | Arm in MANUAL (Ch8 middle, Ch7 low→high) | relay closes, ESC start-up tones, **no spin for 2 s** (arm window) |
+| 2.1 | Arm in MANUAL (Ch8 middle, Ch7 low→high) | `relay=1` (the relay clicks closed), ESC start-up tones, **no spin for 2 s** (arm window) |
 | 2.2 | Throttle a little forward, then yaw | both thrusters forward; yaw spins them opposite. Wrong way? `thr_invert`/`yaw_invert` (pico_bridge) and `THR_INVERT`/`YAW_INVERT` (firmware) |
 | 2.3 | Ch8 low while spinning | thrusters stop at once, relay opens (ESC power-down tones) |
 | 2.4 | AUTONOMOUS (Ch8 high, Ch7 cycled, GUI AUTO), `ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.15}}"` | both spin slowly forward |
