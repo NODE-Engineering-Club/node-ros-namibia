@@ -205,8 +205,9 @@ What is missing, for one or the other:
   (`/mavros/set_stream_rate`, all streams at 10 Hz, 10 s after start). If a
   topic stays silent, raise `SR0_*` (the USB port's stream rates) instead.
 - **PX4:** `set_stream_rate` is not sent (PX4 ignores REQUEST_DATA_STREAM).
-  The USB link starts PX4's MAVLink in *config* mode, which streams all of
-  the above. If the Pixhawk is ever wired on TELEM instead of USB, set that
+  The USB link starts PX4's MAVLink in *config* mode, which is expected to
+  stream all of the above (to verify on the real Pixhawk: `ros2 topic hz`
+  on each). If the Pixhawk is ever wired on TELEM instead of USB, set that
   instance's `MAV_x_MODE` to *Onboard* and its rate, or nothing arrives.
 - **Both:** *RTK fixed / RTK float* in the GUI needs RTCM corrections reaching
   the UM982 — Phase B (e), not done (note below). Until then the best is
@@ -222,6 +223,86 @@ source (a base station or an NTRIP caster on the shore laptop), MAVROS's
 `/mavros/gps_rtk/send_rtcm` (plugin `gps_rtk`, not on the denylist) or
 QGroundControl's RTK injection through the relay (`enable_gcs_relay`), and
 on the FC side ArduPilot `GPS_INJECT_TO` / PX4's injection on the GPS port.
+
+## 4d. Settings to make in the Pixhawk, per autopilot
+
+Done once, from QGroundControl on the shore laptop: either with the Pixhawk's
+USB on the laptop, or through the Jetson with `enable_gcs_relay:=true`
+(QGroundControl connects by itself on UDP 14550). None of this has been
+tried on this Pixhawk yet.
+
+### Which firmware is it?
+
+- **QGroundControl:** *Vehicle Setup → Summary* names the firmware
+  (ArduPilot Rover / PX4) and its version, and the setup pages differ (PX4
+  has *Airframe*; ArduPilot has *Frame* and *Servo Output*). *Analyze Tools →
+  MAVLink Inspector → HEARTBEAT → autopilot*: 3 = ArduPilot, 12 = PX4.
+- **On the Jetson, before launching:** USB IDs (`deploy/udev/README.md`):
+  `26ac:0032` is PX4, `1209:5740`/`1209:5741` is ArduPilot.
+- **Running:** the pre-flight row *Flight controller firmware*, and *Autopilot*
+  in the Boat panel's Details.
+
+Then launch with the matching `autopilot:=`.
+
+### ArduPilot (Rover 4.5 / 4.6)
+
+USB and MAVLink:
+
+| Parameter | Value | |
+|---|---|---|
+| `SERIAL0_PROTOCOL` | 2 (MAVLink 2) | the USB port; default |
+| `SR0_POSITION` | 5 | GLOBAL_POSITION_INT |
+| `SR0_EXT_STAT` | 2 | GPS_RAW_INT, SYS_STATUS |
+| `SR0_EXTRA1` | 10 | ATTITUDE (heading, roll) |
+| `SR0_RAW_SENS` | 10 | IMU |
+| `SR0_EXTRA3` | 1 | SYSTEM_TIME (the pre-flight's GPS clock) |
+
+The launch also asks for every stream at 10 Hz at start-up
+(`set_stream_rate`); these make the rates survive without it.
+
+UM982, one module, two antennas, **no magnetometer** (ArduPilot "GPS for
+yaw"). Parameter names are `GPS1_*` from 4.6; up to 4.5 they are `GPS_TYPE`,
+`GPS_MB1_TYPE`, `GPS_MB1_OFS_X/Y/Z`.
+
+| Parameter | Value | |
+|---|---|---|
+| `SERIAL3_PROTOCOL` | 5 (GPS) | Pixhawk 4 "GPS module" port = SERIAL3 |
+| `SERIAL3_BAUD` | 230 (230 400) | the UM982's configured rate (Holybro ships 230 400) |
+| `GPS1_TYPE` | 25 (UnicoreMovingBaseline) | 24 would be position only, no yaw |
+| `GPS1_MB_TYPE` | 1 | shows the offset parameters |
+| `GPS1_MB_OFS_X/Y/Z` | measured, m | master relative to slave: +X master ahead, +Y master to the right, +Z master below. Antennas **≥ 30 cm** apart |
+| `GPS1_POS_X/Y/Z` | measured, m (optional) | master antenna from the boat's centre |
+| `AHRS_EKF_TYPE`, `EK3_ENABLE`, `EK2_ENABLE` | 3, 1, 0 | EKF3 |
+| `EK3_SRC1_YAW` | 2 (GPS) | 3 = GPS with compass fallback, only if a compass is kept |
+| `COMPASS_USE`, `COMPASS_USE2`, `COMPASS_USE3` | 0 | no magnetometer in the heading |
+| `GPS_AUTO_SWITCH` | not 2 | Blend is not allowed with moving baseline |
+
+Check: point the boat at a distant landmark; QGroundControl's heading
+matches, and follows when the boat is turned.
+
+### PX4 (1.14 and later)
+
+USB: nothing to set — PX4 starts MAVLink on USB by itself (*config* mode,
+high rates). Only if the link is moved to a TELEM port: `MAV_1_CONFIG` = that
+port, `MAV_1_MODE` = Onboard, `MAV_1_RATE` = 0 (maximum).
+
+UM982 on the *GPS 1* port, dual-antenna heading:
+
+| Parameter | Value | |
+|---|---|---|
+| `GPS_1_CONFIG` | GPS 1 | the port the UM982 is on |
+| `SER_GPS1_BAUD` | 230400 | |
+| `GPS_1_PROTOCOL` | 6 (NMEA) | Unicore = NMEA + Unicore sentences |
+| `EKF2_GPS_CTRL` | bit 3 set (+8), e.g. 15 | dual-antenna heading into the yaw estimate |
+| `GPS_YAW_OFFSET` (1.14) | 0 if the primary antenna is ahead; 90 if it is to the right (clockwise) | |
+| `SENS_GNSS0_HDG`, `SENS_GNSS0_OFFX/Y/Z`, `SENS_GNSS0_AUXX/Y/Z` (newer releases) | dual antenna; primary and secondary antenna positions | replace `GPS_YAW_OFFSET` |
+| `SYS_HAS_MAG` | 0 | no magnetometer. **To verify**: on some versions the EKF then refuses to arm or keeps a compass; an older alternative is `EKF2_MAG_TYPE` = None |
+
+PX4 forum reports `EKF2_GPS_CTRL` refusing 8 alone and reverting to 15 on
+some 1.14 builds — 15 (all bits) includes the heading bit and is fine.
+
+Sources: ArduPilot "GPS for Yaw (aka Moving Baseline)"; PX4 "Holybro H-RTK
+Unicore UM982"; Holybro's UM982 setup guide.
 
 ## 5. Risks to keep in front of everybody
 
