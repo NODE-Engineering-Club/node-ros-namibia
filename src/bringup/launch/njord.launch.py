@@ -227,9 +227,11 @@ def generate_launch_description():
                     "'tcp://localhost:5777' if '", LaunchConfiguration("use_blueos"),
                     "' == 'true' else '", LaunchConfiguration("fcu_url"), "'",
                 ])],
+                # Off: the YAML empty string ''. A bare "gcs_url:=" is not a
+                # valid parameter override and mavros_node aborts on it.
                 "-p", ["gcs_url:=", PythonExpression([
                     "'", LaunchConfiguration("gcs_url"), "' if '",
-                    LaunchConfiguration("enable_gcs_relay"), "' == 'true' else ''",
+                    LaunchConfiguration("enable_gcs_relay"), "' == 'true' else \"''\"",
                 ])],
                 "-p", "tgt_system:=1",
                 "-p", "tgt_component:=1",

@@ -52,4 +52,6 @@ def test_the_qgroundcontrol_relay_is_off_by_default():
     assert _default("gcs_url") == "udp-b://@14550"
     gcs = NJORD.split('"-p", ["gcs_url:=",', 1)[1].split("])],", 1)[0]
     assert 'LaunchConfiguration("enable_gcs_relay")' in gcs
-    assert "else ''" in gcs
+    # Off is the YAML empty string: a bare "gcs_url:=" makes mavros_node abort
+    # ("Couldn't parse parameter override rule"), found in the ROS image.
+    assert "else \\\"''\\\"\"" in gcs
