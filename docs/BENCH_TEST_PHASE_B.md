@@ -44,13 +44,77 @@ Rolling back: the same steps with `firmware/pico-node_v4/pico-node_v4.ino`,
 **and** the pre-Phase B (c) software on the Jetson: this stack refuses to
 drive a v4 Pico on purpose.
 
-## 0b. Prepare
+## 0b. Prerequisites — the Jetson runs this branch, and sees the Pico
 
-1. On the Jetson: udev links (`deploy/udev/README.md`) — `ls -l /dev/pico`.
-2. Start the stack with the defaults (Pico path, GUI):
-   `ros2 launch bringup njord.launch.py enable_gui:=true` (or
-   `sudo systemctl start asket.service`). GUI at `http://<jetson>:8090`.
-4. A terminal to watch the Pico: `ros2 topic echo /pico/status --field data`.
+Do not start the bench until every line here is true.
+
+1. **This branch, built, on the Jetson.** The `asket.service` image
+   `ghcr.io/node-engineering-club/node-ros-2026:latest` is built from `main`
+   and does **not** contain Phase B. On the Jetson (arm64, native build; it
+   takes a while):
+
+   ```bash
+   git clone https://github.com/NODE-Engineering-Club/node-ros-namibia.git
+   cd node-ros-namibia
+   git checkout hw-alignment
+   git submodule update --init --recursive      # sllidar_ros2
+   sudo podman build --target prod -t localhost/asket:hw-alignment .
+   ```
+
+   (Or `git fetch <bundle> hw-alignment:hw-alignment` if the branch came as a
+   bundle.)
+2. **The udev link `/dev/pico`** (`deploy/udev/README.md`), on the host. Plug
+   the Pico in **alone**, then:
+
+   ```bash
+   ls -l /dev/ttyACM*                       # which one appeared
+   udevadm info --query=property --name=/dev/ttyACM0 \
+     | grep -E '^(ID_VENDOR_ID|ID_MODEL_ID|ID_SERIAL_SHORT|ID_USB_INTERFACE_NUM)='
+   ```
+
+   `ID_VENDOR_ID=2e8a` is the Pico. Put its `ID_SERIAL_SHORT` in place of
+   `CHANGE_ME_PICO_SERIAL` in `deploy/udev/99-asket.rules`, then:
+
+   ```bash
+   sudo cp deploy/udev/99-asket.rules /etc/udev/rules.d/99-asket.rules
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger --subsystem-match=tty --action=add
+   ls -l /dev/pico                          # -> ttyACMx
+   ```
+3. **No `njord.service`.** If `scripts/init.sh` was ever run on this Jetson
+   (`systemctl list-unit-files | grep njord`):
+
+   ```bash
+   sudo systemctl disable --now njord.service njord-update.service
+   ```
+4. **Start the stack**, either way:
+   - `asket.service` (`deploy/jetson/README.md`), with its image line changed
+     to `Environment=IMAGE=localhost/asket:hw-alignment`, then
+     `sudo systemctl daemon-reload && sudo systemctl restart asket.service`;
+   - or by hand, the same container in a terminal:
+
+     ```bash
+     sudo mkdir -p /srv/asket/data/missions /srv/asket/data/maps /srv/asket/data/setup
+     sudo podman run --rm -it --name asket --init --privileged \
+       --network host --ipc host \
+       -v /dev:/dev -v /run/udev:/run/udev:ro -v /srv/asket/data:/data \
+       localhost/asket:hw-alignment \
+       ros2 launch bringup njord.launch.py use_pico_bridge:=true enable_gui:=true
+     ```
+
+     Add `enable_bms:=true` only if the BMS reader is plugged in and named
+     `/dev/bms_pack1`.
+5. **The container sees the Pico**, and the bridge has it:
+
+   ```bash
+   sudo podman exec asket ls -l /dev/pico
+   sudo podman exec asket bash -c 'source /opt/ros/jazzy/setup.bash && \
+     source /opt/njord/setup.bash && ros2 node list | grep pico_bridge'
+   ```
+
+   GUI at `http://<jetson>:8090`.
+6. A terminal to watch the Pico:
+   `sudo podman exec -it asket bash -c 'source /opt/ros/jazzy/setup.bash && source /opt/njord/setup.bash && ros2 topic echo /pico/status --field data'`.
 
 ## 1. ESC unpowered (battery disconnected from the ESC rail)
 
