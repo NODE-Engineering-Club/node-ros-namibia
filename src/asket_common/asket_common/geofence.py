@@ -163,6 +163,26 @@ def contains(polygon_enu: list[tuple[float, float]], x: float, y: float) -> bool
     return inside
 
 
+def signed_distance_m(polygon_latlon, lat: float, lon: float) -> float:
+    """Metres from the point to the fence edge: positive inside, negative outside.
+
+    ``polygon_latlon`` is [(lat, lon), ...] as in :class:`Geofence`. Computed
+    in a local ENU frame at the point itself, which is exact enough at the
+    size of a survey block (MAX_SPAN_M).
+    """
+    origin = LocalOrigin(lat, lon)
+    enu = [origin.to_enu(p_lat, p_lon) for p_lat, p_lon in polygon_latlon]
+    nearest = math.inf
+    n = len(enu)
+    for i in range(n):
+        (x1, y1), (x2, y2) = enu[i], enu[(i + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        length2 = dx * dx + dy * dy
+        t = 0.0 if length2 == 0 else max(0.0, min(1.0, -(x1 * dx + y1 * dy) / length2))
+        nearest = min(nearest, math.hypot(x1 + t * dx, y1 + t * dy))
+    return nearest if contains(enu, 0.0, 0.0) else -nearest
+
+
 def to_map_frame(fence: Geofence, origin_lat: float, origin_lon: float):
     """The polygon in the ``map`` frame, metres east/north of the datum."""
     origin = LocalOrigin(origin_lat, origin_lon)

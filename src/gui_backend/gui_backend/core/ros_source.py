@@ -595,7 +595,8 @@ class RosSource:
                 if state["mission"].get("state") == "ERROR"
                 else None
             ),
-            "disk_free_bytes": None,
+            # From the recorder's own report (its disk, not this process's).
+            "disk_free_bytes": state["mission"].get("disk_free_bytes"),
             "sonar_expected": self._msg("sonar_status") is not None,
             "sonar_connected": state["sonar"].get("connected"),
             "sonar_seconds_since_data": state["sonar"].get("seconds_since_data"),
@@ -604,11 +605,22 @@ class RosSource:
             "heading_divergence_suspicious": state["heading"].get("divergence_suspicious"),
             "heading_divergence_deg": state["heading"].get("divergence_deg"),
             "roll_deg": state["vessel"].get("roll_deg"),
-            "geofence_distance_m": None,
+            "geofence_distance_m": self._geofence_distance_m(state["vessel"]),
             "rc_link_ok": state["pico"].get("rc_link_ok"),
             # Whether the GUI is reading the Pico's status or guessing at it.
             **self._pico_state_facts(),
         }
+
+    def _geofence_distance_m(self, vessel: dict) -> float | None:
+        """Signed metres to the day's fence edge (positive inside), or None
+        when there is no fence or no position."""
+        from asket_common.geofence import signed_distance_m
+
+        fence = self._geofence.payload().get("geofence") or []
+        lat, lon = vessel.get("lat"), vessel.get("lon")
+        if len(fence) < 3 or lat is None or lon is None:
+            return None
+        return signed_distance_m([(p_lat, p_lon) for p_lon, p_lat in fence], lat, lon)
 
     def _pico_state_facts(self) -> dict:
         """What the pre-flight needs to judge the STATE parser.

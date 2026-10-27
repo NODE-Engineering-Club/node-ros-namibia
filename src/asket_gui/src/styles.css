@@ -891,3 +891,6 @@ button.link,
   text-decoration: none;
 }
 .button-link:hover { filter: brightness(1.1); }
+
+.alarm-sound { margin: 0; gap: 6px; }
+.alarm-sound button { padding: 2px 8px; font-size: 12px; }
