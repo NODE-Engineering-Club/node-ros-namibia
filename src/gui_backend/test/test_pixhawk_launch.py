@@ -45,3 +45,11 @@ def test_one_parameter_file_per_autopilot_with_the_same_denylist():
 def test_stream_rates_are_requested_from_ardupilot_only():
     timer = NJORD.split("TimerAction(", 1)[1].split("actions=[", 1)[0]
     assert 'LaunchConfiguration("autopilot"), "\' == \'ardupilot\'"' in timer
+
+
+def test_the_qgroundcontrol_relay_is_off_by_default():
+    assert _default("enable_gcs_relay") == "false"
+    assert _default("gcs_url") == "udp-b://@14550"
+    gcs = NJORD.split('"-p", ["gcs_url:=",', 1)[1].split("])],", 1)[0]
+    assert 'LaunchConfiguration("enable_gcs_relay")' in gcs
+    assert "else ''" in gcs

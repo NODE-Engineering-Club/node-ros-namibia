@@ -116,7 +116,15 @@ def generate_launch_description():
         # Pixhawk, and REQUEST_DATA_STREAM is an ArduPilot-only request.
         DeclareLaunchArgument("autopilot",            default_value="ardupilot",
                               description="Firmware on the Pixhawk: 'ardupilot' or 'px4'."),
-        DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
+        # MAVLink relay to QGroundControl on the shore laptop, to set the
+        # Pixhawk up without unplugging it from the Jetson. Off by default.
+        # udp-b://@14550 broadcasts on the boat/shore network to UDP 14550,
+        # where QGroundControl listens by default; a fixed laptop is
+        # udp://@<laptop-ip>:14550.
+        DeclareLaunchArgument("enable_gcs_relay",     default_value="false",
+                              description="Relay MAVLink to QGroundControl on gcs_url."),
+        DeclareLaunchArgument("gcs_url",              default_value="udp-b://@14550",
+                              description="Where the QGroundControl relay sends (enable_gcs_relay)."),
         # Phase B (a): the ESCs are wired to the Pico, so the Pico is the motor
         # path by default. false selects actuator_driver (MAVROS RC override
         # through the Pixhawk) instead; the two never run together
@@ -219,7 +227,10 @@ def generate_launch_description():
                     "'tcp://localhost:5777' if '", LaunchConfiguration("use_blueos"),
                     "' == 'true' else '", LaunchConfiguration("fcu_url"), "'",
                 ])],
-                "-p", ["gcs_url:=", LaunchConfiguration("gcs_url")],
+                "-p", ["gcs_url:=", PythonExpression([
+                    "'", LaunchConfiguration("gcs_url"), "' if '",
+                    LaunchConfiguration("enable_gcs_relay"), "' == 'true' else ''",
+                ])],
                 "-p", "tgt_system:=1",
                 "-p", "tgt_component:=1",
                 "-p", "local_position.frame_id:=odom",
