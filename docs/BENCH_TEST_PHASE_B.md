@@ -188,7 +188,33 @@ shows only `PING`, AUTO is refused, the pre-flight fails. Flash v5 back.
 > Pico cannot cut ESC power at all, and a wrong throttle sign or a stuck
 > command would spin the thrusters until someone pulls the battery.
 
-Connect the battery to the ESC rail. Keep throttle low, bursts short.
+### 2a. First power-up on a current-limited lab supply
+
+The first time the ESCs are powered, use a bench supply instead of the LiPo:
+a wiring mistake (reversed polarity, a short, a thruster that will not stop)
+then costs a current-limit beep instead of a fire.
+
+| Setting | Value | Why |
+|---|---|---|
+| Voltage | **14.8 V** (4S nominal) | inside the T200's and the ESCs' range, below a full pack (16.8 V) |
+| Current limit, power-up and arming | **2 A** | the ESCs' start-up tones draw well under 1 A; 2 A rides through their capacitor inrush |
+| Current limit, low-throttle spins (2.2, 2.4) | **5 A** | two T200 at 10–15 % throttle draw about 1–3 A together in air |
+
+- If the supply drops into current limit at switch-on and the ESC tones
+  repeat in a loop, the inrush is folding it back: raise the limit to 3 A for
+  the power-up only.
+- Stay at low throttle on the supply. A T200 can draw over 20 A at full
+  throttle; the supply will current-limit and the ESC brown out mid-test.
+- Do steps 2.1–2.3 on the supply. If all pass, switch off, then continue with
+  the LiPo.
+
+### 2b. Then the LiPo
+
+Battery voltage first (≥ 14 V for the two 4S packs, `BATTERY` in the GUI or a
+multimeter), E-stop button pressed in (ESC rail cut) while connecting, then
+released. Repeat 2.1–2.9.
+
+Keep throttle low, bursts short.
 
 | # | Do | Expect |
 |---|---|---|
