@@ -170,6 +170,59 @@ written as a nested YAML list (Jazzy wants a string — the generated params fil
 was unparseable and every Nav2 node exited), and a `KeepOutFilter` class that
 does not exist (`KeepoutFilter`).
 
+## 4c. Pixhawk 4 without BlueOS (Phase B d) — PX4 or ArduPilot
+
+MAVROS opens the Pixhawk itself on `/dev/pixhawk` (USB). Which firmware it
+runs is not yet confirmed, so both are prepared and `njord.launch.py
+autopilot:=ardupilot|px4` (default `ardupilot`) selects
+`config/mavros_<autopilot>.yaml` and whether MAVROS requests stream rates.
+The pre-flight check **Flight controller firmware** (`autopilot.match`,
+critical) reads the Pixhawk's own HEARTBEAT and fails if it is the other one;
+the Boat panel's Details show the detected firmware.
+
+### What the stack reads from MAVROS, and where each comes from
+
+Checked in the ROS image (launch × firmware, a fake flight controller sending
+heartbeats): every topic below has a MAVROS publisher with both
+`autopilot:=ardupilot` and `autopilot:=px4`. Whether **data** flows depends on
+the Pixhawk sending the MAVLink message — the last two columns.
+
+| Topic | Read by | MAVLink message | ArduPilot | PX4 |
+|---|---|---|---|---|
+| `/mavros/global_position/raw/fix` | imu_gps_driver → `/gps_driver/gps_raw` → GUI position, navsat_transform | GPS_RAW_INT | after `set_stream_rate` (done by the launch) | streamed on USB |
+| `/mavros/global_position/global` | pre-flight GNSS, recorder | GLOBAL_POSITION_INT | after `set_stream_rate` | streamed |
+| `/mavros/global_position/raw/satellites`, `raw/gps_vel` | pre-flight, recorder | GPS_RAW_INT | after `set_stream_rate` | streamed |
+| `/mavros/gpsstatus/gps1/raw` | GUI fix quality (RTK fixed/float), satellites, HDOP; pre-flight | GPS_RAW_INT | after `set_stream_rate` | streamed |
+| `/mavros/imu/data` | imu_gps_driver → EKF (heading, attitude), pre-flight roll, recorder | ATTITUDE (+ quaternion), SCALED/HIGHRES_IMU | after `set_stream_rate` | streamed |
+| `/mavros/time_reference` | pre-flight GPS clock | SYSTEM_TIME | after `set_stream_rate` | streamed |
+| `/mavros/home_position/home` | datum_sync → map frame → geofence mask | HOME_POSITION | MAVROS polls for it until answered | streamed |
+| `/mavros/state` | (diagnostics) | HEARTBEAT | yes | yes |
+| `/uas1/mavlink_source` | autopilot_probe → `autopilot.match` | HEARTBEAT (raw) | yes | yes |
+
+What is missing, for one or the other:
+
+- **ArduPilot:** nothing beyond the stream request the launch already makes
+  (`/mavros/set_stream_rate`, all streams at 10 Hz, 10 s after start). If a
+  topic stays silent, raise `SR0_*` (the USB port's stream rates) instead.
+- **PX4:** `set_stream_rate` is not sent (PX4 ignores REQUEST_DATA_STREAM).
+  The USB link starts PX4's MAVLink in *config* mode, which streams all of
+  the above. If the Pixhawk is ever wired on TELEM instead of USB, set that
+  instance's `MAV_x_MODE` to *Onboard* and its rate, or nothing arrives.
+- **Both:** *RTK fixed / RTK float* in the GUI needs RTCM corrections reaching
+  the UM982 — Phase B (e), not done (note below). Until then the best is
+  *GPS only*. The dual-antenna heading needs the settings in §4d; the
+  stack does not read the GNSS yaw separately: it arrives through the
+  flight controller's attitude (`/mavros/imu/data`) once the FC fuses it.
+- **Both:** the EKF (`robot_localization`) and navsat_transform need no change
+  between the two: MAVROS gives an ENU `/mavros/imu/data` and a NavSatFix in
+  both cases.
+
+**RTK corrections (Phase B e), not done.** What it will need: a correction
+source (a base station or an NTRIP caster on the shore laptop), MAVROS's
+`/mavros/gps_rtk/send_rtcm` (plugin `gps_rtk`, not on the denylist) or
+QGroundControl's RTK injection through the relay (`enable_gcs_relay`), and
+on the FC side ArduPilot `GPS_INJECT_TO` / PX4's injection on the GPS port.
+
 ## 5. Risks to keep in front of everybody
 
 * **No obstacle detection at all.** No lidar, no working camera pipeline.
