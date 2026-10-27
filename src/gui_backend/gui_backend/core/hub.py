@@ -567,7 +567,19 @@ class Hub:
             }
             for effect in effects
         ]
+        self._resend_hello()
         return result
+
+    def _resend_hello(self) -> None:
+        """Values the backend applies itself (the SonarView address, the
+        station, the battery) travel in `hello`. Re-sent to every client after
+        a save, so "in use" is true on every open page, not only after a
+        reload. The source re-reads the file it just wrote."""
+        refresh = getattr(getattr(self.source, "setup", None), "refresh", None)
+        if refresh is not None:
+            refresh(force=True)
+        for session in self.clients.values():
+            session.send(self.hello(session))
 
     def _apply_setup(self, args: dict, now_utc: int, command_id: str | None) -> dict:
         """Tell the owning node to re-read the setup file, and wait for proof.

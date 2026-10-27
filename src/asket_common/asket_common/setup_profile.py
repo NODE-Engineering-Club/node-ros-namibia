@@ -335,6 +335,18 @@ FIELDS: tuple[FieldSpec, ...] = (
             "any transmit power we are allowed to use."
         ),
     ),
+    FieldSpec(
+        id="vessel.sonarview.url",
+        tier=TIER_VESSEL,
+        label="SonarView address",
+        # SonarView in its container on the Jetson. Cerulean's Docker and
+        # BlueOS instructions both serve its web interface on port 7077.
+        default="http://10.10.20.10:7077",
+        consequence=(
+            "The Sonar card's 'Open SonarView' button goes nowhere, and the "
+            "sonar — settings and recording — is operated only from there."
+        ),
+    ),
     # -- deployment: set up again on every beach --------------------------
     FieldSpec(
         id="deployment.station.lat",

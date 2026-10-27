@@ -36,6 +36,7 @@ from asket_common.heading import (
 
 from . import adapters, payloads
 from .ros_camera import CompressedCamera
+from .setup_values import SetupValues
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
 
 from .commands import (
@@ -187,11 +188,22 @@ class RosSource:
         self._service_clients: dict[str, object] = {}
         self._radio, self._station_origin = _radio_from_config(config)
         self._camera = CompressedCamera()
+
         self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
         self._link = adapters.link_from_measurements("wifi", 1.0, 0.0, 800_000.0)
 
         self._subscribe_all()
         self._prepare_commands()
+
+    @property
+    def setup(self) -> SetupValues:
+        """The Setup page's file: the values gui_backend applies itself are
+        read from here (core/setup_values.py). Created on first use."""
+        values = self.__dict__.get("_setup_values")
+        if values is None:
+            values = SetupValues((getattr(self, "config", None) or {}).get("setup_file"))
+            self.__dict__["_setup_values"] = values
+        return values
 
     # -- wiring -----------------------------------------------------------
 
@@ -806,6 +818,8 @@ class RosSource:
             # "health" when SonarView runs the sonar; "full" (the default,
             # for an older topics.yaml) when this stack drives it.
             "sonar_panel": self.config.get("sonar_panel") or "full",
+            # Where SonarView's web page is, from the Setup page.
+            "sonarview_url": str(self.setup.get("vessel.sonarview.url") or ""),
             "estop": {
                 "mode": estop.get("mode"),
                 "available": bool(estop.get("mode")),

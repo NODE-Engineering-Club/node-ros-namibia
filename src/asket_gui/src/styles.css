@@ -878,3 +878,16 @@ button.link,
 /* The Boat panel's one line of speed, heading and position quality. */
 .motion-line { margin: 8px 0; font-weight: 600; }
 .motion-line .errline, .motion-line .okline { font-size: inherit; }
+
+/* A link that does the job of a button: "Open SonarView" leaves this page. */
+.button-link {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 1px solid var(--info-fill);
+  border-radius: 4px;
+  background: var(--info-fill);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+.button-link:hover { filter: brightness(1.1); }

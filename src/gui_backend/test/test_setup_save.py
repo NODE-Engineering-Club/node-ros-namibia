@@ -263,3 +263,23 @@ def test_no_save_is_ever_left_pending(hub, monkeypatch):
     for args in cases:
         hub.issue_command("save_setup", args)
     assert hub.commands.pending == []
+
+
+def test_a_save_resends_hello_to_every_open_page(hub):
+    """Values the backend applies itself (the SonarView address, among
+    others) travel in `hello`. A save that left open pages on the old hello
+    would make "in use" true only after a reload."""
+    from gui_backend.core.hub import ClientSession
+
+    def drain(session):
+        out = []
+        while not session.outbox.empty():
+            out.append(session.outbox.get_nowait())
+        return out
+
+    session = ClientSession("browser")
+    hub.add_client(session)
+    drain(session)
+    result = save(hub, {"vessel.sonarview.url": {"value": "http://10.10.20.10:7078"}})
+    assert result["status"] == "confirmed", result["detail"]
+    assert any(m.get("type") == "hello" for m in drain(session))
