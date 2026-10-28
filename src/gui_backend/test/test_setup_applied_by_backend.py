@@ -98,3 +98,31 @@ def test_the_shore_station_comes_from_setup_once_position_and_bearing_are_in(tmp
     assert radio.station.boresight_deg == 270.0
     assert radio.station.height_m == 4.0
     assert radio.vessel.height_m == 1.5
+
+
+def test_a_bench_sonarview_address_is_accepted_and_surfaced(tmp_path):
+    """The bench case, which is not the boat case.
+
+    The default points at the Jetson on the boat LAN, 10.10.20.10. On a bench
+    the Jetson is wherever the laptop can reach it — on the sonar's own
+    192.168.2.0/24, or on a hotspot — and the button has to be able to follow.
+
+    This is not hypothetical: the first sonar bringup happens before the boat
+    LAN exists, and a button that silently points at an unreachable address
+    looks exactly like a button pointing at a crashed SonarView.
+    """
+    path = tmp_path / "setup.yaml"
+    _save(path, vessel__sonarview__url="http://192.168.2.1:7077")
+    assert _source(path).describe()["sonarview_url"] == "http://192.168.2.1:7077"
+
+
+def test_an_empty_sonarview_address_reports_empty_rather_than_the_default(tmp_path):
+    """Cleared on purpose means cleared.
+
+    The panel shows "No SonarView address — set it on the Setup page" when this
+    is empty. Falling back to the default here would show a button that cannot
+    work and give no hint why.
+    """
+    path = tmp_path / "setup.yaml"
+    _save(path, vessel__sonarview__url="")
+    assert _source(path).describe()["sonarview_url"] == ""
