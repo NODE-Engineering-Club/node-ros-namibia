@@ -176,6 +176,23 @@ def generate_launch_description():
                                           "(also starts system_test and mission_recorder)"),
         DeclareLaunchArgument("gui_port",             default_value="8090",
                               description="Mission GUI HTTP/WebSocket port. Clear of foxglove_bridge (8765)."),
+        # The Omniscan's health bridge, and the address it looks for the sonar
+        # at. Both are passed straight through to gui.launch.py.
+        #
+        # The address is an argument because the sonar does not reach its final
+        # address by itself: it leaves the factory on 192.168.2.92 and is
+        # re-addressed once, by hand, with SonarView's discovery. Between
+        # unboxing and that moment — which is the whole of the first bench
+        # session — the only way to talk to it is to say where it actually is.
+        # The default is deliberately unchanged: 10.10.20.31 is where the boat
+        # LAN expects it (docs/HARDWARE_DECISIONS.md §2).
+        DeclareLaunchArgument("enable_sonar",         default_value="false",
+                              description="Start omniscan_bridge (sonar health only; SonarView owns the "
+                                          "sonar). Requires enable_gui:=true."),
+        DeclareLaunchArgument("sonar_host",           default_value="10.10.20.31",
+                              description="Omniscan address. Factory default is 192.168.2.92 — pass "
+                                          "sonar_host:=192.168.2.92 on a bench where it has not been "
+                                          "re-addressed yet."),
     ]
     # fmt: on
 
@@ -887,6 +904,8 @@ def generate_launch_description():
                     "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
                     LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",
                 ]),
+                "enable_sonar": LaunchConfiguration("enable_sonar"),
+                "sonar_host": LaunchConfiguration("sonar_host"),
             }.items(),
             condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),
