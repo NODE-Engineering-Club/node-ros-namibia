@@ -21,7 +21,7 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | Signalling | 3 lights (green/yellow/red) as in the firmware. |
 | Energy | 2× LiPo 4S 8000 mAh **in parallel** ≈ 2 × 14.8 V × 8 Ah ≈ **237 Wh**. Probably **2 BQ76920 BMS** boards, one per pack — **TO VERIFY**. |
 | GNSS | Holybro H-RTK Unicore UM982 (dual antenna, heading) **on the Pixhawk**. RTK base Holybro F9P ashore; corrections wanted along base → shore laptop → WiFi → Jetson → MAVROS → Pixhawk (**not implemented**, see Phase B). |
-| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. |
+| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. Reached over **TCP 62312 at 192.168.2.21** — measured 2026-10-28, see §2. What that stream contains is **not verified**: the transducer was in air and no point data has ever been seen. |
 | Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver in the image yet**; prepared behind `enable_oak` (off), see `docs/CAMERA_OAK.md`. |
 | Lidars | **No Livox and no RPLidar on board for now.** ⇒ **The boat has no obstacle detection.** |
 | BlueOS / Raspberry Pi 5 | **Not used.** |
@@ -38,29 +38,70 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | 10.10.20.3 | MikroTik NetMetal 5 ax (boat) |
 | 10.10.20.4 | MikroTik mANTBox ax 15s (shore) |
 | 10.10.20.10 | Jetson AGX Orin |
-| 10.10.20.21 | OAK-D-LR |
+| 10.10.20.21 | OAK-D-LR — **see the IP conflict below** |
 | 10.10.20.22 | reserved (Livox) |
-| 10.10.20.31 | Omniscan 3D 450 SS (**ships as 192.168.2.92 — must be re-addressed**) |
+| 10.10.20.31 | Omniscan 3D 450 SS — **planned only. The sonar is on 192.168.2.21 and has not been moved** |
 | 10.10.20.32 | reserved (second sonar) |
 | 10.10.20.100–199 | DHCP, shore laptops |
 
 Mission GUI: `http://10.10.20.10:8090`. Foxglove: `ws://10.10.20.10:8765`
 (firewalled to loopback by `scripts/harden-network.sh`). SonarView/SonarLink:
-port 7077 on the host running SonarView.
+port 7077 on the host running SonarView — nmap confirms it is **closed on the
+sonar itself**.
+
+### The sonar's real address — VERIFIED 2026-10-28
+
+The plan above is a plan. What was measured on the hardware:
+
+| Fact | Evidence |
+|---|---|
+| Sonar at **192.168.2.21** | ping, and SonarView |
+| Host at **192.168.2.1/24** on the wired interface | worked, `ip addr add` |
+| **TCP 62312 open**; 51200 and 7077 **closed**; 80 and 22 open | `nmap -p-` |
+| Data port is TCP, not UDP | SonarView: `CONNECTED, tcp://192.168.2.21:62312, Product: Omniscan 3D` |
+| Two boards, **AX** and **BX**, firmware **V1.8.2** and **V1.7.2** | SonarView's device list |
+| Boards at **192.168.2.201/.202** exchange **UDP** with the host on **51221/51222** | observed traffic, control packets of 10–105 bytes |
+
+**NOT verified:** what the bytes on TCP 62312 are. The transducer was in air,
+so the sonar produced no soundings and no point data has ever been seen.
+Neither is it known whether the sonar streams unasked, nor whether SonarView
+and `omniscan_bridge` can hold that port at once. See `docs/SONAR_BRINGUP.md`,
+which carries the test for each.
+
+### IP conflict — a network decision nobody has taken
+
+> **Conflit IP :** OAK-D-LR prévue en .21 dans le plan 10.10.20.x ; le sonar
+> est en 192.168.2.21 par défaut et SonarView le fait dialoguer sur
+> 192.168.2.x avec l'hôte en .1. Décision réseau à prendre.
+
+In English, and with what it costs: the plan gives `.21` to the OAK-D-LR; the
+sonar is on `.21` of a *different* `/24`; and SonarView does not only talk to
+the sonar — it has the sonar's two boards talking to the host on
+`192.168.2.0/24`. So three things are open at once: which subnet the sonar ends
+up on, who gets `.21` if both move onto `10.10.20.0/24`, and whether the
+boards' own traffic survives a re-address at all. Nothing in this repository
+re-addresses anything; the code follows the measurement
+(`host: "192.168.2.21"`, overridable with `ASKET_SONAR_HOST`) and the
+`10.10.20.x` plan is left exactly as written.
 
 Where the plan is written into the configuration (hw-alignment step 7):
 
 | Value | File |
 |---|---|
-| Sonar `10.10.20.31` | `src/omniscan_bridge/config/omniscan.yaml` (`host`), `src/omniscan_bridge/omniscan_bridge/omniscan_bridge_node.py` (parameter default), `src/gui_backend/launch/gui.launch.py` (`sonar_host`) |
+| Sonar `192.168.2.21` (**measured**, not the plan's `10.10.20.31`) | `src/omniscan_bridge/config/omniscan.yaml` (`host`), `src/omniscan_bridge/omniscan_bridge/omniscan_bridge_node.py` (parameter default), `src/gui_backend/launch/gui.launch.py` and `sonar_test.launch.py` (`sonar_host`), `src/bringup/launch/njord.launch.py`, `scripts/sonar_probe.py`. All read `ASKET_SONAR_HOST` as an override |
 | Whole plan, for reference | `src/gui_backend/config/topics.yaml` (`network:`; nothing connects to it) |
 | Shore sector mANTBox ax 15s (confirmed), boat NetMetal 5 ax | `src/gui_backend/config/topics.yaml` (`shore_station.antenna`, `vessel_radio`) — the link budget |
 
-Re-addressing the sonar (once, on the bench): connect a laptop **by cable** to
-the CSS610, run SonarView, let its discovery find the Omniscan at
-192.168.2.92 and set it to 10.10.20.31 / 255.255.255.0. Discovery is a
-broadcast, and WiFi bridges usually drop it — do not try it over the link.
+Re-addressing the sonar, **if the decision above goes that way**: connect a
+laptop **by cable** to the CSS610, run SonarView, let its discovery find the
+Omniscan at 192.168.2.21 and set it to 10.10.20.31 / 255.255.255.0. Discovery
+is a broadcast, and WiFi bridges usually drop it — do not try it over the link.
 Then check from the Jetson: `ping 10.10.20.31`.
+
+Before doing that, note what is not known: SonarView has the sonar's two boards
+talking to the host on `192.168.2.201/.202`, and nobody has checked whether
+those addresses follow a re-address of the sonar or are configured separately.
+Re-addressing on the day of a survey is therefore not a safe step.
 
 Note: `scripts/harden-network.sh` comments describe a *routed* shore subnet
 (10.10.10.0/24 via 10.10.99.0/30) from an earlier design note. The plan above
@@ -89,7 +130,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | 3 lights + buzzer | Pico GPIO10/11/12, GPIO13 | firmware | firmware | always | — | ✅ (firmware) |
 | BMS pack 1, pack 2 (BQ76920 via MCP2221) | USB-UART 115200 (via hub) | `bms_port` `/dev/bms_pack1`, `bms2_port` `/dev/bms_pack2` (udev) | `bms_reader` → `/battery/pack1` (+ `/battery/pack2` with `enable_bms2:=true`); `battery_aggregator` → `/battery/state` | no (`enable_bms:=false`); only one BMS wired, so `enable_bms2` defaults to false | Power, status strip | ⚠️ state of charge estimated from cell voltage; with one BMS the second pack is not measured |
 | 2× LiPo 4S 8000 mAh (parallel) | — | GUI capacity 237 Wh (`src/gui_backend/config/topics.yaml`) | — | — | Power | ✅ config |
-| Omniscan 3D 450 SS Modular | Ethernet | 10.10.20.31 (`src/omniscan_bridge/config/omniscan.yaml`), UDP 62312 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
+| Omniscan 3D 450 SS Modular | Ethernet | 192.168.2.21 **measured** (`src/omniscan_bridge/config/omniscan.yaml`), **TCP** 62312 — not UDP, and not the plan's 10.10.20.31 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
 | SonarView | Docker on the Jetson (OPEN) | SonarLink `ws://127.0.0.1:7077` (`src/comms/cloud_bridge/config/cloud_bridge_params.yaml`) | `sonar_bridge_node` → `/sonar/decimated` (cloud) | no | — | ⚠️ |
 | OAK-D-LR | PoE Ethernet | 10.10.20.21 (`enable_oak`, off) | `/oak/rgb/image_raw/compressed` for the GUI (to verify); SAM2 expects `/camera/front/image_raw` | — | Camera: "Camera not connected" | ❌ driver not installed |
 | USB camera | — (not used) | `/dev/video0` | `camera_driver` | **no** (`enable_usb_camera:=false`) | — | — |
@@ -110,7 +151,10 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
                     │  SonarView screen                     │                      │
                     │                                       │      ┌───────────────┼──────────────┐
                     │                                       │  Omniscan 3D     OAK-D-LR      Jetson AGX Orin
-                    │                                       │  10.10.20.31     10.10.20.21   10.10.20.10
+                    │                                       │  192.168.2.21    10.10.20.21   10.10.20.10
+                    │                                       │  (measured;      (.21 clashes
+                    │                                       │   plan says       with the
+                    │                                       │   10.10.20.31)    sonar's .21)
                     │                                       │  (SonarView)     (PoE, no      │ ROS 2 (Podman)
                     │                                       │                   driver yet)  │
                     │                                       │                     USB hub ───┤
@@ -334,8 +378,10 @@ Unicore UM982"; Holybro's UM982 setup guide.
 | V4 | Two BMS boards, one per pack | count MCP2221 devices (`ls -l /dev/serial/by-id/`) |
 | V5 | MCP2221 serial numbers are unique | `udevadm info` (they are often blank or identical — then use the USB port path) |
 | V6 | UM982 yaw reaches the EKF | `ros2 topic echo /odometry/filtered` heading vs. a known bearing |
-| V7 | Sonar re-addressed to 10.10.20.31 | SonarView device discovery |
-| V8 | SonarView and `omniscan_bridge` can both read the sonar | only if `enable_sonar:=true` is ever wanted |
+| V7 | ~~Sonar re-addressed to 10.10.20.31~~ | **Superseded.** The sonar answers on 192.168.2.21 (2026-10-28) and whether it moves at all is an open network decision — see §2 |
+| V8 | SonarView and `omniscan_bridge` can both read TCP 62312 | **Open.** Procedure in `docs/SONAR_BRINGUP.md` §5 "Both at once?". Needs the transducer in water, both connection orders, and one of four named outcomes recorded |
+| V9 | What the Omniscan actually sends on TCP 62312 | **Open, and the blocking one.** The transport is measured; the format is not. `scripts/sonar_probe.py` with the transducer in water — point sets decode, bytes arrive that do not decode (capture them), or nothing arrives |
+| V10 | Whether the sonar streams unasked, or must be commanded | **Open.** Nothing in this repository sends a start command, by design: `send_ping_parameters` is `false` because those parameters start the transducer |
 | O1 | LTE beacon (LilyGO T-SIM7000G) | team decision |
 | O2 | Where SonarView runs (Docker on the Jetson?) | team decision |
 | O3 | Cloudflare relay hostname and deployment | team decision |
