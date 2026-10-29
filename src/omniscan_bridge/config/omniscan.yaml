@@ -1,12 +1,25 @@
 omniscan_bridge:
   ros__parameters:
-    # The sonar's address on the boat LAN 10.10.20.0/24
-    # (docs/HARDWARE_DECISIONS.md, IP plan). The Omniscan ships as
-    # 192.168.2.92 and must be re-addressed once, with SonarView's discovery,
-    # from a machine on the same wired segment (discovery is broadcast; Wi-Fi
-    # usually drops it). Overridden to 127.0.0.1 when sim:=true, where asket_sim
-    # serves real Ping Protocol frames on a real socket.
-    host: "10.10.20.31"
+    # MEASURED on the hardware, 2026-10-28: the sonar answers on
+    # 192.168.2.21, and SonarView reports "CONNECTED, tcp://192.168.2.21:62312,
+    # Product: Omniscan 3D". That is the default here because it is the only
+    # address the device has ever been seen on.
+    #
+    # It is NOT 192.168.2.92 (the figure previously carried here, which came
+    # from Cerulean's documentation for another model) and it is NOT
+    # 10.10.20.31 (the boat LAN plan in docs/HARDWARE_DECISIONS.md §2, which
+    # the sonar has not been moved onto).
+    #
+    # Note the conflict, which is a network decision nobody has taken yet: the
+    # 10.10.20.x plan puts the OAK-D-LR on .21, and the sonar is on .21 of
+    # 192.168.2.0/24 while SonarView has it talking to the host on .1 of that
+    # same /24. See docs/HARDWARE_DECISIONS.md §2.
+    #
+    # Override with the `host` parameter, or with ASKET_SONAR_HOST in the
+    # environment (the launch files read it). Overridden to 127.0.0.1 when
+    # sim:=true, where asket_sim serves real Ping Protocol frames on a real
+    # socket.
+    host: "192.168.2.21"
     port: 62312
     transport: "udp"
 

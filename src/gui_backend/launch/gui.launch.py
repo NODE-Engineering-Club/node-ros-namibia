@@ -15,7 +15,11 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    EnvironmentVariable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 import os
@@ -120,10 +124,19 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "sonar_host",
-            default_value="10.10.20.31",
+            # Measured on the hardware on 2026-10-28: the sonar answers on
+            # 192.168.2.21 and nowhere else. The boat LAN plan
+            # (10.10.20.0/24, docs/HARDWARE_DECISIONS.md §2) is unchanged and
+            # the sonar has not been moved onto it — the two conflict, and that
+            # is a network decision nobody has taken.
+            default_value=EnvironmentVariable(
+                "ASKET_SONAR_HOST", default_value="192.168.2.21"
+            ),
             description=(
-                "Omniscan address on the boat LAN 10.10.20.0/24 "
-                "(docs/HARDWARE_DECISIONS.md). Factory default 192.168.2.92."
+                "Omniscan address. Default 192.168.2.21, where the sonar was "
+                "measured; ASKET_SONAR_HOST overrides it. The boat LAN plan "
+                "says 10.10.20.31, which the sonar is not on "
+                "(docs/HARDWARE_DECISIONS.md §2)."
             ),
         ),
     ]

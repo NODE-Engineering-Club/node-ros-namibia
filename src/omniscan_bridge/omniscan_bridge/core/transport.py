@@ -25,6 +25,13 @@ from dataclasses import dataclass
 
 from .ping_protocol import DEFAULT_PORT
 
+#: The only address the Omniscan 3D has ever been seen on (measured
+#: 2026-10-28). Not 192.168.2.92, which was a transcription from Cerulean's
+#: documentation for another model, and not 10.10.20.31, which is the boat LAN
+#: plan the sonar has not been moved onto. See
+#: omniscan_bridge/config/omniscan.yaml.
+DEFAULT_HOST = "192.168.2.21"
+
 #: Blue Robotics device discovery: broadcast a request, devices answer with a
 #: descriptive text blob.
 DISCOVERY_PORT = 51200

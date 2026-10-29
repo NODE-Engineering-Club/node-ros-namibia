@@ -5,7 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node, SetParameter
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions import ParameterFile
@@ -179,20 +179,21 @@ def generate_launch_description():
         # The Omniscan's health bridge, and the address it looks for the sonar
         # at. Both are passed straight through to gui.launch.py.
         #
-        # The address is an argument because the sonar does not reach its final
-        # address by itself: it leaves the factory on 192.168.2.92 and is
-        # re-addressed once, by hand, with SonarView's discovery. Between
-        # unboxing and that moment — which is the whole of the first bench
-        # session — the only way to talk to it is to say where it actually is.
-        # The default is deliberately unchanged: 10.10.20.31 is where the boat
-        # LAN expects it (docs/HARDWARE_DECISIONS.md §2).
+        # The address is an argument because the sonar's address is not settled.
+        # Measured on 2026-10-28 it answers on 192.168.2.21, which is the
+        # default here; the boat LAN plan (10.10.20.31,
+        # docs/HARDWARE_DECISIONS.md §2) is where it would go if anybody
+        # re-addressed it, and nobody has. ASKET_SONAR_HOST overrides the
+        # default without editing this file.
         DeclareLaunchArgument("enable_sonar",         default_value="false",
                               description="Start omniscan_bridge (sonar health only; SonarView owns the "
                                           "sonar). Requires enable_gui:=true."),
-        DeclareLaunchArgument("sonar_host",           default_value="10.10.20.31",
-                              description="Omniscan address. Factory default is 192.168.2.92 — pass "
-                                          "sonar_host:=192.168.2.92 on a bench where it has not been "
-                                          "re-addressed yet."),
+        DeclareLaunchArgument("sonar_host",
+                              default_value=EnvironmentVariable(
+                                  "ASKET_SONAR_HOST", default_value="192.168.2.21"),
+                              description="Omniscan address. Default 192.168.2.21, measured on the "
+                                          "hardware; ASKET_SONAR_HOST overrides it. The boat LAN plan "
+                                          "says 10.10.20.31, which the sonar is not on."),
     ]
     # fmt: on
 

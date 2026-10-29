@@ -18,8 +18,8 @@ Three checks, in the order they stop being worth doing:
 
 Usage::
 
-    # tonight, factory address
-    python3 scripts/sonar_probe.py --host 192.168.2.92
+    # the address the sonar was measured on
+    python3 scripts/sonar_probe.py --host 192.168.2.21
 
     # against the simulator, no hardware at all
     python3 -m asket_sim.core.fake_sonar_server --port 62312 &
@@ -46,10 +46,15 @@ after. See docs/SONAR_BRINGUP.md.
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import subprocess
 import sys
 import time
+
+#: Where the sonar actually is (measured 2026-10-28). Overridable with
+#: ASKET_SONAR_HOST, the same variable the launch files read.
+DEFAULT_SONAR_HOST = "192.168.2.21"
 
 #: Blue Robotics / Cerulean Ethernet discovery. Broadcast, which is why it does
 #: not survive a Wi-Fi bridge — run this on the wired segment.
@@ -200,8 +205,9 @@ def listen_udp(host: str, port: int, seconds: float, bind_port: int | None = Non
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--host", default="192.168.2.92",
-                    help="sonar address (factory default 192.168.2.92)")
+    ap.add_argument("--host", default=os.environ.get("ASKET_SONAR_HOST", DEFAULT_SONAR_HOST),
+                    help=f"sonar address (default {DEFAULT_SONAR_HOST}, measured "
+                         "2026-10-28; ASKET_SONAR_HOST overrides it)")
     ap.add_argument("--port", type=int, default=DEFAULT_DATA_PORT,
                     help=f"UDP data port to listen on (default {DEFAULT_DATA_PORT})")
     ap.add_argument("--broadcast", default="255.255.255.255",

@@ -19,6 +19,7 @@ Two things this node must never do:
 from __future__ import annotations
 
 import math
+import os
 import struct
 from dataclasses import replace
 
@@ -42,7 +43,7 @@ from omniscan_bridge.core.status import (
     CLOCK_OFFSET_WARN_MS,
     SonarHealthTracker,
 )
-from omniscan_bridge.core.transport import TcpTransport, UdpTransport
+from omniscan_bridge.core.transport import DEFAULT_HOST, TcpTransport, UdpTransport
 
 SENSOR_QOS = QoSProfile(depth=2, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
@@ -61,8 +62,13 @@ class OmniscanBridge(Node):
     def __init__(self) -> None:
         super().__init__("omniscan_bridge")
 
-        # The boat LAN address (docs/HARDWARE_DECISIONS.md); factory is 192.168.2.92.
-        self.declare_parameter("host", "10.10.20.31")
+        # Where the sonar has actually been seen (2026-10-28): 192.168.2.21.
+        # ASKET_SONAR_HOST overrides the built-in default, so a bench session
+        # on a differently-addressed device needs no launch file edit; an
+        # explicit `host` parameter still wins over both. See
+        # omniscan_bridge/config/omniscan.yaml for why the address is not
+        # 10.10.20.31.
+        self.declare_parameter("host", os.environ.get("ASKET_SONAR_HOST", DEFAULT_HOST))
         self.declare_parameter("port", pp.DEFAULT_PORT)
         self.declare_parameter("transport", "udp")
         self.declare_parameter("frame_id", "base_link")

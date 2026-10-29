@@ -26,42 +26,53 @@ rather than three arguments remembered correctly.
 no Pico, no GNSS fix and no heading, so the vessel genuinely is not fit to go
 anywhere. Read the Sonar panel, not the verdict.
 
-Tonight's command
-=================
+The command
+===========
 
-The sonar still has its factory address, so that is this file's default::
+The sonar answers on **192.168.2.21** — measured on 2026-10-28, not assumed —
+so that is this file's default::
 
     ros2 launch gui_backend sonar_test.launch.py
 
-Once the sonar has been re-addressed onto the boat LAN::
+For any other address, without editing anything::
 
-    ros2 launch gui_backend sonar_test.launch.py sonar_host:=10.10.20.31
+    ASKET_SONAR_HOST=192.168.2.30 ros2 launch gui_backend sonar_test.launch.py
+    ros2 launch gui_backend sonar_test.launch.py sonar_host:=192.168.2.30
 
 Then open ``http://<jetson>:8090`` from the laptop.
+
+**Expect the Sonar panel to stay silent until the transducer is in water.**
+The 2026-10-28 session got as far as a TCP connection on 62312 and no further,
+because a dry transducer produces no soundings. The panel saying "sonar
+silent" with the link up is the honest report of that state, not a fault in
+this launch file.
 """
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    EnvironmentVariable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 
 
 def generate_launch_description():
     return LaunchDescription([
-        # The factory address, not the boat's. This file is for the bench, and
-        # on the bench the sonar has not been re-addressed yet — that is done
-        # once, from SonarView's discovery, and usually after this test.
-        #
-        # The boat default (10.10.20.31, docs/HARDWARE_DECISIONS.md §2) lives
-        # in omniscan.yaml and gui.launch.py and is deliberately not touched
-        # here: a bench convenience must not become the deployed setting.
+        # The measured address, which is now also the deployed default in
+        # omniscan.yaml and gui.launch.py — so this file no longer differs
+        # from them, and the bench and the boat agree. ASKET_SONAR_HOST
+        # overrides it for a device that has been moved.
         DeclareLaunchArgument(
             "sonar_host",
-            default_value="192.168.2.92",
+            default_value=EnvironmentVariable(
+                "ASKET_SONAR_HOST", default_value="192.168.2.21"
+            ),
             description=(
-                "Omniscan address. Factory default 192.168.2.92; pass "
-                "sonar_host:=10.10.20.31 once it has been re-addressed."
+                "Omniscan address. Default 192.168.2.21, measured on the "
+                "hardware on 2026-10-28; ASKET_SONAR_HOST overrides it."
             ),
         ),
         DeclareLaunchArgument(

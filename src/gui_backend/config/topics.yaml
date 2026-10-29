@@ -299,9 +299,14 @@ network:
   vessel_radio: 10.10.20.3    # NetMetal 5 ax (boat)
   shore_radio: 10.10.20.4     # mANTBox ax 15s (tripod)
   jetson: 10.10.20.10         # this GUI: http://10.10.20.10:8090
-  camera: 10.10.20.21         # OAK-D-LR (PoE)
+  camera: 10.10.20.21         # OAK-D-LR (PoE) -- see the sonar note below
   lidar_reserved: 10.10.20.22 # Livox, not fitted
-  sonar: 10.10.20.31          # Omniscan 3D 450 SS (factory 192.168.2.92)
+  # The PLAN, not where the sonar is. Measured 2026-10-28, the Omniscan answers
+  # on 192.168.2.21 and has never been moved onto this subnet; omniscan.yaml
+  # carries the real address. Two things to settle before this line is true:
+  # the sonar is on .21 of 192.168.2.0/24 (with SonarView talking to the host
+  # on .1 of it), and .21 of this plan is already the OAK-D-LR.
+  sonar: 10.10.20.31          # Omniscan 3D 450 SS -- PLANNED, not measured
   sonar_reserved: 10.10.20.32
   laptops_dhcp: 10.10.20.100-10.10.20.199
 
