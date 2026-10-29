@@ -76,6 +76,13 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument(
+            "sonar_transport",
+            default_value="tcp",
+            description=(
+                "tcp (measured) or udp. udp is for asket_sim's fake sonar only."
+            ),
+        ),
+        DeclareLaunchArgument(
             "gui_port",
             default_value="8090",
             description="Mission GUI port, as on the boat.",
@@ -89,6 +96,7 @@ def generate_launch_description():
             launch_arguments={
                 "enable_sonar": "true",
                 "sonar_host": LaunchConfiguration("sonar_host"),
+                "sonar_transport": LaunchConfiguration("sonar_transport"),
                 "gui_port": LaunchConfiguration("gui_port"),
                 # Nothing else is running, so the pre-flight must not expect a
                 # Pixhawk or a geofence and report their absence as a surprise.

@@ -139,6 +139,16 @@ def generate_launch_description():
                 "(docs/HARDWARE_DECISIONS.md §2)."
             ),
         ),
+        DeclareLaunchArgument(
+            "sonar_transport",
+            default_value="tcp",
+            description=(
+                "tcp (measured, the deployed default) or udp. Pass udp only to "
+                "run against asket_sim's fake sonar, which is a UDP socket. "
+                "Editing omniscan.yaml for a bench test is how a bench setting "
+                "reaches the boat."
+            ),
+        ),
     ]
 
     sim_time = {"use_sim_time": LaunchConfiguration("use_sim")}
@@ -223,6 +233,7 @@ def generate_launch_description():
                 ),
                 {
                     "host": LaunchConfiguration("sonar_host"),
+                    "transport": LaunchConfiguration("sonar_transport"),
                     "mounting_path": PathJoinSubstitution(
                         [get_package_share_directory("omniscan_bridge"),
                          "config", "mounting.yaml"]

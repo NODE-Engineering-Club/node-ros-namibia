@@ -201,6 +201,10 @@ transport has to be named — the deployed default is `tcp`:
 python3 -m asket_sim.core.fake_sonar_server --port 62312 &
 ros2 run omniscan_bridge omniscan_bridge_node --ros-args \
     -p host:=127.0.0.1 -p transport:=udp
+
+# or through the GUI's launch file, which has the argument
+ros2 launch gui_backend sonar_test.launch.py \
+    sonar_host:=127.0.0.1 sonar_transport:=udp
 ```
 
 `test/test_tcp_transport.py` covers the TCP path with no ROS and no hardware:
