@@ -21,7 +21,27 @@ omniscan_bridge:
     # socket.
     host: "192.168.2.21"
     port: 62312
-    transport: "udp"
+
+    # TCP, measured. nmap against the sonar on 2026-10-28 found exactly ONE
+    # open TCP port -- 62312 -- with 51200 (Cerulean's documented port for the
+    # 450 family) and 7077 (SonarLink) closed, and SonarView itself reported
+    # "CONNECTED, tcp://192.168.2.21:62312". The port this package was built
+    # around was right; the transport was not.
+    #
+    # What is on that socket is NOT verified. The transducer was in air all
+    # evening, so no point data has ever been seen and nothing here assumes the
+    # stream is Ping Protocol. The parser rejects and counts what it cannot
+    # read, and the sonar diagnostics refuse to say OK until a point set has
+    # actually decoded. See docs/SONAR_BRINGUP.md.
+    transport: "tcp"
+
+    # Whether this node may command the sonar to ping. OFF, and not as a
+    # cautious default: those parameters start the transducer, a transducer
+    # driven in air can damage itself, and a launch file runs when nobody is
+    # beside the boat. Turn it on when somebody is, and the transducer is wet.
+    # The ~/set_ping_parameters service works either way -- a person asking is
+    # not the same as a node deciding.
+    send_ping_parameters: false
 
     frame_id: "base_link"
 

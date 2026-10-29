@@ -583,14 +583,19 @@ def _sonar(state: dict, t: Thresholds) -> CheckResult:
             return CheckResult(
                 "sonar.link", "Sonar", FAIL,
                 "The sonar is on the network but not sending data",
-                "It answered discovery, so the cable and power are fine. "
-                "Power-cycle the sonar, and check the configured port (62312).",
+                "Is the transducer in water? In air it produces nothing, and "
+                "this is the expected reading. Otherwise check the sonar panel's "
+                "bytes_received: zero means the stream has to be asked for, "
+                "non-zero means it is not the format we parse "
+                "(docs/SONAR_BRINGUP.md).",
             )
         return CheckResult(
             "sonar.link", "Sonar", FAIL,
             "Nothing answering at the sonar's address",
             "Check the sonar's Ethernet cable and its power. Then check the "
-            "host address in omniscan.yaml matches the sonar.",
+            "host address in omniscan.yaml matches the sonar: it answers on "
+            "192.168.2.21 unless somebody has re-addressed it, and the host "
+            "needs an address on that same /24.",
         )
 
     rate = state.get("sonar_ping_rate_hz")
