@@ -15,8 +15,13 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    EnvironmentVariable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 import os
 
 
@@ -85,6 +90,16 @@ def generate_launch_description():
             description="The Nav2 survey profile runs, so the pre-flight requires its geofence.",
         ),
         DeclareLaunchArgument(
+            "min_disk_free_gb",
+            default_value="10.0",
+            description="Pre-flight NO-GO below this much free space on /data.",
+        ),
+        DeclareLaunchArgument(
+            "autopilot",
+            default_value="ardupilot",
+            description="The Pixhawk's firmware the stack was started for (njord.launch.py autopilot).",
+        ),
+        DeclareLaunchArgument(
             "mavros_expected",
             default_value="false",
             description="MAVROS is started, so the pre-flight expects its node.",
@@ -109,10 +124,29 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "sonar_host",
-            default_value="10.10.20.31",
+            # Measured on the hardware on 2026-10-28: the sonar answers on
+            # 192.168.2.21 and nowhere else. The boat LAN plan
+            # (10.10.20.0/24, docs/HARDWARE_DECISIONS.md §2) is unchanged and
+            # the sonar has not been moved onto it — the two conflict, and that
+            # is a network decision nobody has taken.
+            default_value=EnvironmentVariable(
+                "ASKET_SONAR_HOST", default_value="192.168.2.21"
+            ),
             description=(
-                "Omniscan address on the boat LAN 10.10.20.0/24 "
-                "(docs/HARDWARE_DECISIONS.md). Factory default 192.168.2.92."
+                "Omniscan address. Default 192.168.2.21, where the sonar was "
+                "measured; ASKET_SONAR_HOST overrides it. The boat LAN plan "
+                "says 10.10.20.31, which the sonar is not on "
+                "(docs/HARDWARE_DECISIONS.md §2)."
+            ),
+        ),
+        DeclareLaunchArgument(
+            "sonar_transport",
+            default_value="tcp",
+            description=(
+                "tcp (measured, the deployed default) or udp. Pass udp only to "
+                "run against asket_sim's fake sonar, which is a UDP socket. "
+                "Editing omniscan.yaml for a bench test is how a bench setting "
+                "reaches the boat."
             ),
         ),
     ]
@@ -138,6 +172,7 @@ def generate_launch_description():
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "camera_fitted": LaunchConfiguration("camera_fitted"),
                     "geofence_file": LaunchConfiguration("geofence_file"),
+                    "autopilot": LaunchConfiguration("autopilot"),
                 },
                 sim_time,
             ],
@@ -159,6 +194,9 @@ def generate_launch_description():
                     # Plus mavros when it is started, and the Nav2 survey
                     # nodes when geofence_expected (system_test_node adds them).
                     "mavros_expected": LaunchConfiguration("mavros_expected"),
+                    "autopilot_expected": LaunchConfiguration("autopilot"),
+                    "min_disk_free_gb": ParameterValue(
+                        LaunchConfiguration("min_disk_free_gb"), value_type=float),
                     # Equipment absent on purpose is "not checked", not a
                     # NO-GO: no lidar unless lidar_fitted, and the sonar is
                     # watched only when omniscan_bridge is started.
@@ -195,6 +233,7 @@ def generate_launch_description():
                 ),
                 {
                     "host": LaunchConfiguration("sonar_host"),
+                    "transport": LaunchConfiguration("sonar_transport"),
                     "mounting_path": PathJoinSubstitution(
                         [get_package_share_directory("omniscan_bridge"),
                          "config", "mounting.yaml"]

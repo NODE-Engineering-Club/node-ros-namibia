@@ -118,7 +118,21 @@ class Thresholds:
     #: clock now. A reference from five minutes ago cannot report on a drift
     #: that started four minutes ago.
     max_gps_time_age_s: float = 30.0
-    min_disk_free_bytes: int = 20 * 1024**3
+    #: The floor below which the pre-flight is NO-GO. 10 GB, not 20: on this
+    #: boat mission_recorder writes navigation only (about 10 MB an hour —
+    #: trajectory at 10 Hz, diagnostics at 1 Hz) because SonarView records the
+    #: sonar. What can still fill the disk is SonarView itself if it saves to
+    #: the same disk (2-5 GB an hour), and 10 GB covers that for longer than
+    #: the battery lasts. The recorder stops itself at 1 GiB and warns at
+    #: 5 GiB (recorder.yaml), so this is the margin above those. Set with the
+    #: system_test parameter min_disk_free_gb.
+    min_disk_free_bytes: int = 10 * 1024**3
+    #: What a recording costs, for the "hours of recording" figure. 3.5 GB/h
+    #: is the Omniscan raw stream (2-5 GB/h), which only applies when
+    #: omniscan_bridge feeds the recorder; system_test_node picks 0.05 GB/h
+    #: (navigation only, measured 10 MB/h, with margin) otherwise. Set with
+    #: recording_gb_per_h.
+    recording_bytes_per_h: float = 3.5 * 1024**3
     min_disk_write_mbps: float = 20.0
     max_link_rtt_ms: float = 400.0
     max_pico_age_s: float = 2.0
@@ -377,6 +391,36 @@ def _rc(state: dict, t: Thresholds) -> CheckResult:
 # -- navigation -----------------------------------------------------------
 
 
+@check("autopilot.match", "Flight controller firmware", critical=True)
+def _autopilot(state: dict, t: Thresholds) -> CheckResult:
+    """Is the Pixhawk running the autopilot the stack was launched for?
+
+    njord.launch.py's `autopilot:=ardupilot|px4` picks MAVROS's parameters
+    and whether it asks for stream rates; launched for the wrong one, half of
+    what the GUI and the pre-flight read never arrives, and it looks like a
+    broken sensor. The answer is in the flight controller's own HEARTBEAT
+    (sensors/autopilot_probe → /autopilot/detected).
+    """
+    expected = state.get("autopilot_expected")
+    detected = state.get("autopilot_detected")
+    if not detected:
+        return _missing("autopilot.match", "Flight controller firmware",
+                        "no heartbeat from the flight controller")
+    from asket_common.autopilot import label
+
+    if expected and detected != expected:
+        return CheckResult(
+            "autopilot.match", "Flight controller firmware", FAIL,
+            f"The Pixhawk runs {label(detected)}, the stack was started for {label(expected)}",
+            f"Restart the stack with autopilot:={detected} (asket.service launch line), "
+            "or flash the Pixhawk with the intended firmware.",
+        )
+    return CheckResult(
+        "autopilot.match", "Flight controller firmware", PASS,
+        f"{label(detected)}" + (", as launched" if expected else ""), "",
+    )
+
+
 @check("gnss.fix", "GNSS fix", critical=True)
 def _gnss(state: dict, t: Thresholds) -> CheckResult:
     sats = state.get("num_sats")
@@ -539,14 +583,19 @@ def _sonar(state: dict, t: Thresholds) -> CheckResult:
             return CheckResult(
                 "sonar.link", "Sonar", FAIL,
                 "The sonar is on the network but not sending data",
-                "It answered discovery, so the cable and power are fine. "
-                "Power-cycle the sonar, and check the configured port (62312).",
+                "Is the transducer in water? In air it produces nothing, and "
+                "this is the expected reading. Otherwise check the sonar panel's "
+                "bytes_received: zero means the stream has to be asked for, "
+                "non-zero means it is not the format we parse "
+                "(docs/SONAR_BRINGUP.md).",
             )
         return CheckResult(
             "sonar.link", "Sonar", FAIL,
             "Nothing answering at the sonar's address",
             "Check the sonar's Ethernet cable and its power. Then check the "
-            "host address in omniscan.yaml matches the sonar.",
+            "host address in omniscan.yaml matches the sonar: it answers on "
+            "192.168.2.21 unless somebody has re-addressed it, and the host "
+            "needs an address on that same /24.",
         )
 
     rate = state.get("sonar_ping_rate_hz")
@@ -835,7 +884,7 @@ def _disk(state: dict, t: Thresholds) -> CheckResult:
     free = state.get("disk_free_bytes")
     if free is None:
         return _missing("disk.space", "Disk space", "cannot read the missions disk")
-    hours = free / (3.5 * 1024**3)          # 2-5 GB per hour; 3.5 is the middle
+    hours = free / t.recording_bytes_per_h
     if free < t.min_disk_free_bytes:
         return CheckResult(
             "disk.space", "Disk space", FAIL,
@@ -990,6 +1039,7 @@ REQUIRES = {
     "sonar.clock": "sonar_bridge",
     "sonar.mounting": "sonar_bridge",
     "nav.geofence": "survey_nav",
+    "autopilot.match": "mavros",
 }
 
 #: What the operator is told for each kind of absent equipment.
@@ -998,6 +1048,10 @@ ABSENT_REASON = {
     "sonar_bridge": (
         "the sonar is run from SonarView, and omniscan_bridge is not started, "
         "so this stack does not watch it"
+    ),
+    "mavros": (
+        "MAVROS is not started (enable_mavros:=false, or the simulator), so "
+        "there is no flight controller to check"
     ),
     "survey_nav": (
         "the Nav2 survey profile is not running (enable_nav2:=false or "
@@ -1011,6 +1065,7 @@ ENABLE_ARG = {
     "lidar": "enable_lidar:=true",
     "sonar_bridge": "enable_sonar:=true",
     "survey_nav": "enable_nav2:=true nav2_profile:=survey",
+    "mavros": "enable_mavros:=true",
 }
 
 

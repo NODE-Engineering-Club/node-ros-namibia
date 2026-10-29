@@ -637,7 +637,14 @@ function addLayers(map, withGraticule) {
     id: 'vessel-halo',
     type: 'circle',
     source: 'vessel',
-    paint: { 'circle-radius': 9, 'circle-color': COLOURS.plan, 'circle-opacity': 0.2 },
+    paint: {
+      'circle-radius': 26,
+      'circle-color': COLOURS.plan,
+      'circle-opacity': 0.18,
+      'circle-stroke-width': 2,
+      'circle-stroke-color': COLOURS.plan,
+      'circle-stroke-opacity': 0.5,
+    },
   });
 
   // The heading arrow is drawn as a triangle rotated by heading. When heading
@@ -659,9 +666,14 @@ function addLayers(map, withGraticule) {
   map.addImage('vessel-arrow', arrowImage(), { pixelRatio: 2 });
 }
 
-/** A 32x32 arrow, generated so nothing has to be fetched. */
+//: The boat's arrow, in device pixels (drawn at pixelRatio 2, so 40 CSS
+//: pixels). It was 16 px on screen — a speck on a beach-size tablet in the
+//: sun. Large enough to find at a glance, small enough not to hide the track.
+const ARROW_PX = 80;
+
+/** The boat's arrow, generated so nothing has to be fetched. */
 function arrowImage() {
-  const size = 32;
+  const size = ARROW_PX;
   const data = new Uint8ClampedArray(size * size * 4);
   const put = (x, y, r, g, b, a) => {
     const i = (y * size + x) * 4;
@@ -670,11 +682,22 @@ function arrowImage() {
     data[i + 2] = b;
     data[i + 3] = a;
   };
-  // Triangle pointing up (north at rotation 0).
-  for (let y = 4; y < 28; y += 1) {
-    const halfWidth = ((y - 4) / 24) * 9;
-    for (let x = Math.round(16 - halfWidth); x <= Math.round(16 + halfWidth); x += 1) {
-      const edge = Math.abs(x - 16) > halfWidth - 2 || y > 25;
+  // Triangle pointing up (north at rotation 0), with a notched tail so the
+  // bow cannot be mistaken for the stern.
+  const top = Math.round(size * 0.08);
+  const bottom = Math.round(size * 0.9);
+  const centre = size / 2;
+  const maxHalf = size * 0.34;
+  const outline = Math.max(2, Math.round(size / 16));
+  for (let y = top; y < bottom; y += 1) {
+    const halfWidth = ((y - top) / (bottom - top)) * maxHalf;
+    // The notch: the tail is cut back in a shallow V.
+    const notch = (y - (bottom - size * 0.16)) / (size * 0.16) * maxHalf * 0.6;
+    for (let x = Math.round(centre - halfWidth); x <= Math.round(centre + halfWidth); x += 1) {
+      const off = Math.abs(x - centre);
+      if (notch > 0 && off < notch) continue;
+      const edge = off > halfWidth - outline || y > bottom - outline - 1
+        || (notch > 0 && off < notch + outline);
       // Black outline, blue body — legible on white, on the green coverage
       // ribbon, and on a satellite tile alike.
       put(x, y, edge ? 0 : 11, edge ? 0 : 87, edge ? 0 : 208, 255);

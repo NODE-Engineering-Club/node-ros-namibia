@@ -19,7 +19,9 @@ Two things this node must never do:
 from __future__ import annotations
 
 import math
+import os
 import struct
+import time
 from dataclasses import replace
 
 import rclpy
@@ -42,7 +44,7 @@ from omniscan_bridge.core.status import (
     CLOCK_OFFSET_WARN_MS,
     SonarHealthTracker,
 )
-from omniscan_bridge.core.transport import TcpTransport, UdpTransport
+from omniscan_bridge.core.transport import DEFAULT_HOST, TcpTransport, UdpTransport
 
 SENSOR_QOS = QoSProfile(depth=2, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
@@ -61,10 +63,34 @@ class OmniscanBridge(Node):
     def __init__(self) -> None:
         super().__init__("omniscan_bridge")
 
-        # The boat LAN address (docs/HARDWARE_DECISIONS.md); factory is 192.168.2.92.
-        self.declare_parameter("host", "10.10.20.31")
+        # Where the sonar has actually been seen (2026-10-28): 192.168.2.21.
+        # ASKET_SONAR_HOST overrides the built-in default, so a bench session
+        # on a differently-addressed device needs no launch file edit; an
+        # explicit `host` parameter still wins over both. See
+        # omniscan_bridge/config/omniscan.yaml for why the address is not
+        # 10.10.20.31.
+        self.declare_parameter("host", os.environ.get("ASKET_SONAR_HOST", DEFAULT_HOST))
         self.declare_parameter("port", pp.DEFAULT_PORT)
-        self.declare_parameter("transport", "udp")
+        # TCP, because that is what the sonar was found to speak. nmap on
+        # 2026-10-28 showed exactly one open TCP port, 62312, and SonarView
+        # reported "tcp://192.168.2.21:62312". 51200 and 7077 were closed.
+        # What travels over that socket is NOT known -- the transducer was in
+        # air, so no point data has ever been seen -- and nothing in this node
+        # assumes it is Ping Protocol: the parser validates and counts, and the
+        # diagnostics below stay out of OK until a point set decodes.
+        self.declare_parameter("transport", "tcp")
+        # Whether this node may command the sonar's ping parameters.
+        #
+        # OFF by default, and that is a safety choice rather than a
+        # conservative default. `enable_ping` in those parameters starts the
+        # transducer, a transducer driven in air can damage itself, and nobody
+        # is standing beside the boat when a launch file runs. Set it true only
+        # once somebody is, and knows the transducer is wet.
+        #
+        # The ~/set_ping_parameters service stays available either way: an
+        # operator asking for a range change is a person deciding, which is a
+        # different thing from a node deciding at startup.
+        self.declare_parameter("send_ping_parameters", False)
         self.declare_parameter("frame_id", "base_link")
         self.declare_parameter("range_m", 30.0)
         # -1 is auto gain and is what Cerulean recommend; 0..10 is manual.
@@ -178,6 +204,12 @@ class OmniscanBridge(Node):
         )
 
         self._pinging = True
+        # When a point set was last decoded -- the only evidence that the bytes
+        # on this socket are what we think they are. Until it moves off zero,
+        # the wire format on TCP 62312 is an assumption and the diagnostics say
+        # so out loud.
+        self._last_point_utc_ms = 0
+        self._last_point_monotonic = 0.0
         self._min_publish_interval_ns = int(
             1e9 / max(0.1, self.get_parameter("max_publish_rate_hz").value)
         )
@@ -186,14 +218,28 @@ class OmniscanBridge(Node):
         self.transport.start()
         self.create_timer(1.0 / self.get_parameter("drain_rate_hz").value, self._drain)
         self.create_timer(1.0, self._publish_status)
-        # Configure the device once it answers, and again after any reconnect.
+        # Configure the device once it answers, and again after any reconnect
+        # -- only if a human has turned that on. See `send_ping_parameters`.
         self._configured_for_reconnects = -1
-        self.create_timer(1.0, self._configure_if_needed)
+        self._may_command = bool(self.get_parameter("send_ping_parameters").value)
+        if self._may_command:
+            self.create_timer(1.0, self._configure_if_needed)
 
         self.get_logger().info(
             f"connecting to Omniscan 3D at {self.transport.host}:{self.transport.port} "
             f"over {transport_cls.__name__.replace('Transport', '').lower()}"
         )
+        if self._may_command:
+            self.get_logger().warning(
+                "send_ping_parameters is true: this node will command the sonar to "
+                "ping as soon as it answers. A transducer driven in air can be "
+                "damaged -- make sure it is in water."
+            )
+        else:
+            self.get_logger().info(
+                "listening only; the sonar is not commanded to ping "
+                "(send_ping_parameters is false)"
+            )
 
     # -- device configuration ---------------------------------------------
 
@@ -203,6 +249,10 @@ class OmniscanBridge(Node):
         A device that reboots mid-mission comes back with defaults. Silently
         surveying at the wrong range for the second half is exactly the kind of
         failure nobody notices until the data is opened back home.
+
+        This timer only exists when ``send_ping_parameters`` is true, so on a
+        default run nothing here is reached and the sonar is never told to
+        ping. See the parameter's declaration for why.
 
         Note what is *not* sent here: there is no NTP message. The Omniscan 3D's
         ``SET_NTP_INFO`` packet was removed by Cerulean, and the NTP server is
@@ -264,6 +314,8 @@ class OmniscanBridge(Node):
             self._on_end_ping(message)
 
     def _on_point_set(self, ps: pp.PointSet) -> None:
+        self._last_point_utc_ms = int(ps.utc_msec)
+        self._last_point_monotonic = time.monotonic()
         valid = len(ps.bottom_points())
         self.health.on_point_set(
             utc_msec=ps.utc_msec,
@@ -350,6 +402,17 @@ class OmniscanBridge(Node):
         msg.data = bytes(buf)
         return msg
 
+    def _frames_invalid(self) -> int:
+        """Everything the parser refused, as one number.
+
+        Three different ways a frame can be wrong — a bad checksum, a declared
+        length that disagrees with the payload, a payload that would not decode
+        — and they are all "this is not what we expected on the wire". They are
+        reported individually too; this is the one an operator reads first.
+        """
+        stats = self.parser.stats
+        return stats.checksum_errors + stats.length_mismatches + stats.decode_errors
+
     def _current_health(self):
         stats = self.parser.stats
         return self.health.health(
@@ -395,11 +458,46 @@ class OmniscanBridge(Node):
         # Plain language, and say what to DO about it. "sonar: ERROR" on a
         # Namibian beach costs an hour; "no packets for 12 s — check the
         # Ethernet cable" costs a minute.
-        if not h.connected:
+        stats = self.parser.stats
+        tstats = self.transport.stats
+        # "No link" and "a link with nothing on it" are different faults with
+        # different fixes, and on 2026-10-28 the sonar sat in the second state
+        # all evening — TCP 62312 accepted, not one sounding, because the
+        # transducer was in air. A panel that cannot say which of the two it is
+        # looking at sends somebody to check a cable that is fine.
+        if not self.transport.link_up:
+            st.level = DiagnosticStatus.ERROR
+            reason = tstats.last_connect_error or "no answer"
+            st.message = (
+                f"cannot connect to {self.transport.host}:{self.transport.port} "
+                f"({reason}) — check the sonar's Ethernet cable and power"
+            )
+        elif tstats.bytes_received == 0:
+            st.level = DiagnosticStatus.WARN
+            st.message = (
+                f"connected to {self.transport.host}:{self.transport.port}, but the "
+                f"sonar has sent nothing in {self.transport.seconds_connected:.0f} s. "
+                "Expected with the transducer in air. If it is in water, the stream "
+                "may have to be asked for — see docs/SONAR_BRINGUP.md"
+            )
+        elif stats.point_sets == 0:
+            # Bytes are arriving and not one of them has become a point set.
+            # Either the sonar is sending something other than soundings, or
+            # this stream is not Ping Protocol at all — which has never been
+            # verified. Saying OK here is the exact lie this panel exists to
+            # avoid.
+            st.level = DiagnosticStatus.WARN
+            st.message = (
+                f"{tstats.bytes_received} bytes received, no OS3D_POINT_SET decoded "
+                f"({stats.frames_parsed} frames parsed, {stats.bytes_discarded} bytes "
+                "discarded). The format of this stream is NOT verified — "
+                "see docs/SONAR_BRINGUP.md"
+            )
+        elif not h.connected:
             st.level = DiagnosticStatus.ERROR
             st.message = (
-                f"no data for {h.seconds_since_data:.0f} s — check the sonar's "
-                "Ethernet cable and power"
+                f"no data for {h.seconds_since_data:.0f} s — the sonar answered "
+                "earlier and has stopped; check its cable and power"
             )
         elif h.clock_compromised:
             st.level = DiagnosticStatus.ERROR
@@ -445,8 +543,40 @@ class OmniscanBridge(Node):
             KeyValue(key="checksum_errors", value=str(h.checksum_errors)),
             KeyValue(key="bytes_discarded", value=str(h.bytes_discarded)),
             KeyValue(key="realized_ping_rate_hz", value=f"{h.actual_ping_rate_hz:.2f}"),
-            KeyValue(key="reconnects", value=str(self.transport.stats.reconnects)),
-            KeyValue(key="rx_chunks_dropped", value=str(self.transport.stats.chunks_dropped)),
+            KeyValue(key="reconnects", value=str(tstats.reconnects)),
+            KeyValue(key="rx_chunks_dropped", value=str(tstats.chunks_dropped)),
+        ]
+        # The link, as opposed to the data. Every one of these was a question
+        # somebody actually had to answer with tcpdump on 2026-10-28.
+        st.values += [
+            KeyValue(key="transport", value=type(self.transport).__name__),
+            KeyValue(key="link_up", value=str(self.transport.link_up)),
+            KeyValue(key="seconds_connected", value=f"{self.transport.seconds_connected:.0f}"),
+            KeyValue(key="bytes_received", value=str(tstats.bytes_received)),
+            KeyValue(key="connect_attempts", value=str(tstats.connect_attempts)),
+            KeyValue(key="connect_failures", value=str(tstats.connect_failures)),
+            KeyValue(key="disconnects", value=str(tstats.disconnects)),
+            KeyValue(key="last_connect_error", value=tstats.last_connect_error),
+            # Valid against rejected, as two numbers rather than one. A stream
+            # that is not what we think it is shows up here as frames_invalid
+            # climbing with frames_valid flat, before anybody opens a capture.
+            KeyValue(key="frames_valid", value=str(stats.frames_parsed)),
+            KeyValue(key="frames_invalid", value=str(self._frames_invalid())),
+            KeyValue(key="length_mismatches", value=str(stats.length_mismatches)),
+            KeyValue(key="decode_errors", value=str(stats.decode_errors)),
+            KeyValue(key="point_sets", value=str(stats.point_sets)),
+            # Zero means no sounding has ever been decoded on this link, which
+            # is the state the hardware has been in since it was unboxed.
+            KeyValue(key="last_point_utc_ms", value=str(self._last_point_utc_ms)),
+            KeyValue(
+                key="seconds_since_point",
+                value=(
+                    f"{time.monotonic() - self._last_point_monotonic:.0f}"
+                    if self._last_point_monotonic
+                    else "never"
+                ),
+            ),
+            KeyValue(key="ping_commanded_by_bridge", value=str(self._may_command)),
         ]
         # The mounting geometry actually in use, reported by the node that
         # loaded it. The pre-flight check reads these rather than the file, so
@@ -492,9 +622,16 @@ class OmniscanBridge(Node):
 
     def _on_set_parameters(self, request, response):
         """Runtime range, gain and rate, so they can be tuned on site."""
-        if not self.transport.connected:
+        # The precondition is a socket, not a data stream. If the sonar turns
+        # out to need asking before it streams, requiring data here would make
+        # the one service that could ask it unusable -- so this gates on
+        # link_up and reports honestly whether anything followed.
+        if not self.transport.link_up:
             response.success = False
-            response.message = "sonar not connected"
+            response.message = (
+                f"no connection to the sonar at {self.transport.host}:"
+                f"{self.transport.port}"
+            )
             return response
 
         params = replace(
@@ -519,6 +656,12 @@ class OmniscanBridge(Node):
 
     def _on_start(self, request, response):
         self._pinging = True
+        # When a point set was last decoded -- the only evidence that the bytes
+        # on this socket are what we think they are. Until it moves off zero,
+        # the wire format on TCP 62312 is an assumption and the diagnostics say
+        # so out loud.
+        self._last_point_utc_ms = 0
+        self._last_point_monotonic = 0.0
         ok = self._send_ping_parameters(replace(self.params, ping_enable=True))
         response.success = ok
         response.message = "pinging" if ok else "failed to send to the sonar"

@@ -41,15 +41,22 @@ export function LinkStatus({ state, connection }) {
   // What the collapsed panel has to say is not "63 kB/s" but which detail level
   // is in force and why — that is what tells an operator whether a missing
   // value is missing because nothing is happening or because it is not sent.
+  //
+  // Red only when the link is actually down. A narrow link that is carrying
+  // less is amber and said in plain words; which streams were cut, and why,
+  // is the Details list below.
   const forced = !state.connected
     ? 'the link is down'
     : link?.active_link === 'none'
       ? 'no bearer'
-      : profile.profile === 'minimal'
-        ? 'beacon profile — most streams are not carried'
-        : degraded.length
-          ? `${degraded.length} subscription(s) cut back`
-          : '';
+      : '';
+  const weak = forced
+    ? ''
+    : profile.profile === 'minimal'
+      ? 'Weak link: beacon only — position, mode and battery'
+      : degraded.length || profile.profile === 'reduced'
+        ? 'Weak link: reduced detail'
+        : '';
 
   return (
     <Panel
@@ -62,9 +69,17 @@ export function LinkStatus({ state, connection }) {
         </Chip>
       }
       summary={
-        <Rows>
-          <Row label="Latency">{num(latency, 0, ' ms')}</Row>
-        </Rows>
+        <>
+          <Rows>
+            <Row label="Latency">{num(latency, 0, ' ms')}</Row>
+          </Rows>
+          {weak && (
+            <p className="warnline" style={{ margin: '6px 0 0' }}>
+              {weak}
+              {details && degraded.length ? ` — ${degraded.length} stream(s) cut back` : ''}
+            </p>
+          )}
+        </>
       }
     >
       {/* Everything below explains the link rather than asks for action:

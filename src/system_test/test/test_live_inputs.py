@@ -94,6 +94,7 @@ def _healthy_boat():
         "disk_free_bytes": 200 * 1024**3, "disk_write_mbps": 80.0,
         "state_of_charge": 0.9, "battery_voltage": 16.2,
         "geofence_level": "OK", "geofence_message": "'test block', 72.0 ha",
+        "autopilot_detected": "ardupilot", "autopilot_expected": "ardupilot",
     }
 
 

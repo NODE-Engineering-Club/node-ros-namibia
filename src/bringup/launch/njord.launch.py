@@ -5,7 +5,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import (EnvironmentVariable, LaunchConfiguration,
+                                  PathJoinSubstitution, PythonExpression)
 from launch_ros.actions import Node, SetParameter
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions import ParameterFile
@@ -99,8 +100,32 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument("enable_foxglove",      default_value="true"),
-        DeclareLaunchArgument("fcu_url",              default_value="tcp://localhost:5777"),
-        DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
+        # Phase B (d): MAVROS straight to the Pixhawk over USB, no BlueOS.
+        # /dev/pixhawk is the udev link (deploy/udev/99-asket.rules); the
+        # baud rate is ignored on a USB CDC port but MAVROS's URL needs one.
+        DeclareLaunchArgument("fcu_url",              default_value="/dev/pixhawk:115200",
+                              description="MAVROS link to the flight controller. Ignored with "
+                                          "use_blueos:=true."),
+        DeclareLaunchArgument("use_blueos",           default_value="false",
+                              description="Go through BlueOS's MAVLink router (tcp://localhost:5777) "
+                                          "instead of fcu_url, as before Phase B (d)."),
+        # PX4 or ArduPilot: not yet known for this Pixhawk 4. Selects
+        # config/mavros_<autopilot>.yaml and whether MAVROS asks for stream
+        # rates; the pre-flight's autopilot.match check fails if the Pixhawk
+        # turns out to run the other one. ArduPilot by default: the
+        # set_stream_rate workaround below was confirmed against this
+        # Pixhawk, and REQUEST_DATA_STREAM is an ArduPilot-only request.
+        DeclareLaunchArgument("autopilot",            default_value="ardupilot",
+                              description="Firmware on the Pixhawk: 'ardupilot' or 'px4'."),
+        # MAVLink relay to QGroundControl on the shore laptop, to set the
+        # Pixhawk up without unplugging it from the Jetson. Off by default.
+        # udp-b://@14550 broadcasts on the boat/shore network to UDP 14550,
+        # where QGroundControl listens by default; a fixed laptop is
+        # udp://@<laptop-ip>:14550.
+        DeclareLaunchArgument("enable_gcs_relay",     default_value="false",
+                              description="Relay MAVLink to QGroundControl on gcs_url."),
+        DeclareLaunchArgument("gcs_url",              default_value="udp-b://@14550",
+                              description="Where the QGroundControl relay sends (enable_gcs_relay)."),
         # Phase B (a): the ESCs are wired to the Pico, so the Pico is the motor
         # path by default. false selects actuator_driver (MAVROS RC override
         # through the Pixhawk) instead; the two never run together
@@ -152,6 +177,24 @@ def generate_launch_description():
                                           "(also starts system_test and mission_recorder)"),
         DeclareLaunchArgument("gui_port",             default_value="8090",
                               description="Mission GUI HTTP/WebSocket port. Clear of foxglove_bridge (8765)."),
+        # The Omniscan's health bridge, and the address it looks for the sonar
+        # at. Both are passed straight through to gui.launch.py.
+        #
+        # The address is an argument because the sonar's address is not settled.
+        # Measured on 2026-10-28 it answers on 192.168.2.21, which is the
+        # default here; the boat LAN plan (10.10.20.31,
+        # docs/HARDWARE_DECISIONS.md §2) is where it would go if anybody
+        # re-addressed it, and nobody has. ASKET_SONAR_HOST overrides the
+        # default without editing this file.
+        DeclareLaunchArgument("enable_sonar",         default_value="false",
+                              description="Start omniscan_bridge (sonar health only; SonarView owns the "
+                                          "sonar). Requires enable_gui:=true."),
+        DeclareLaunchArgument("sonar_host",
+                              default_value=EnvironmentVariable(
+                                  "ASKET_SONAR_HOST", default_value="192.168.2.21"),
+                              description="Omniscan address. Default 192.168.2.21, measured on the "
+                                          "hardware; ASKET_SONAR_HOST overrides it. The plan "
+                                          "says 10.10.20.31, which the sonar is not on."),
     ]
     # fmt: on
 
@@ -199,8 +242,16 @@ def generate_launch_description():
             ])),
             arguments=[
                 "--ros-args",
-                "-p", ["fcu_url:=", LaunchConfiguration("fcu_url")],
-                "-p", ["gcs_url:=", LaunchConfiguration("gcs_url")],
+                "-p", ["fcu_url:=", PythonExpression([
+                    "'tcp://localhost:5777' if '", LaunchConfiguration("use_blueos"),
+                    "' == 'true' else '", LaunchConfiguration("fcu_url"), "'",
+                ])],
+                # Off: the YAML empty string ''. A bare "gcs_url:=" is not a
+                # valid parameter override and mavros_node aborts on it.
+                "-p", ["gcs_url:=", PythonExpression([
+                    "'", LaunchConfiguration("gcs_url"), "' if '",
+                    LaunchConfiguration("enable_gcs_relay"), "' == 'true' else \"''\"",
+                ])],
                 "-p", "tgt_system:=1",
                 "-p", "tgt_component:=1",
                 "-p", "local_position.frame_id:=odom",
@@ -213,8 +264,12 @@ def generate_launch_description():
             # use_sim, and adding it back (even as a single-key dict) forces
             # launch_ros to emit a second --params-file, which alone is enough
             # to reproduce the race described above.
+            # One file, chosen by autopilot (see config/mavros_ardupilot.yaml).
             parameters=[
-                cfg + "/mavros_denylist.yaml",
+                PythonExpression([
+                    "'", cfg, "/mavros_' + {'px4': 'px4', 'ardupilot': 'ardupilot'}['",
+                    LaunchConfiguration("autopilot"), "'] + '.yaml'",
+                ]),
             ],
         ),
         # This particular FCU/link doesn't auto-stream position or extended-
@@ -228,11 +283,16 @@ def generate_launch_description():
         # plugin loading and have an FCU connection), fixes it for the rest of
         # the session. This is a workaround for FCU/link stream-rate config,
         # not a bug in this repo's code.
+        #
+        # ArduPilot only: REQUEST_DATA_STREAM (what set_stream_rate sends) is
+        # an ArduPilot message, which PX4 ignores — PX4's rates come from its
+        # own MAVLink instance settings (docs/HARDWARE_DECISIONS.md §4c).
         TimerAction(
             period=10.0,
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
-                LaunchConfiguration("use_sim"), "' != 'true'"
+                LaunchConfiguration("use_sim"), "' != 'true' and '",
+                LaunchConfiguration("autopilot"), "' == 'ardupilot'"
             ])),
             actions=[
                 ExecuteProcess(
@@ -244,6 +304,17 @@ def generate_launch_description():
                     output="log",
                 ),
             ],
+        ),
+        # Which autopilot actually answers (HEARTBEAT off MAVROS's raw
+        # stream) → /autopilot/detected, for the pre-flight's autopilot.match.
+        Node(
+            package="sensors",
+            executable="autopilot_probe",
+            name="autopilot_probe",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
         ),
         # Localization — EKF + NavSat transform
         Node(
@@ -826,6 +897,7 @@ def generate_launch_description():
                     LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
                 ]),
                 "geofence_file": LaunchConfiguration("geofence_file"),
+                "autopilot": LaunchConfiguration("autopilot"),
                 "mavros_expected": PythonExpression([
                     "'true' if '", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
                     LaunchConfiguration("use_sim"), "' != 'true' else 'false'",
@@ -834,6 +906,8 @@ def generate_launch_description():
                     "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
                     LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",
                 ]),
+                "enable_sonar": LaunchConfiguration("enable_sonar"),
+                "sonar_host": LaunchConfiguration("sonar_host"),
             }.items(),
             condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),

@@ -19,6 +19,7 @@ export function ConfirmButton({
   danger,
   pending,
   armMs = 5000,
+  title = '',
 }) {
   const [armed, setArmed] = useState(false);
   const timer = useRef(null);
@@ -47,7 +48,7 @@ export function ConfirmButton({
       className={className}
       onClick={handleClick}
       disabled={disabled || pending}
-      title={armed ? prompt : label}
+      title={armed ? prompt : title || label}
     >
       {pending ? 'Waiting…' : armed ? `Confirm: ${prompt}` : label}
     </button>

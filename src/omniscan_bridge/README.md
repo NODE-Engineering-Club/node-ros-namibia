@@ -1,8 +1,26 @@
 # omniscan_bridge
 
-Cerulean Omniscan 3D → ROS 2. Speaks the Ping Protocol over Ethernet
-(port 62312), publishes vessel-frame points and a health topic that tells you
-what the sonar is actually doing.
+Cerulean Omniscan 3D → ROS 2. Connects to the sonar over Ethernet, publishes
+vessel-frame points and a health topic that tells you what the sonar is
+actually doing.
+
+**Transport: TCP 62312, measured.** On 2026-10-28 the sonar answered on
+192.168.2.21 with exactly one open TCP port — 62312 — while 51200 (Cerulean's
+documented port for the 450 family) and 7077 (SonarLink) were closed, and
+SonarView reported `CONNECTED, tcp://192.168.2.21:62312`. The port this package
+was built around was right; the transport was not, and is now `tcp`.
+
+**The format of that stream is not verified.** The transducer was in air, so no
+point data has ever been seen. This package assumes nothing: the parser rejects
+and counts what it cannot read, the diagnostics will not say OK until a point
+set has decoded, and `bytes_received` against `point_sets` in `/diagnostics` is
+how you tell "nothing is being sent" from "something is being sent and it is
+not what we parse".
+
+**This node never tells the sonar to ping.** `send_ping_parameters` is `false`
+by default, because those parameters start the transducer and a transducer
+driven in air can damage itself. The `~/set_ping_parameters` service still
+works — a person asking is not a node deciding.
 
 The unit is the **AIO variant**: beamforming happens inside the sonar's own
 Pi 5, so the Jetson receives processed data. One unit, so **one side only** —
@@ -176,12 +194,24 @@ No sonar, no socket, no ROS:
 pytest src/omniscan_bridge
 ```
 
-With a fake device on a real socket:
+With a fake device on a real socket. `asket_sim`'s fake sonar is UDP, so the
+transport has to be named — the deployed default is `tcp`:
 
 ```bash
 python3 -m asket_sim.core.fake_sonar_server --port 62312 &
-ros2 run omniscan_bridge omniscan_bridge_node --ros-args -p host:=127.0.0.1
+ros2 run omniscan_bridge omniscan_bridge_node --ros-args \
+    -p host:=127.0.0.1 -p transport:=udp
+
+# or through the GUI's launch file, which has the argument
+ros2 launch gui_backend sonar_test.launch.py \
+    sonar_host:=127.0.0.1 sonar_transport:=udp
 ```
+
+`test/test_tcp_transport.py` covers the TCP path with no ROS and no hardware:
+whole frames, a frame split across two reads, two frames in one read, pure
+noise, a truncated frame, a connection cut mid-frame, a connection that opens
+and stays silent, a refused connection backing off, and the guarantee that
+nothing is sent to the sonar unless something explicitly asks.
 
 Against a synthetic raw file:
 

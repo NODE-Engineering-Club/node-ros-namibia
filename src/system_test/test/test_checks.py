@@ -40,6 +40,7 @@ HEALTHY = dict(
     expected_nodes=["omniscan_bridge"], present_nodes=["omniscan_bridge"],
     pico_state_format_verified=True, pico_state_parsed=True, pico_state_unknown_keys=[],
     pico_estop_feedback_enabled=True,
+    autopilot_detected="ardupilot", autopilot_expected="ardupilot",
     mounting=dict(
         path="/etc/asket/mounting.yaml", found=True, measured=True,
         measured_by="AD", measured_utc="2026-03-02", error="", unknown_fields=[],
@@ -114,7 +115,13 @@ def test_a_sonar_on_the_network_and_a_sonar_absent_are_different_faults():
     assert absent.status == silent.status == FAIL
     assert absent.message != silent.message
     assert "Ethernet cable" in absent.remedy
-    assert "Power-cycle" in silent.remedy
+    # The silent case sends you to the water, not to the cable. A sonar that
+    # answers and sends nothing is, on this hardware, overwhelmingly a dry
+    # transducer -- that was its state for the whole 2026-10-28 session -- and
+    # "power-cycle it", which this used to say, is advice that wastes the one
+    # thing nobody has spare on a beach.
+    assert "transducer" in silent.remedy
+    assert "Ethernet cable" not in silent.remedy
 
 
 def test_clock_drift_is_a_hard_fail_and_says_what_it_costs():
@@ -497,3 +504,53 @@ def test_the_link_is_not_measured_without_a_browser():
     assert "Not measured" in result.message
     measured = item(run_checks(dict(HEALTHY, link_rtt_ms=20.0, link_clients=1)), "link.quality")
     assert measured.status == PASS
+
+
+# -- the disk floor, sized to what this boat records -------------------------
+
+
+def test_the_disk_floor_is_ten_gb_and_settable():
+    assert item(run_checks(dict(HEALTHY, disk_free_bytes=12 * 1024**3)), "disk.space").status == PASS
+    assert item(run_checks(dict(HEALTHY, disk_free_bytes=8 * 1024**3)), "disk.space").status == FAIL
+    strict = Thresholds(min_disk_free_bytes=20 * 1024**3)
+    assert item(run_checks(dict(HEALTHY, disk_free_bytes=12 * 1024**3), strict),
+                "disk.space").status == FAIL
+
+
+def test_hours_of_recording_follow_the_configured_rate():
+    """Navigation only (SonarView records the sonar) is ~10 MB/h, so the same
+    disk lasts hundreds of hours, and the battery is what binds."""
+    nav_only = Thresholds(recording_bytes_per_h=0.05 * 1024**3)
+    result = item(run_checks(dict(HEALTHY, disk_free_bytes=50 * 1024**3,
+                                  battery_endurance_s=2 * 3600), nav_only), "disk.space")
+    assert "1000 hours" in result.message
+    assert "battery gives 2.0" in result.message
+
+
+# -- the flight controller's firmware ----------------------------------------
+
+
+def test_the_autopilot_must_be_the_one_launched_for():
+    ok = item(run_checks(HEALTHY), "autopilot.match")
+    assert ok.status == PASS
+    assert "ArduPilot" in ok.message
+    wrong = run_checks(dict(HEALTHY, autopilot_detected="px4"))
+    result = item(wrong, "autopilot.match")
+    assert result.status == FAIL
+    assert "PX4" in result.message and "ArduPilot" in result.message
+    assert "autopilot:=px4" in result.remedy
+    assert not wrong.go
+
+
+def test_no_heartbeat_is_unknown_and_blocks_because_it_is_critical():
+    report = run_checks(dict(HEALTHY, autopilot_detected=None))
+    assert item(report, "autopilot.match").status == SKIPPED
+    assert not report.go
+
+
+def test_without_mavros_the_autopilot_is_not_checked():
+    report = run_checks(dict(HEALTHY, autopilot_detected=None), absent={"mavros"})
+    result = item(report, "autopilot.match")
+    assert result.status == SKIPPED
+    assert "MAVROS is not started" in result.message
+    assert report.go

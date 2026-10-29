@@ -26,6 +26,7 @@ setup(
             "sim_node = asket_sim.sim_node:main",
             "fake_sonar_node = asket_sim.fake_sonar_node:main",
             "make_sonar_raw = asket_sim.make_sonar_raw:main",
+            "fake_fcu = asket_sim.fake_fcu:main",
         ],
     },
 )

@@ -21,7 +21,7 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | Signalling | 3 lights (green/yellow/red) as in the firmware. |
 | Energy | 2× LiPo 4S 8000 mAh **in parallel** ≈ 2 × 14.8 V × 8 Ah ≈ **237 Wh**. Probably **2 BQ76920 BMS** boards, one per pack — **TO VERIFY**. |
 | GNSS | Holybro H-RTK Unicore UM982 (dual antenna, heading) **on the Pixhawk**. RTK base Holybro F9P ashore; corrections wanted along base → shore laptop → WiFi → Jetson → MAVROS → Pixhawk (**not implemented**, see Phase B). |
-| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. |
+| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. Reached over **TCP 62312 at 192.168.2.21** — measured 2026-10-28, see §2. What that stream contains is **not verified**: the transducer was in air and no point data has ever been seen. |
 | Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver in the image yet**; prepared behind `enable_oak` (off), see `docs/CAMERA_OAK.md`. |
 | Lidars | **No Livox and no RPLidar on board for now.** ⇒ **The boat has no obstacle detection.** |
 | BlueOS / Raspberry Pi 5 | **Not used.** |
@@ -38,29 +38,70 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | 10.10.20.3 | MikroTik NetMetal 5 ax (boat) |
 | 10.10.20.4 | MikroTik mANTBox ax 15s (shore) |
 | 10.10.20.10 | Jetson AGX Orin |
-| 10.10.20.21 | OAK-D-LR |
+| 10.10.20.21 | OAK-D-LR — **see the IP conflict below** |
 | 10.10.20.22 | reserved (Livox) |
-| 10.10.20.31 | Omniscan 3D 450 SS (**ships as 192.168.2.92 — must be re-addressed**) |
+| 10.10.20.31 | Omniscan 3D 450 SS — **planned only. The sonar is on 192.168.2.21 and has not been moved** |
 | 10.10.20.32 | reserved (second sonar) |
 | 10.10.20.100–199 | DHCP, shore laptops |
 
 Mission GUI: `http://10.10.20.10:8090`. Foxglove: `ws://10.10.20.10:8765`
 (firewalled to loopback by `scripts/harden-network.sh`). SonarView/SonarLink:
-port 7077 on the host running SonarView.
+port 7077 on the host running SonarView — nmap confirms it is **closed on the
+sonar itself**.
+
+### The sonar's real address — VERIFIED 2026-10-28
+
+The plan above is a plan. What was measured on the hardware:
+
+| Fact | Evidence |
+|---|---|
+| Sonar at **192.168.2.21** | ping, and SonarView |
+| Host at **192.168.2.1/24** on the wired interface | worked, `ip addr add` |
+| **TCP 62312 open**; 51200 and 7077 **closed**; 80 and 22 open | `nmap -p-` |
+| Data port is TCP, not UDP | SonarView: `CONNECTED, tcp://192.168.2.21:62312, Product: Omniscan 3D` |
+| Two boards, **AX** and **BX**, firmware **V1.8.2** and **V1.7.2** | SonarView's device list |
+| Boards at **192.168.2.201/.202** exchange **UDP** with the host on **51221/51222** | observed traffic, control packets of 10–105 bytes |
+
+**NOT verified:** what the bytes on TCP 62312 are. The transducer was in air,
+so the sonar produced no soundings and no point data has ever been seen.
+Neither is it known whether the sonar streams unasked, nor whether SonarView
+and `omniscan_bridge` can hold that port at once. See `docs/SONAR_BRINGUP.md`,
+which carries the test for each.
+
+### IP conflict — a network decision nobody has taken
+
+> **Conflit IP :** OAK-D-LR prévue en .21 dans le plan 10.10.20.x ; le sonar
+> est en 192.168.2.21 par défaut et SonarView le fait dialoguer sur
+> 192.168.2.x avec l'hôte en .1. Décision réseau à prendre.
+
+In English, and with what it costs: the plan gives `.21` to the OAK-D-LR; the
+sonar is on `.21` of a *different* `/24`; and SonarView does not only talk to
+the sonar — it has the sonar's two boards talking to the host on
+`192.168.2.0/24`. So three things are open at once: which subnet the sonar ends
+up on, who gets `.21` if both move onto `10.10.20.0/24`, and whether the
+boards' own traffic survives a re-address at all. Nothing in this repository
+re-addresses anything; the code follows the measurement
+(`host: "192.168.2.21"`, overridable with `ASKET_SONAR_HOST`) and the
+`10.10.20.x` plan is left exactly as written.
 
 Where the plan is written into the configuration (hw-alignment step 7):
 
 | Value | File |
 |---|---|
-| Sonar `10.10.20.31` | `src/omniscan_bridge/config/omniscan.yaml` (`host`), `src/omniscan_bridge/omniscan_bridge/omniscan_bridge_node.py` (parameter default), `src/gui_backend/launch/gui.launch.py` (`sonar_host`) |
+| Sonar `192.168.2.21` (**measured**, not the plan's `10.10.20.31`) | `src/omniscan_bridge/config/omniscan.yaml` (`host`), `src/omniscan_bridge/omniscan_bridge/omniscan_bridge_node.py` (parameter default), `src/gui_backend/launch/gui.launch.py` and `sonar_test.launch.py` (`sonar_host`), `src/bringup/launch/njord.launch.py`, `scripts/sonar_probe.py`. All read `ASKET_SONAR_HOST` as an override |
 | Whole plan, for reference | `src/gui_backend/config/topics.yaml` (`network:`; nothing connects to it) |
 | Shore sector mANTBox ax 15s (confirmed), boat NetMetal 5 ax | `src/gui_backend/config/topics.yaml` (`shore_station.antenna`, `vessel_radio`) — the link budget |
 
-Re-addressing the sonar (once, on the bench): connect a laptop **by cable** to
-the CSS610, run SonarView, let its discovery find the Omniscan at
-192.168.2.92 and set it to 10.10.20.31 / 255.255.255.0. Discovery is a
-broadcast, and WiFi bridges usually drop it — do not try it over the link.
+Re-addressing the sonar, **if the decision above goes that way**: connect a
+laptop **by cable** to the CSS610, run SonarView, let its discovery find the
+Omniscan at 192.168.2.21 and set it to 10.10.20.31 / 255.255.255.0. Discovery
+is a broadcast, and WiFi bridges usually drop it — do not try it over the link.
 Then check from the Jetson: `ping 10.10.20.31`.
+
+Before doing that, note what is not known: SonarView has the sonar's two boards
+talking to the host on `192.168.2.201/.202`, and nobody has checked whether
+those addresses follow a re-address of the sonar or are configured separately.
+Re-addressing on the day of a survey is therefore not a safe step.
 
 Note: `scripts/harden-network.sh` comments describe a *routed* shore subnet
 (10.10.10.0/24 via 10.10.99.0/30) from an earlier design note. The plan above
@@ -78,7 +119,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 
 | Component | Link | Port / IP in code | Node → topics | Launched by default? | GUI | Status |
 |---|---|---|---|---|---|---|
-| Pixhawk 4 | USB (via hub) — today MAVLink via `fcu_url` `tcp://localhost:5777`, a BlueOS router (`src/bringup/launch/njord.launch.py:67`) | `/dev/pixhawk` (udev) — not yet used by the launch (Phase B) | `mavros` → `imu_gps_driver` → `/imu_driver/imu_raw`, `/gps_driver/gps_raw`; EKF → `/odometry/filtered` | yes (`enable_mavros`) | Vessel, Heading, map | ⚠️ needs a serial `fcu_url` without BlueOS (Phase B) |
+| Pixhawk 4 | USB (via hub), MAVROS straight to it since Phase B (d): `fcu_url` `/dev/pixhawk:115200`, `autopilot:=ardupilot\|px4`; `use_blueos:=true` goes back through BlueOS (`tcp://localhost:5777`) | `/dev/pixhawk` (udev) | `mavros` → `imu_gps_driver` → `/imu_driver/imu_raw`, `/gps_driver/gps_raw`; EKF → `/odometry/filtered` | yes (`enable_mavros`) | Vessel, Heading, map | ⚠️ firmware (PX4 / ArduPilot) still to confirm: §4c |
 | UM982 GNSS (dual antenna) | to the Pixhawk | — | via MAVROS as above | — | Heading (source shown as EKF) | ⚠️ ArduPilot/PX4 GPS-yaw config to verify |
 | F9P RTK base | shore laptop → WiFi → Jetson | — | none (MAVROS `gps_rtk` plugin not fed) | — | — | ❌ (Phase B) |
 | Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/pico` (udev, `deploy/udev/`) | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **yes** (`use_pico_bridge:=true` is the default since Phase B a) | Mode, Vessel, pre-flight | ⚠️ bench test first |
@@ -89,7 +130,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | 3 lights + buzzer | Pico GPIO10/11/12, GPIO13 | firmware | firmware | always | — | ✅ (firmware) |
 | BMS pack 1, pack 2 (BQ76920 via MCP2221) | USB-UART 115200 (via hub) | `bms_port` `/dev/bms_pack1`, `bms2_port` `/dev/bms_pack2` (udev) | `bms_reader` → `/battery/pack1` (+ `/battery/pack2` with `enable_bms2:=true`); `battery_aggregator` → `/battery/state` | no (`enable_bms:=false`); only one BMS wired, so `enable_bms2` defaults to false | Power, status strip | ⚠️ state of charge estimated from cell voltage; with one BMS the second pack is not measured |
 | 2× LiPo 4S 8000 mAh (parallel) | — | GUI capacity 237 Wh (`src/gui_backend/config/topics.yaml`) | — | — | Power | ✅ config |
-| Omniscan 3D 450 SS Modular | Ethernet | 10.10.20.31 (`src/omniscan_bridge/config/omniscan.yaml`), UDP 62312 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
+| Omniscan 3D 450 SS Modular | Ethernet | 192.168.2.21 **measured** (`src/omniscan_bridge/config/omniscan.yaml`), **TCP** 62312 — not UDP, and not the plan's 10.10.20.31 | `omniscan_bridge` → `/sonar/status` (optional health only) | no (`enable_sonar:=false`) | Sonar (health only) | ⚠️ SonarView owns the sonar |
 | SonarView | Docker on the Jetson (OPEN) | SonarLink `ws://127.0.0.1:7077` (`src/comms/cloud_bridge/config/cloud_bridge_params.yaml`) | `sonar_bridge_node` → `/sonar/decimated` (cloud) | no | — | ⚠️ |
 | OAK-D-LR | PoE Ethernet | 10.10.20.21 (`enable_oak`, off) | `/oak/rgb/image_raw/compressed` for the GUI (to verify); SAM2 expects `/camera/front/image_raw` | — | Camera: "Camera not connected" | ❌ driver not installed |
 | USB camera | — (not used) | `/dev/video0` | `camera_driver` | **no** (`enable_usb_camera:=false`) | — | — |
@@ -110,7 +151,10 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
                     │  SonarView screen                     │                      │
                     │                                       │      ┌───────────────┼──────────────┐
                     │                                       │  Omniscan 3D     OAK-D-LR      Jetson AGX Orin
-                    │                                       │  10.10.20.31     10.10.20.21   10.10.20.10
+                    │                                       │  192.168.2.21    10.10.20.21   10.10.20.10
+                    │                                       │  (measured;      (.21 clashes
+                    │                                       │   plan says       with the
+                    │                                       │   10.10.20.31)    sonar's .21)
                     │                                       │  (SonarView)     (PoE, no      │ ROS 2 (Podman)
                     │                                       │                   driver yet)  │
                     │                                       │                     USB hub ───┤
@@ -170,6 +214,140 @@ written as a nested YAML list (Jazzy wants a string — the generated params fil
 was unparseable and every Nav2 node exited), and a `KeepOutFilter` class that
 does not exist (`KeepoutFilter`).
 
+## 4c. Pixhawk 4 without BlueOS (Phase B d) — PX4 or ArduPilot
+
+MAVROS opens the Pixhawk itself on `/dev/pixhawk` (USB). Which firmware it
+runs is not yet confirmed, so both are prepared and `njord.launch.py
+autopilot:=ardupilot|px4` (default `ardupilot`) selects
+`config/mavros_<autopilot>.yaml` and whether MAVROS requests stream rates.
+The pre-flight check **Flight controller firmware** (`autopilot.match`,
+critical) reads the Pixhawk's own HEARTBEAT and fails if it is the other one;
+the Boat panel's Details show the detected firmware.
+
+### What the stack reads from MAVROS, and where each comes from
+
+Checked in the ROS image (launch × firmware, a fake flight controller sending
+heartbeats): every topic below has a MAVROS publisher with both
+`autopilot:=ardupilot` and `autopilot:=px4`. Whether **data** flows depends on
+the Pixhawk sending the MAVLink message — the last two columns.
+
+| Topic | Read by | MAVLink message | ArduPilot | PX4 |
+|---|---|---|---|---|
+| `/mavros/global_position/raw/fix` | imu_gps_driver → `/gps_driver/gps_raw` → GUI position, navsat_transform | GPS_RAW_INT | after `set_stream_rate` (done by the launch) | streamed on USB |
+| `/mavros/global_position/global` | pre-flight GNSS, recorder | GLOBAL_POSITION_INT | after `set_stream_rate` | streamed |
+| `/mavros/global_position/raw/satellites`, `raw/gps_vel` | pre-flight, recorder | GPS_RAW_INT | after `set_stream_rate` | streamed |
+| `/mavros/gpsstatus/gps1/raw` | GUI fix quality (RTK fixed/float), satellites, HDOP; pre-flight | GPS_RAW_INT | after `set_stream_rate` | streamed |
+| `/mavros/imu/data` | imu_gps_driver → EKF (heading, attitude), pre-flight roll, recorder | ATTITUDE (+ quaternion), SCALED/HIGHRES_IMU | after `set_stream_rate` | streamed |
+| `/mavros/time_reference` | pre-flight GPS clock | SYSTEM_TIME | after `set_stream_rate` | streamed |
+| `/mavros/home_position/home` | datum_sync → map frame → geofence mask | HOME_POSITION | MAVROS polls for it until answered | streamed |
+| `/mavros/state` | (diagnostics) | HEARTBEAT | yes | yes |
+| `/uas1/mavlink_source` | autopilot_probe → `autopilot.match` | HEARTBEAT (raw) | yes | yes |
+
+What is missing, for one or the other:
+
+- **ArduPilot:** nothing beyond the stream request the launch already makes
+  (`/mavros/set_stream_rate`, all streams at 10 Hz, 10 s after start). If a
+  topic stays silent, raise `SR0_*` (the USB port's stream rates) instead.
+- **PX4:** `set_stream_rate` is not sent (PX4 ignores REQUEST_DATA_STREAM).
+  The USB link starts PX4's MAVLink in *config* mode, which is expected to
+  stream all of the above (to verify on the real Pixhawk: `ros2 topic hz`
+  on each). If the Pixhawk is ever wired on TELEM instead of USB, set that
+  instance's `MAV_x_MODE` to *Onboard* and its rate, or nothing arrives.
+- **Both:** *RTK fixed / RTK float* in the GUI needs RTCM corrections reaching
+  the UM982 — Phase B (e), not done (note below). Until then the best is
+  *GPS only*. The dual-antenna heading needs the settings in §4d; the
+  stack does not read the GNSS yaw separately: it arrives through the
+  flight controller's attitude (`/mavros/imu/data`) once the FC fuses it.
+- **Both:** the EKF (`robot_localization`) and navsat_transform need no change
+  between the two: MAVROS gives an ENU `/mavros/imu/data` and a NavSatFix in
+  both cases.
+
+**RTK corrections (Phase B e), not done.** What it will need: a correction
+source (a base station or an NTRIP caster on the shore laptop), MAVROS's
+`/mavros/gps_rtk/send_rtcm` (plugin `gps_rtk`, not on the denylist) or
+QGroundControl's RTK injection through the relay (`enable_gcs_relay`), and
+on the FC side ArduPilot `GPS_INJECT_TO` / PX4's injection on the GPS port.
+
+## 4d. Settings to make in the Pixhawk, per autopilot
+
+Done once, from QGroundControl on the shore laptop: either with the Pixhawk's
+USB on the laptop, or through the Jetson with `enable_gcs_relay:=true`
+(QGroundControl connects by itself on UDP 14550). None of this has been
+tried on this Pixhawk yet.
+
+### Which firmware is it?
+
+- **QGroundControl:** *Vehicle Setup → Summary* names the firmware
+  (ArduPilot Rover / PX4) and its version, and the setup pages differ (PX4
+  has *Airframe*; ArduPilot has *Frame* and *Servo Output*). *Analyze Tools →
+  MAVLink Inspector → HEARTBEAT → autopilot*: 3 = ArduPilot, 12 = PX4.
+- **On the Jetson, before launching:** USB IDs (`deploy/udev/README.md`):
+  `26ac:0032` is PX4, `1209:5740`/`1209:5741` is ArduPilot.
+- **Running:** the pre-flight row *Flight controller firmware*, and *Autopilot*
+  in the Boat panel's Details.
+
+Then launch with the matching `autopilot:=`.
+
+### ArduPilot (Rover 4.5 / 4.6)
+
+USB and MAVLink:
+
+| Parameter | Value | |
+|---|---|---|
+| `SERIAL0_PROTOCOL` | 2 (MAVLink 2) | the USB port; default |
+| `SR0_POSITION` | 5 | GLOBAL_POSITION_INT |
+| `SR0_EXT_STAT` | 2 | GPS_RAW_INT, SYS_STATUS |
+| `SR0_EXTRA1` | 10 | ATTITUDE (heading, roll) |
+| `SR0_RAW_SENS` | 10 | IMU |
+| `SR0_EXTRA3` | 1 | SYSTEM_TIME (the pre-flight's GPS clock) |
+
+The launch also asks for every stream at 10 Hz at start-up
+(`set_stream_rate`); these make the rates survive without it.
+
+UM982, one module, two antennas, **no magnetometer** (ArduPilot "GPS for
+yaw"). Parameter names are `GPS1_*` from 4.6; up to 4.5 they are `GPS_TYPE`,
+`GPS_MB1_TYPE`, `GPS_MB1_OFS_X/Y/Z`.
+
+| Parameter | Value | |
+|---|---|---|
+| `SERIAL3_PROTOCOL` | 5 (GPS) | Pixhawk 4 "GPS module" port = SERIAL3 |
+| `SERIAL3_BAUD` | 230 (230 400) | the UM982's configured rate (Holybro ships 230 400) |
+| `GPS1_TYPE` | 25 (UnicoreMovingBaseline) | 24 would be position only, no yaw |
+| `GPS1_MB_TYPE` | 1 | shows the offset parameters |
+| `GPS1_MB_OFS_X/Y/Z` | measured, m | master relative to slave: +X master ahead, +Y master to the right, +Z master below. Antennas **≥ 30 cm** apart |
+| `GPS1_POS_X/Y/Z` | measured, m (optional) | master antenna from the boat's centre |
+| `AHRS_EKF_TYPE`, `EK3_ENABLE`, `EK2_ENABLE` | 3, 1, 0 | EKF3 |
+| `EK3_SRC1_YAW` | 2 (GPS) | 3 = GPS with compass fallback, only if a compass is kept |
+| `COMPASS_USE`, `COMPASS_USE2`, `COMPASS_USE3` | 0 | no magnetometer in the heading |
+| `GPS_AUTO_SWITCH` | not 2 | Blend is not allowed with moving baseline |
+
+Check: point the boat at a distant landmark; QGroundControl's heading
+matches, and follows when the boat is turned.
+
+### PX4 (1.14 and later)
+
+USB: nothing to set — PX4 starts MAVLink on USB by itself (*config* mode,
+high rates). Only if the link is moved to a TELEM port: `MAV_1_CONFIG` = that
+port, `MAV_1_MODE` = Onboard, `MAV_1_RATE` = 0 (maximum).
+
+UM982 on the *GPS 1* port, dual-antenna heading:
+
+| Parameter | Value | |
+|---|---|---|
+| `GPS_1_CONFIG` | GPS 1 | the port the UM982 is on |
+| `SER_GPS1_BAUD` | 230400 | |
+| `GPS_1_PROTOCOL` | 6 (NMEA) | Unicore = NMEA + Unicore sentences |
+| `EKF2_GPS_CTRL` | bit 3 set (+8), e.g. 15 | dual-antenna heading into the yaw estimate |
+| `GPS_YAW_OFFSET` (1.14) | 0 if the primary antenna is ahead; 90 if it is to the right (clockwise) | |
+| `SENS_GNSS0_HDG`, `SENS_GNSS0_OFFX/Y/Z`, `SENS_GNSS0_AUXX/Y/Z` (newer releases) | dual antenna; primary and secondary antenna positions | replace `GPS_YAW_OFFSET` |
+| `SYS_HAS_MAG` | 0 | no magnetometer. **To verify**: on some versions the EKF then refuses to arm or keeps a compass; an older alternative is `EKF2_MAG_TYPE` = None |
+
+PX4 forum reports `EKF2_GPS_CTRL` refusing 8 alone and reverting to 15 on
+some 1.14 builds — 15 (all bits) includes the heading bit and is fine.
+
+Sources: ArduPilot "GPS for Yaw (aka Moving Baseline)"; PX4 "Holybro H-RTK
+Unicore UM982"; Holybro's UM982 setup guide.
+
 ## 5. Risks to keep in front of everybody
 
 * **No obstacle detection at all.** No lidar, no working camera pipeline.
@@ -200,8 +378,10 @@ does not exist (`KeepoutFilter`).
 | V4 | Two BMS boards, one per pack | count MCP2221 devices (`ls -l /dev/serial/by-id/`) |
 | V5 | MCP2221 serial numbers are unique | `udevadm info` (they are often blank or identical — then use the USB port path) |
 | V6 | UM982 yaw reaches the EKF | `ros2 topic echo /odometry/filtered` heading vs. a known bearing |
-| V7 | Sonar re-addressed to 10.10.20.31 | SonarView device discovery |
-| V8 | SonarView and `omniscan_bridge` can both read the sonar | only if `enable_sonar:=true` is ever wanted |
+| V7 | ~~Sonar re-addressed to 10.10.20.31~~ | **Superseded.** The sonar answers on 192.168.2.21 (2026-10-28) and whether it moves at all is an open network decision — see §2 |
+| V8 | SonarView and `omniscan_bridge` can both read TCP 62312 | **Open.** Procedure in `docs/SONAR_BRINGUP.md` §5 "Both at once?". Needs the transducer in water, both connection orders, and one of four named outcomes recorded |
+| V9 | What the Omniscan actually sends on TCP 62312 | **Open, and the blocking one.** The transport is measured; the format is not. `scripts/sonar_probe.py` with the transducer in water — point sets decode, bytes arrive that do not decode (capture them), or nothing arrives |
+| V10 | Whether the sonar streams unasked, or must be commanded | **Open.** Nothing in this repository sends a start command, by design: `send_ping_parameters` is `false` because those parameters start the transducer |
 | O1 | LTE beacon (LilyGO T-SIM7000G) | team decision |
 | O2 | Where SonarView runs (Docker on the Jetson?) | team decision |
 | O3 | Cloudflare relay hostname and deployment | team decision |

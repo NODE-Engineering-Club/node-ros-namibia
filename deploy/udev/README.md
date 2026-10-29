@@ -90,5 +90,5 @@ ros2 launch bringup njord.launch.py \
 ```
 
 `pico_port` defaults to `/dev/pico` since Phase B (a): without the udev rule
-the Pico bridge cannot open its port, and says so in its log. The Pixhawk link
-(`fcu_url`) is not changed yet.
+the Pico bridge cannot open its port, and says so in its log. Since Phase B (d)
+`fcu_url` defaults to `/dev/pixhawk:115200` the same way.

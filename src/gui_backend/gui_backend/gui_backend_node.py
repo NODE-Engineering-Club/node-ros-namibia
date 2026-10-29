@@ -69,6 +69,10 @@ class GuiBackendNode(Node):
         self.declare_parameter("geofence_file", str(geofence.get("file") or ""))
         geofence["file"] = str(self.get_parameter("geofence_file").value)
         topics["geofence"] = geofence
+        # The firmware njord.launch.py was started for; shown beside the one
+        # the flight controller's heartbeat reports (Details).
+        self.declare_parameter("autopilot", str(topics.get("autopilot") or ""))
+        topics["autopilot"] = str(self.get_parameter("autopilot").value)
         profiles = _load_yaml(self.get_parameter("link_profiles_config").value)
 
         self.source = RosSource(self, topics)

@@ -239,6 +239,12 @@ class RosSource:
         self._subscribe_all()
         self._prepare_commands()
 
+    def _autopilot_detected(self) -> str | None:
+        entry = self.latest.get("autopilot_detected")
+        if entry is None or entry.message is None or entry.age_s > 5.0:
+            return None
+        return entry.message.data or None
+
     def _setup_or_config(self, field_id: str, config_value):
         if self.setup.answered(field_id) or config_value is None:
             return float(self.setup.get(field_id))
@@ -447,8 +453,15 @@ class RosSource:
     ) -> Sample | None:
         if stream == "vessel":
             record = self._vessel_record()
-            return Sample(stream, record.utc_ms, payloads.vessel_payload(record, detail)) \
-                if record else None
+            if record is None:
+                return None
+            payload = payloads.vessel_payload(record, detail)
+            if detail == DETAIL_FULL:
+                # Details only: the firmware the heartbeat reports, beside
+                # the one the stack was launched for.
+                payload["autopilot_detected"] = self._autopilot_detected()
+                payload["autopilot_expected"] = self.config.get("autopilot") or None
+            return Sample(stream, record.utc_ms, payload)
 
         if stream == "heading":
             record = self._vessel_record()

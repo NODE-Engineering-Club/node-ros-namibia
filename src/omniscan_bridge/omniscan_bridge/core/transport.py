@@ -1,7 +1,31 @@
 """Network transport for the Omniscan 3D.
 
-The sonar sits on Ethernet and talks Ping Protocol on port 62312. Two rules
-shape this module:
+What is known, from the bench session of 2026-10-28
+===================================================
+
+The sonar answers on **192.168.2.21** and **nmap finds exactly one open TCP
+port: 62312**. 51200 (which Cerulean's SonarView documentation names for the
+450 family) is closed; 7077 (SonarLink) is closed. SonarView itself reports
+``CONNECTED, tcp://192.168.2.21:62312``. So the transport is TCP, on the port
+this package was already built around, and the default here is
+:class:`TcpTransport`.
+
+What is **not** known is what travels over that socket. The transducer was dry,
+so no soundings were produced and no byte of point data has ever been seen.
+This module therefore does exactly two things — connect, and hand bytes to the
+parser — and asserts nothing about their shape. The parser
+(:mod:`omniscan_bridge.core.parser`) rejects and counts what it cannot make
+sense of, and the node refuses to report OK until a point set has actually been
+decoded. If the stream turns out not to be Ping Protocol, the honest outcome is
+a rising ``bytes_discarded`` and a sonar panel that says so, not a crash and
+not a green light.
+
+Nothing here ever tells the sonar to start pinging. That is a deliberate
+constraint, not an oversight: a transducer commanded to ping in air can damage
+itself, and nobody is standing next to the boat when this node starts. See
+``send_ping_parameters`` in the node.
+
+Two rules shape this module:
 
 1. **Never block the ROS executor on a socket read.** A reader thread fills a
    bounded queue; the node drains it from a timer. If the sonar stops talking,
@@ -25,6 +49,13 @@ from dataclasses import dataclass
 
 from .ping_protocol import DEFAULT_PORT
 
+#: The only address the Omniscan 3D has ever been seen on (measured
+#: 2026-10-28). Not 192.168.2.92, which was a transcription from Cerulean's
+#: documentation for another model, and not 10.10.20.31, which is the boat LAN
+#: plan the sonar has not been moved onto. See
+#: omniscan_bridge/config/omniscan.yaml.
+DEFAULT_HOST = "192.168.2.21"
+
 #: Blue Robotics device discovery: broadcast a request, devices answer with a
 #: descriptive text blob.
 DISCOVERY_PORT = 51200
@@ -38,8 +69,20 @@ class TransportStats:
     #: Chunks dropped because the consumer fell behind. Never silent.
     chunks_dropped: int = 0
     connect_attempts: int = 0
+    #: Attempts that never produced a socket. Separate from ``reconnects``:
+    #: "I cannot reach the sonar" and "the sonar keeps dropping me" send
+    #: somebody to two different places.
+    connect_failures: int = 0
+    #: Connections the peer closed, or that died on us, after being up.
+    disconnects: int = 0
     reconnects: int = 0
     last_rx_monotonic: float = 0.0
+    #: When the current connection came up, 0.0 when there is none.
+    connected_since_monotonic: float = 0.0
+    #: The last connect error, in the words the OS used. Shown in diagnostics
+    #: because "Connection refused" and "No route to host" are different
+    #: problems with different fixes.
+    last_connect_error: str = ""
 
 
 class SonarTransport:
@@ -52,11 +95,23 @@ class SonarTransport:
         queue_size: int = 256,
         reconnect_interval_s: float = 2.0,
         rx_timeout_s: float = 3.0,
+        connect_timeout_s: float = 3.0,
+        backoff_max_s: float = 15.0,
     ) -> None:
         self.host = host
         self.port = port
         self.reconnect_interval_s = reconnect_interval_s
         self.rx_timeout_s = rx_timeout_s
+        #: How long a connect attempt may take before it is abandoned. Bounded
+        #: because a TCP connect to an address with nothing on it blocks until
+        #: the kernel gives up, which on Linux is a couple of minutes — long
+        #: enough that an operator concludes the node has hung.
+        self.connect_timeout_s = connect_timeout_s
+        #: Retries back off to this. A sonar that is simply not plugged in must
+        #: not be hammered once every two seconds for an entire mission, and
+        #: the log must stay readable.
+        self.backoff_max_s = backoff_max_s
+        self._backoff_s = reconnect_interval_s
 
         self.stats = TransportStats()
         self._queue: queue.Queue[bytes] = queue.Queue(maxsize=queue_size)
@@ -86,6 +141,24 @@ class SonarTransport:
         if self._thread:
             self._thread.join(timeout=2.0)
             self._thread = None
+
+    @property
+    def link_up(self) -> bool:
+        """A socket is open. Says nothing about data.
+
+        Deliberately separate from :attr:`connected`. On 2026-10-28 the sonar
+        accepted a TCP connection and sent no soundings, because the transducer
+        was in air — and those two facts have to be reportable apart, or the
+        panel either lies about having data or lies about having a link.
+        """
+        return self._sock is not None
+
+    @property
+    def seconds_connected(self) -> float:
+        """How long the current connection has been up; 0.0 when there is none."""
+        if self._sock is None or self.stats.connected_since_monotonic == 0.0:
+            return 0.0
+        return time.monotonic() - self.stats.connected_since_monotonic
 
     @property
     def connected(self) -> bool:
@@ -163,18 +236,25 @@ class SonarTransport:
     # -- reader thread ----------------------------------------------------
 
     def _run(self) -> None:
+        had_a_connection = False
         while not self._stop.is_set():
             try:
                 self.stats.connect_attempts += 1
                 sock = self._connect()
-            except OSError:
-                self._sleep(self.reconnect_interval_s)
+            except OSError as exc:
+                self.stats.connect_failures += 1
+                self.stats.last_connect_error = str(exc.strerror or exc)
+                self._backoff()
                 continue
 
+            self.stats.last_connect_error = ""
+            self._reset_backoff()
             with self._lock:
-                if self._sock is not None:
+                if had_a_connection:
                     self.stats.reconnects += 1
                 self._sock = sock
+                self.stats.connected_since_monotonic = time.monotonic()
+            had_a_connection = True
 
             try:
                 while not self._stop.is_set():
@@ -182,23 +262,38 @@ class SonarTransport:
                     if data:
                         self._publish(data)
                     elif data is not None:
-                        break  # b'' means the peer closed
+                        # b'' means the peer closed. Distinct from None,
+                        # "nothing this cycle", which is the normal case on a
+                        # sonar that has a link but is not pinging.
+                        self.stats.disconnects += 1
+                        break
             except socket.timeout:
                 continue
-            except OSError:
-                pass
+            except OSError as exc:
+                self.stats.disconnects += 1
+                self.stats.last_connect_error = str(exc.strerror or exc)
             finally:
                 with self._lock:
                     if self._sock is sock:
                         self._sock = None
+                    self.stats.connected_since_monotonic = 0.0
                 try:
                     sock.close()
                 except OSError:
                     pass
-                self._sleep(self.reconnect_interval_s)
+                if not self._stop.is_set():
+                    self._sleep(self.reconnect_interval_s)
 
     def _sleep(self, seconds: float) -> None:
         self._stop.wait(seconds)
+
+    def _backoff(self) -> None:
+        """Wait, then double the wait, up to :attr:`backoff_max_s`."""
+        self._sleep(self._backoff_s)
+        self._backoff_s = min(self._backoff_s * 2.0, self.backoff_max_s)
+
+    def _reset_backoff(self) -> None:
+        self._backoff_s = self.reconnect_interval_s
 
 
 class UdpTransport(SonarTransport):
@@ -249,20 +344,25 @@ class UdpTransport(SonarTransport):
             try:
                 self.stats.connect_attempts += 1
                 sock = self._connect()
-            except OSError:
-                self._sleep(self.reconnect_interval_s)
+            except OSError as exc:
+                self.stats.connect_failures += 1
+                self.stats.last_connect_error = str(exc.strerror or exc)
+                self._backoff()
                 continue
 
+            self._reset_backoff()
             with self._lock:
                 if self._sock is not None:
                     self.stats.reconnects += 1
                 self._sock = sock
+                self.stats.connected_since_monotonic = time.monotonic()
 
             try:
                 while not self._stop.is_set():
                     try:
                         data = self._receive(sock)
-                    except OSError:
+                    except OSError as exc:
+                        self.stats.last_connect_error = str(exc.strerror or exc)
                         break
                     if data:
                         self._publish(data)
@@ -270,6 +370,7 @@ class UdpTransport(SonarTransport):
                 with self._lock:
                     if self._sock is sock:
                         self._sock = None
+                    self.stats.connected_since_monotonic = 0.0
                 try:
                     sock.close()
                 except OSError:
@@ -279,10 +380,37 @@ class UdpTransport(SonarTransport):
 
 
 class TcpTransport(SonarTransport):
-    """Ping Protocol over TCP, for devices or bridges configured that way."""
+    """TCP on port 62312 — how the Omniscan 3D was actually found to answer.
+
+    The 2026-10-28 bench session settled the transport and left the payload
+    open, so this class is written to be correct about the first and silent
+    about the second:
+
+    * **It connects and listens. It sends nothing.** No handshake, no
+      subscribe, no start-pinging command. Whether this stream needs to be
+      asked for is an open question (docs/SONAR_BRINGUP.md); inventing a
+      command to find out is how a transducer gets driven in air.
+    * **A stream, not datagrams.** TCP gives no frame boundaries, so a message
+      can arrive in two reads and two messages in one. The parser is
+      byte-oriented and resynchronising for exactly this reason, and a chunk
+      that happens to cut a frame in half is normal here rather than a fault.
+    * **A connection that is up and silent is reported as such**, via
+      :attr:`link_up` against :attr:`connected`. That is the state the sonar
+      was observed in all evening, with the transducer in air.
+    """
 
     def _connect(self) -> socket.socket:
-        sock = socket.create_connection((self.host, self.port), timeout=2.0)
+        sock = socket.create_connection(
+            (self.host, self.port), timeout=self.connect_timeout_s
+        )
+        # Nagle would hold small frames back waiting for company. The device
+        # sends in bursts and we want each one as it comes.
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        # Short read timeout: the loop must come back often enough to notice
+        # _stop, and a silent link is not an error here.
         sock.settimeout(0.5)
         return sock
 
@@ -293,6 +421,9 @@ class TcpTransport(SonarTransport):
             return None
 
     def _send_on(self, sock: socket.socket, data: bytes) -> None:
+        """Only ever reached through :meth:`send`, i.e. because something
+        outside this module explicitly asked. Nothing in the transport calls
+        it by itself."""
         sock.sendall(data)
 
 
