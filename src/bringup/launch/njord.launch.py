@@ -5,7 +5,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import (EnvironmentVariable, LaunchConfiguration,
+                                  PathJoinSubstitution, PythonExpression)
 from launch_ros.actions import Node, SetParameter
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions import ParameterFile
@@ -192,7 +193,7 @@ def generate_launch_description():
                               default_value=EnvironmentVariable(
                                   "ASKET_SONAR_HOST", default_value="192.168.2.21"),
                               description="Omniscan address. Default 192.168.2.21, measured on the "
-                                          "hardware; ASKET_SONAR_HOST overrides it. The boat LAN plan "
+                                          "hardware; ASKET_SONAR_HOST overrides it. The plan "
                                           "says 10.10.20.31, which the sonar is not on."),
     ]
     # fmt: on
