@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DockTargetArray.msg"
   "msg/WallTarget.msg"
   "msg/WallTargetArray.msg"
+  "msg/PlannedRoute.msg"
   DEPENDENCIES geographic_msgs geometry_msgs std_msgs
 )
 

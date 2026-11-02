@@ -22,6 +22,7 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>vision_msgs</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
+  <exec_depend>njord_msgs</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <!--

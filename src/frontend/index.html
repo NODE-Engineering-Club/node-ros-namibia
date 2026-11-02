@@ -20,6 +20,12 @@
          KELP_CANOPY schema enum, not a binary kelp-vs-not-kelp split.
        * asv_id is displayed in the header (the payload carries it; the
          original dashboard never showed it).
+       * Added a `data.planned_route` layer — a dashed red polyline plus
+         numbered waypoint markers — rendered when cloud_telemetry_node
+         forwards a planned route from mission/waypoint_route_loader.py.
+         This has no counterpart in the original design note. It is a
+         manual-piloting reference line, not an autonomous path: nothing
+         on this page or in the ROS graph drives the boat along it.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -100,6 +106,16 @@
   const marker = L.marker([-26.6385, 15.1528], { icon: asvIcon }).addTo(map);
   const hazardGroup = L.layerGroup().addTo(map);
 
+  // Planned-route reference line (mission/waypoint_route_loader.py's
+  // PlannedRoute, forwarded as data.planned_route) — a manual-piloting
+  // aid, not an autonomous path; drawn once per payload containing it and
+  // left alone otherwise (no reason to redraw an unchanged line every
+  // tick). Waypoint markers are added so individual points are visible,
+  // not just the connecting line.
+  let plannedRouteLine = null;
+  const plannedRouteMarkers = L.layerGroup().addTo(map);
+  let lastPlannedRouteName = null;
+
   // 2. Sonar waterfall canvas.
   const sonarCanvas = document.getElementById('sonar-canvas');
   const sCtx = sonarCanvas.getContext('2d');
@@ -170,6 +186,29 @@
       row.textContent = `#${obs.id} ${obs.class}`;
       hazardListEl.appendChild(row);
     });
+
+    // Render the planned-route reference line, when the packet carries one
+    // (cloud_telemetry_node only includes `planned_route` once
+    // waypoint_route_loader has published at least once — see that node's
+    // docstring). Redrawn only on a name change, since the route is static
+    // between file edits and there is no reason to rebuild the polyline
+    // every tick.
+    if (data.planned_route && Array.isArray(data.planned_route.waypoints)) {
+      const route = data.planned_route;
+      if (route.name !== lastPlannedRouteName) {
+        lastPlannedRouteName = route.name;
+        if (plannedRouteLine) { map.removeLayer(plannedRouteLine); }
+        plannedRouteLine = L.polyline(route.waypoints, { color: "red", weight: 3, dashArray: "6 6" })
+          .bindTooltip(`Planned route: ${route.name}`)
+          .addTo(map);
+        plannedRouteMarkers.clearLayers();
+        route.waypoints.forEach((wp, idx) => {
+          L.circleMarker(wp, { radius: 4, color: "red", fillColor: "#fff", fillOpacity: 1, weight: 2 })
+            .bindTooltip(`WP ${idx + 1}`)
+            .addTo(plannedRouteMarkers);
+        });
+      }
+    }
 
     // Render sonar waterfall (scroll down 1 row, draw new row on top).
     if (data.sonar && data.sonar.port_intensity_u8) {

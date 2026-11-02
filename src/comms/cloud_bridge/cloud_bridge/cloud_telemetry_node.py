@@ -82,6 +82,15 @@ against: scratchpad/verify_cloud_math.py, 19/19 passed):
     on `/sonar/decimated`, or omits the field, rather than sending the
     frozen placeholder values the design note's `latest_sonar` dict would
     have sent forever.
+  * `/cloud_bridge/status` (new): the cloud link's connected/disconnected
+    state, published locally over ROS (transient_local), not just logged —
+    previously the only way to see this was reading log output.
+  * `planned_route` (new, not in the original design note's §5.1 schema):
+    forwards whatever `mission/waypoint_route_loader.py` last published on
+    `/mission/planned_route` — a human-authored waypoint file rendered as a
+    reference line on the dashboard for manual piloting. See that node's
+    own docstring; this is strictly a display feature, nothing here or in
+    it ever calls `/mission/start`.
 """
 import asyncio
 import base64
@@ -95,9 +104,10 @@ import rclpy
 from cv_bridge import CvBridge
 from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import GPSRAW
+from njord_msgs.msg import PlannedRoute
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import BatteryState, Image, NavSatFix
 from std_msgs.msg import String
 from vision_msgs.msg import Detection3DArray
@@ -152,6 +162,7 @@ class CloudTelemetryBridgeNode(Node):
         }
         self.latest_jpeg_b64 = None
         self.frame_counter = 0
+        self.latest_planned_route = None  # {"name": ..., "waypoints": [[lat,lon], ...]}, or None
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1,
@@ -170,6 +181,28 @@ class CloudTelemetryBridgeNode(Node):
         # know SonarLink's packet format at all, only the final small
         # payload shape it re-embeds under packet["sonar"].
         self.create_subscription(String, "/sonar/decimated", self._sonar_cb, sensor_qos)
+
+        # Human-planned route for display (mission/waypoint_route_loader.py)
+        # — NOT an autonomous mission, see that node and PlannedRoute.msg's
+        # own docstrings. transient_local to match that node's publisher
+        # QoS: whichever of the two nodes starts second still gets the
+        # route immediately, not just future updates.
+        route_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, depth=1,
+        )
+        self.create_subscription(PlannedRoute, "/mission/planned_route", self._planned_route_cb, route_qos)
+
+        # Local ROS-visible health: until now the only way to see whether
+        # the cloud link is actually up was reading this node's log output.
+        # transient_local so a dashboard/rqt/Foxglove panel that subscribes
+        # after the fact still immediately sees the current state, same
+        # convention as this repo's existing /competition/status,
+        # /mission/status.
+        status_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, depth=1,
+        )
+        self.pub_status = self.create_publisher(String, "/cloud_bridge/status", status_qos)
+        self._publish_status(connected=False, detail="starting")
 
         # ── Async WebSocket loop in a separate thread ───────────────────────
         self.ws_queue = asyncio.Queue(maxsize=1)  # drop-tail: size=1, oldest discarded
@@ -230,6 +263,15 @@ class CloudTelemetryBridgeNode(Node):
             self.latest_sonar = json.loads(msg.data)
         except json.JSONDecodeError:
             self.get_logger().warn("Malformed /sonar/decimated payload, ignoring", throttle_duration_sec=10.0)
+
+    def _planned_route_cb(self, msg: PlannedRoute):
+        self.latest_planned_route = {
+            "name": msg.name,
+            "waypoints": [[round(p.latitude, 7), round(p.longitude, 7)] for p in msg.waypoints],
+        }
+        self.get_logger().info(
+            f"Planned route updated: '{msg.name}', {len(msg.waypoints)} waypoint(s)", throttle_duration_sec=1.0,
+        )
 
     def _lidar_cb(self, msg: Detection3DArray):
         if self.latest_nav["lat"] is None or self._boat_map_xy is None:
@@ -315,6 +357,12 @@ class CloudTelemetryBridgeNode(Node):
         }
         if self.latest_sonar is not None:
             packet["sonar"] = self.latest_sonar
+        if self.latest_planned_route is not None:
+            # NOT in the original design note's schema (§5.1) — a later
+            # addition for the manual-piloting reference-line feature, see
+            # mission/waypoint_route_loader.py. Sent on every packet once
+            # loaded (small payload, no reason to decimate it further).
+            packet["planned_route"] = self.latest_planned_route
         if self.latest_jpeg_b64 is not None:
             packet["image_jpeg_b64"] = self.latest_jpeg_b64
             self.latest_jpeg_b64 = None
@@ -328,6 +376,18 @@ class CloudTelemetryBridgeNode(Node):
 
     # ── WebSocket client (outbound only) ─────────────────────────────────────
 
+    def _publish_status(self, connected: bool, detail: str):
+        # rclpy Publisher.publish() is safe to call from a non-executor
+        # thread (it only serializes and hands off), unlike subscription
+        # callbacks — this is called directly from the asyncio worker
+        # thread below, not bounced back onto the main executor.
+        self.pub_status.publish(String(data=json.dumps({
+            "connected": connected,
+            "detail": detail,
+            "ws_url": self.ws_url,
+            "seq": self.seq,
+        })))
+
     def _run_async_loop(self):
         asyncio.set_event_loop(self.loop)
         self.loop.run_until_complete(self._ws_client_worker())
@@ -337,14 +397,17 @@ class CloudTelemetryBridgeNode(Node):
         while rclpy.ok():
             try:
                 self.get_logger().info(f"Connecting to cloud ingest: {self.ws_url}")
+                self._publish_status(connected=False, detail="connecting")
                 async with websockets.connect(self.ws_url, ping_interval=5, ping_timeout=10) as ws:
                     self.get_logger().info("Cloud WebSocket link established.")
+                    self._publish_status(connected=True, detail="connected")
                     backoff = 2.0
                     while rclpy.ok():
                         payload_str = await self.ws_queue.get()
                         await ws.send(payload_str)
             except Exception as e:  # noqa: BLE001 — must keep retrying regardless of cause
                 self.get_logger().warn(f"Cloud WS link dropped: {e}. Retrying in {backoff:.1f}s...")
+                self._publish_status(connected=False, detail=str(e))
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 30.0)  # capped exponential backoff
 

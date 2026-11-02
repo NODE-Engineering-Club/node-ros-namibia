@@ -29,6 +29,7 @@ setup(
             "north_test_mission = mission.north_test_mission:main",
             "random_test_mission = mission.random_test_mission:main",
             "waypoints_and_detection_mission = mission.waypoints_and_detection_mission:main",
+            "waypoint_route_loader = mission.waypoint_route_loader:main",
         ],
     },
 )

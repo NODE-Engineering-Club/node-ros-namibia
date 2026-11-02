@@ -48,6 +48,16 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_geo_fusion",    default_value="true"),
         DeclareLaunchArgument("enable_control",       default_value="true"),
         DeclareLaunchArgument("enable_mission",       default_value="true"),
+        DeclareLaunchArgument("enable_waypoint_route_loader", default_value="false",
+                              description="Loads a YAML/JSON waypoint file and publishes it as "
+                                          "njord_msgs/PlannedRoute on /mission/planned_route for "
+                                          "display only (a reference line for a human pilot to "
+                                          "manually drive along) — never calls /mission/start, "
+                                          "never touches Nav2. Off by default; needs route_file set."),
+        DeclareLaunchArgument("route_file",           default_value="",
+                              description="Path to the planned-route .yaml/.yml/.json file "
+                                          "(see mission/waypoint_route_loader.py's module "
+                                          "docstring for the expected format)."),
         DeclareLaunchArgument("enable_maneuvering_pathfinding_mission", default_value="false",
                               description="Run the Task 9.1 (Maneuvering + Path Finding) mission "
                                           "sequencer — off by default so bringing up the stack "
@@ -541,6 +551,21 @@ def generate_launch_description():
             name="mission_manager",
             condition=IfCondition(LaunchConfiguration("enable_mission")),
             parameters=[sim_time],
+            respawn=True,
+            respawn_delay=2.0,
+            output="screen",
+        ),
+
+        # Planned-route display loader — a reference line for manual
+        # piloting, not an autonomous mission. See
+        # mission/waypoint_route_loader.py's module docstring; this node
+        # never calls mission_manager's /mission/start.
+        Node(
+            package="mission",
+            executable="waypoint_route_loader",
+            name="waypoint_route_loader",
+            condition=IfCondition(LaunchConfiguration("enable_waypoint_route_loader")),
+            parameters=[{"route_file": LaunchConfiguration("route_file")}, sim_time],
             respawn=True,
             respawn_delay=2.0,
             output="screen",
