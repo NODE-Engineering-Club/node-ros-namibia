@@ -150,7 +150,7 @@ class FakeSonarServer:
                     pp.encode_end_ping_info(
                         pp.EndPingInfo(
                             ping_number=ping.ping_number,
-                            ping_hz_realized=self.world.cfg.sonar.ping_rate_hz,
+                            acoustic_hz=450000.0,
                             range_start_m=0.0,
                             range_end_m=self.world.cfg.sonar.range_setting_m,
                             gain_index=self.world.cfg.sonar.gain,

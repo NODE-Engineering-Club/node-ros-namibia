@@ -28,6 +28,7 @@ import rclpy
 from asket_interfaces.msg import SonarStatus
 from asket_interfaces.srv import SetPingParameters
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Imu, PointCloud2, PointField
@@ -117,8 +118,13 @@ class OmniscanBridge(Node):
         # anything reinterpreted before it reaches disk is something a
         # post-mission tool cannot reinterpret differently later.
         self.declare_parameter("publish_raw", True)
+        # Put every point on /sonar/points, not only seabed detections. For
+        # looking at the sonar on a bench, where there is no seabed: off on the
+        # boat, because anything else in the cloud is not bathymetry.
+        self.declare_parameter("publish_all_points", False)
 
         self.frame_id = self.get_parameter("frame_id").value
+        self._publish_all_points = bool(self.get_parameter("publish_all_points").value)
         self.mounting, self.mounting_provenance = load_mounting(
             self.get_parameter("mounting_path").value,
             **self._overlay_kwargs(),
@@ -216,14 +222,21 @@ class OmniscanBridge(Node):
         self._last_publish_ns = 0
 
         self.transport.start()
-        self.create_timer(1.0 / self.get_parameter("drain_rate_hz").value, self._drain)
-        self.create_timer(1.0, self._publish_status)
+        # Steady clock, because a timer on the default ROS clock follows the
+        # system clock: a step (NTP or GPS time arriving, a host resync) stalled
+        # these timers for up to 27 s, the receive queue overflowed behind them,
+        # and data was lost before it reached /sonar/raw.
+        steady = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(
+            1.0 / self.get_parameter("drain_rate_hz").value, self._drain, clock=steady
+        )
+        self.create_timer(1.0, self._publish_status, clock=steady)
         # Configure the device once it answers, and again after any reconnect
         # -- only if a human has turned that on. See `send_ping_parameters`.
         self._configured_for_reconnects = -1
         self._may_command = bool(self.get_parameter("send_ping_parameters").value)
         if self._may_command:
-            self.create_timer(1.0, self._configure_if_needed)
+            self.create_timer(1.0, self._configure_if_needed, clock=steady)
 
         self.get_logger().info(
             f"connecting to Omniscan 3D at {self.transport.host}:{self.transport.port} "
@@ -333,13 +346,19 @@ class OmniscanBridge(Node):
                 throttle_duration_sec=30.0,
             )
 
-        now_ns = self.get_clock().now().nanoseconds
+        # Monotonic: on the system clock, a backward step would hold clouds back
+        # until the clock caught up again.
+        now_ns = time.monotonic_ns()
         if now_ns - self._last_publish_ns < self._min_publish_interval_ns:
             return  # rate limit: the health topic still sees every ping
         self._last_publish_ns = now_ns
 
         points = point_set_to_vessel_frame(
-            ps, self.mounting, roll_deg=self._roll_deg, pitch_deg=self._pitch_deg
+            ps,
+            self.mounting,
+            roll_deg=self._roll_deg,
+            pitch_deg=self._pitch_deg,
+            include_all_types=self._publish_all_points,
         )
         self.pub_points.publish(self._to_point_cloud(points, ps.utc_msec))
 
@@ -368,13 +387,12 @@ class OmniscanBridge(Node):
     def _on_end_ping(self, info: pp.EndPingInfo) -> None:
         """The device's own account of the ping it just finished.
 
-        ``ping_hz_realized`` is the rate the sonar actually achieved, which is
-        not always the rate it was asked for — a long range forces a slower
-        ping. Taking the device's figure beats measuring arrival times
-        ourselves, because ours also measures the network.
+        The rate comes from its ping counter and uptime, which beats timing
+        arrivals here because ours also measures the network.
         """
         self.health.on_end_ping(
-            realized_ping_rate_hz=info.ping_hz_realized,
+            ping_number=info.ping_number,
+            pwr_up_msec=info.pwr_up_msec,
             gain_index=info.gain_index,
             range_end_m=info.range_end_m,
         )

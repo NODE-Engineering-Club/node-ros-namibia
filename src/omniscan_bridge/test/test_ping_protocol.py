@@ -132,19 +132,19 @@ def test_attitude_is_an_up_vector_and_angles_come_out_of_it():
     assert pitched.roll_deg == pytest.approx(0.0, abs=1e-4)
 
 
-def test_end_ping_info_carries_the_rate_the_device_actually_achieved():
-    """Better than timing arrivals here, which also measures the network."""
+def test_end_ping_info_carries_the_acoustic_frequency():
+    """Not the ping rate: the real unit reports 451127 while pinging at 5 Hz."""
     info = pp.decode_end_ping_info(
         pp.encode_end_ping_info(
             pp.EndPingInfo(
-                ping_number=7, ping_hz_realized=4.2, range_start_m=0.0,
+                ping_number=7, acoustic_hz=451127.0, range_start_m=0.0,
                 range_end_m=27.5, gain_index=3, utc_msec=1_700_000_000_000,
                 n_range_bins=400, samples_per_range_bin=4,
             )
         )[8:-2]
     )
     assert info.ping_number == 7
-    assert info.ping_hz_realized == pytest.approx(4.2, abs=1e-5)
+    assert info.acoustic_hz == pytest.approx(451127.0)
     assert info.range_end_m == pytest.approx(27.5)
     assert info.gain_index == 3
     assert info.utc_msec == 1_700_000_000_000

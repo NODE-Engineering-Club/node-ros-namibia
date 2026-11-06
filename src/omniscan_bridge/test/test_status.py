@@ -23,6 +23,13 @@ def feed_pings(tracker, count, period_s=0.2, offset_ms=0, start=100.0, utc0=1_70
     return start + (count - 1) * period_s
 
 
+def feed_end_pings(tracker, count, period_ms, first_ping=1, start_ms=1000, **kwargs):
+    for i in range(count):
+        tracker.on_end_ping(
+            ping_number=first_ping + i, pwr_up_msec=start_ms + i * period_ms, **kwargs
+        )
+
+
 def test_ping_rate_is_measured_not_assumed():
     t = SonarHealthTracker()
     now = feed_pings(t, 20, period_s=0.2)
@@ -101,9 +108,9 @@ def test_the_devices_own_ping_rate_is_preferred_over_our_measurement():
     now = feed_pings(t, 20, period_s=0.2)          # measures 5 Hz
     assert t.measured_ping_rate_hz(now) == pytest.approx(5.0, rel=0.05)
 
-    t.on_end_ping(realized_ping_rate_hz=4.2, gain_index=3, range_end_m=27.5)
+    feed_end_pings(t, 5, period_ms=250, gain_index=3, range_end_m=27.5)  # says 4 Hz
     health = t.health(True, 0, 0, 0, 0, 0.1, now_monotonic=now)
-    assert health.actual_ping_rate_hz == pytest.approx(4.2)
+    assert health.actual_ping_rate_hz == pytest.approx(4.0)
     assert health.rate_from_device
     # The device also reports the range window it actually used, which in
     # auto-range mode is the only way to know what it is.
@@ -114,6 +121,23 @@ def test_the_devices_own_ping_rate_is_preferred_over_our_measurement():
 def test_a_stale_device_figure_is_not_reported_as_current():
     t = SonarHealthTracker(window_s=2.0)
     now = feed_pings(t, 10, period_s=0.1)
-    t.on_end_ping(realized_ping_rate_hz=5.0)
+    feed_end_pings(t, 5, period_ms=200)
     assert t.ping_rate_hz(now) == pytest.approx(5.0)
     assert t.ping_rate_hz(now + 60.0) == 0.0
+
+
+def test_a_dropped_end_ping_does_not_read_as_a_slower_ping():
+    t = SonarHealthTracker()
+    t.on_end_ping(ping_number=1, pwr_up_msec=1000)
+    t.on_end_ping(ping_number=2, pwr_up_msec=1200)
+    t.on_end_ping(ping_number=6, pwr_up_msec=2000)  # 3, 4 and 5 never arrived
+    assert t.realized_ping_rate_hz == pytest.approx(5.0)
+
+
+def test_a_sonar_restart_does_not_produce_a_nonsense_rate():
+    t = SonarHealthTracker()
+    feed_end_pings(t, 5, period_ms=200, first_ping=900, start_ms=2_800_000)
+    t.on_end_ping(ping_number=1, pwr_up_msec=500)
+    assert t.realized_ping_rate_hz is None
+    t.on_end_ping(ping_number=2, pwr_up_msec=700)
+    assert t.realized_ping_rate_hz == pytest.approx(5.0)
