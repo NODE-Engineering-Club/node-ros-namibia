@@ -41,11 +41,10 @@ For any other address, without editing anything::
 
 Then open ``http://<jetson>:8090`` from the laptop.
 
-**Expect the Sonar panel to stay silent until the transducer is in water.**
-The 2026-10-28 session got as far as a TCP connection on 62312 and no further,
-because a dry transducer produces no soundings. The panel saying "sonar
-silent" with the link up is the honest report of that state, not a fault in
-this launch file.
+**Expect the Sonar panel to stay silent until the sonar is pinging.** An idle
+sonar sends only status, and nothing here starts it (transducer in water, then
+``~/start_pinging``). The panel saying "sonar silent" with the link up is the
+honest report of that state, not a fault in this launch file.
 """
 
 from ament_index_python.packages import get_package_share_directory

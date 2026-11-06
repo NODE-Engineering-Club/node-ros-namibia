@@ -583,10 +583,11 @@ def _sonar(state: dict, t: Thresholds) -> CheckResult:
             return CheckResult(
                 "sonar.link", "Sonar", FAIL,
                 "The sonar is on the network but not sending data",
-                "Is the transducer in water? In air it produces nothing, and "
-                "this is the expected reading. Otherwise check the sonar panel's "
-                "bytes_received: zero means the stream has to be asked for, "
-                "non-zero means it is not the format we parse "
+                "An idle sonar normally still sends status, so first close any "
+                "other client, since its port refused a second one when tested. "
+                "Check the transducer is in water: this was the reading on "
+                "2026-10-28 with it in air. Then check the sonar panel's "
+                "bytes_received: non-zero means it is not the format we parse "
                 "(docs/SONAR_BRINGUP.md).",
             )
         return CheckResult(

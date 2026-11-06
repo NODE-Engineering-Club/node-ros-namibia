@@ -18,7 +18,7 @@ What the repo already provides for each mission in `KELP_MISSIONS.md`, and what 
 | **M0** | Harbour acceptance | Stand-test procedure (`TODOS.md`); Pico 2 e-stop/arm/mode firmware (`firmware/pico/`); BMS reader (`sensors/bms_reader`) | Go/no-go checklist wired to bench tests T01–T18; leak sensors; watchdog kill-upstream test (T15) |
 | **M1** | Manual transit + link baseline | RC control through the Pico or ArduPilot; Foxglove GUI (boat LAN only) | MikroTik RSSI/rate logging; MQTT telemetry bridge to the shore station |
 | **M2** | Autonomous transit + collision avoidance | `mission_manager` → Nav2 waypoint chains; `boat_bt` GlobalSafety obstacle bypass; LiDAR + camera fusion (`/obstacles/fused`, `/obstacles/global`); Nav2 `collision_monitor` (stop polygon **disabled**) | Farm-GeoJSON keep-out costmap filter + geofence check; enable/tune the stop polygon after measuring `d_stop`; Livox Mid-360S and OAK-D-LR adapters onto the existing topics; speed governor; entanglement detection |
-| **M3** | Sonar survey, lane following | Lanes can already be flown as a waypoint list through `/mission/start` | Lawnmower lane generator; SonarView (Docker or BlueOS extension); `nmea_udp_bridge`; `sonar_bridge`; auto-pause on RTK/heading/ping loss |
+| **M3** | Sonar survey, lane following | Lanes can already be flown as a waypoint list through `/mission/start`; `omniscan_bridge` decodes real sonar data onto `/sonar/points` (bucket test only, [`docs/SONAR_BRINGUP.md`](docs/SONAR_BRINGUP.md)) | Lawnmower lane generator; SonarView (Docker or BlueOS extension); `nmea_udp_bridge`; sonar QC metrics; auto-pause on RTK/heading/ping loss |
 | **M4** | Structure verification | — | Offset-pass planner around known targets; detection scoring table |
 | **M5** | Repeat-pass monitoring (post-MVP) | `mission_manager` checkpoint resume (note: identical waypoint lists resume the earlier pass) | Change detection between passes |
 | **M6** | Drift and deviation monitor | — | Cross-track / heading / speed-made-good monitor node and alerts |
@@ -130,6 +130,8 @@ source install/setup.bash
 | `enable_mission` | `true` | GPS waypoint sequencer (`mission_manager`) |
 | `enable_boat_bt` | `true` | Safety Behavior Tree (`boat_bt_node`) |
 | `enable_foxglove` | `true` | Foxglove WebSocket bridge (port 8765, **no authentication — boat LAN only**) |
+| `enable_sonar` | `false` | `omniscan_bridge`, for sonar health. Requires `enable_gui:=true`. Never starts the sonar pinging. To view its data on a bench, use `ros2 launch omniscan_bridge sonar_rviz.launch.py` ([`docs/SONAR_BRINGUP.md`](docs/SONAR_BRINGUP.md)) |
+| `sonar_host` | `192.168.2.21` | Omniscan address; `ASKET_SONAR_HOST` overrides the default |
 
 ## Workspace Layout
 
@@ -148,6 +150,7 @@ src/
 ├── calibration/    # scan_to_cloud, collect_data, calibrate, extrinsic_tf_publisher
 ├── sim/            # 2D Python simulator + sim_nav2.launch.py
 ├── foxglove/       # Foxglove layout + GUI helper scripts
+├── omniscan_bridge/ # Omniscan 3D -> /sonar/points and health; sonar_rviz.launch.py to view it
 ├── fusion/
 │   └── asket_sensor_fusion/  # Kelp Blue, JETSON-ONLY: dynamic sea-surface LiDAR filter,
 │                              # SAM2-mask 3D obstacle extraction, RTK-georeferenced EKF
@@ -251,7 +254,7 @@ flowchart TD
     PB --> PICO[Pico 2 → ESCs]
 ```
 
-The Kelp additions in `KELP_MISSIONS.md` §3–§5 (decision log, health monitor, MQTT bridge, recorder, SonarView + `sonar_bridge` + `nmea_udp_bridge`) plug into this graph; none of them exist yet.
+The Kelp additions in `KELP_MISSIONS.md` §3–§5 (decision log, health monitor, MQTT bridge, recorder, SonarView + `sonar_bridge` + `nmea_udp_bridge`) plug into this graph. The recorder (`src/mission_recorder`) and two sonar bridges (`src/omniscan_bridge`, and `sonar_bridge_node` in `src/comms/cloud_bridge`) now exist. `nmea_udp_bridge` and the MQTT bridge do not.
 
 ## TF Frame Tree
 

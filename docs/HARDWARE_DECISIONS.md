@@ -21,7 +21,7 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 | Signalling | 3 lights (green/yellow/red) as in the firmware. |
 | Energy | 2× LiPo 4S 8000 mAh **in parallel** ≈ 2 × 14.8 V × 8 Ah ≈ **237 Wh**. Probably **2 BQ76920 BMS** boards, one per pack — **TO VERIFY**. |
 | GNSS | Holybro H-RTK Unicore UM982 (dual antenna, heading) **on the Pixhawk**. RTK base Holybro F9P ashore; corrections wanted along base → shore laptop → WiFi → Jetson → MAVROS → Pixhawk (**not implemented**, see Phase B). |
-| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. Reached over **TCP 62312 at 192.168.2.21** — measured 2026-10-28, see §2. What that stream contains is **not verified**: the transducer was in air and no point data has ever been seen. |
+| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. Reached over **TCP 62312 at 192.168.2.21** — measured 2026-10-28, see §2. That stream is Ping Protocol and its point data decodes, measured 2026-11-06 in a bucket; see `docs/SONAR_BRINGUP.md`. |
 | Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver in the image yet**; prepared behind `enable_oak` (off), see `docs/CAMERA_OAK.md`. |
 | Lidars | **No Livox and no RPLidar on board for now.** ⇒ **The boat has no obstacle detection.** |
 | BlueOS / Raspberry Pi 5 | **Not used.** |
@@ -62,11 +62,12 @@ The plan above is a plan. What was measured on the hardware:
 | Two boards, **AX** and **BX**, firmware **V1.8.2** and **V1.7.2** | SonarView's device list |
 | Boards at **192.168.2.201/.202** exchange **UDP** with the host on **51221/51222** | observed traffic, control packets of 10–105 bytes |
 
-**NOT verified:** what the bytes on TCP 62312 are. The transducer was in air,
-so the sonar produced no soundings and no point data has ever been seen.
-Neither is it known whether the sonar streams unasked, nor whether SonarView
-and `omniscan_bridge` can hold that port at once. See `docs/SONAR_BRINGUP.md`,
-which carries the test for each.
+**Measured since, on 2026-11-06, in a bucket:** the stream is Ping Protocol and
+`OS3D_POINT_SET` decodes. An idle sonar sends only status, and point data needs
+the sonar told to ping. It keeps pinging with no client connected. The port
+refused a second plain TCP client, so expect SonarView and `omniscan_bridge` to
+exclude each other. **Not verified:** that refusal with SonarView itself, and
+point positions against a real target. See `docs/SONAR_BRINGUP.md`.
 
 ### IP conflict — a network decision nobody has taken
 
@@ -379,8 +380,8 @@ Unicore UM982"; Holybro's UM982 setup guide.
 | V5 | MCP2221 serial numbers are unique | `udevadm info` (they are often blank or identical — then use the USB port path) |
 | V6 | UM982 yaw reaches the EKF | `ros2 topic echo /odometry/filtered` heading vs. a known bearing |
 | V7 | ~~Sonar re-addressed to 10.10.20.31~~ | **Superseded.** The sonar answers on 192.168.2.21 (2026-10-28) and whether it moves at all is an open network decision — see §2 |
-| V8 | SonarView and `omniscan_bridge` can both read TCP 62312 | **Open.** Procedure in `docs/SONAR_BRINGUP.md` §5 "Both at once?". Needs the transducer in water, both connection orders, and one of four named outcomes recorded |
-| V9 | What the Omniscan actually sends on TCP 62312 | **Open, and the blocking one.** The transport is measured; the format is not. `scripts/sonar_probe.py` with the transducer in water — point sets decode, bytes arrive that do not decode (capture them), or nothing arrives |
+| V8 | SonarView and `omniscan_bridge` can both read TCP 62312 | **Probably not.** On 2026-11-06 a second plain TCP client was refused. Still to confirm with SonarView itself: `docs/SONAR_BRINGUP.md` §5 "Both at once?" |
+| V9 | What the Omniscan actually sends on TCP 62312 | **Closed 2026-11-06.** Ping Protocol: status when idle, and point sets (3104) when pinging, which decode with no length mismatches. Accuracy against a real target is still unmeasured |
 | V10 | Whether the sonar streams unasked, or must be commanded | **Open.** Nothing in this repository sends a start command, by design: `send_ping_parameters` is `false` because those parameters start the transducer |
 | O1 | LTE beacon (LilyGO T-SIM7000G) | team decision |
 | O2 | Where SonarView runs (Docker on the Jetson?) | team decision |

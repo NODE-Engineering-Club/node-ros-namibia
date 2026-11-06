@@ -75,10 +75,10 @@ class OmniscanBridge(Node):
         # TCP, because that is what the sonar was found to speak. nmap on
         # 2026-10-28 showed exactly one open TCP port, 62312, and SonarView
         # reported "tcp://192.168.2.21:62312". 51200 and 7077 were closed.
-        # What travels over that socket is NOT known -- the transducer was in
-        # air, so no point data has ever been seen -- and nothing in this node
-        # assumes it is Ping Protocol: the parser validates and counts, and the
-        # diagnostics below stay out of OK until a point set decodes.
+        # What travels over that socket is Ping Protocol (measured 2026-11-06),
+        # but this node still does not assume it: the parser validates and
+        # counts, and the diagnostics below stay out of OK until a point set
+        # decodes.
         self.declare_parameter("transport", "tcp")
         # Whether this node may command the sonar's ping parameters.
         #
@@ -210,10 +210,7 @@ class OmniscanBridge(Node):
         )
 
         self._pinging = True
-        # When a point set was last decoded -- the only evidence that the bytes
-        # on this socket are what we think they are. Until it moves off zero,
-        # the wire format on TCP 62312 is an assumption and the diagnostics say
-        # so out loud.
+        # When a point set was last decoded. Zero until one has been on this run.
         self._last_point_utc_ms = 0
         self._last_point_monotonic = 0.0
         self._min_publish_interval_ns = int(
@@ -341,8 +338,8 @@ class OmniscanBridge(Node):
             # Throttled: if the layout assumption is wrong this fires every ping.
             self.get_logger().warn(
                 "point set declared a different point count than it carried — "
-                "verify the OS3D_POINT_SET layout against Cerulean sample data "
-                "(docs/open_questions.md Q8)",
+                "this did not happen on the real unit on 2026-11-06, so the "
+                "firmware or the device may have changed (docs/SONAR_BRINGUP.md)",
                 throttle_duration_sec=30.0,
             )
 
@@ -478,10 +475,10 @@ class OmniscanBridge(Node):
         # Ethernet cable" costs a minute.
         stats = self.parser.stats
         tstats = self.transport.stats
-        # "No link" and "a link with nothing on it" are different faults with
-        # different fixes, and on 2026-10-28 the sonar sat in the second state
-        # all evening — TCP 62312 accepted, not one sounding, because the
-        # transducer was in air. A panel that cannot say which of the two it is
+        # "No link", "a link with nothing on it" and "an idle sonar" are
+        # different states with different fixes. On 2026-10-28 the sonar sat in
+        # the second all evening, with the transducer in air; on 2026-11-06 an
+        # idle sonar sat in the third. A panel that cannot say which it is
         # looking at sends somebody to check a cable that is fine.
         if not self.transport.link_up:
             st.level = DiagnosticStatus.ERROR
@@ -495,21 +492,25 @@ class OmniscanBridge(Node):
             st.message = (
                 f"connected to {self.transport.host}:{self.transport.port}, but the "
                 f"sonar has sent nothing in {self.transport.seconds_connected:.0f} s. "
-                "Expected with the transducer in air. If it is in water, the stream "
-                "may have to be asked for — see docs/SONAR_BRINGUP.md"
+                "An idle sonar normally sends status about once a second — "
+                "see docs/SONAR_BRINGUP.md"
             )
-        elif stats.point_sets == 0:
-            # Bytes are arriving and not one of them has become a point set.
-            # Either the sonar is sending something other than soundings, or
-            # this stream is not Ping Protocol at all — which has never been
-            # verified. Saying OK here is the exact lie this panel exists to
-            # avoid.
+        elif stats.point_sets == 0 and stats.frames_parsed > 0:
+            # What a healthy idle sonar looks like. Not OK, because there is no
+            # sonar data, but not a fault either, and it must not read as one.
             st.level = DiagnosticStatus.WARN
             st.message = (
-                f"{tstats.bytes_received} bytes received, no OS3D_POINT_SET decoded "
-                f"({stats.frames_parsed} frames parsed, {stats.bytes_discarded} bytes "
-                "discarded). The format of this stream is NOT verified — "
-                "see docs/SONAR_BRINGUP.md"
+                f"sonar idle: {stats.frames_parsed} status frames, no point data. "
+                "To start it, transducer in water, then ~/start_pinging"
+            )
+        elif stats.point_sets == 0:
+            # Bytes are arriving and none of them parse, which is not what this
+            # unit sent on 2026-11-06.
+            st.level = DiagnosticStatus.WARN
+            st.message = (
+                f"{tstats.bytes_received} bytes received and none parsed as Ping "
+                f"Protocol ({stats.bytes_discarded} discarded). The firmware or the "
+                "device may have changed — see docs/SONAR_BRINGUP.md"
             )
         elif not h.connected:
             st.level = DiagnosticStatus.ERROR
@@ -583,8 +584,7 @@ class OmniscanBridge(Node):
             KeyValue(key="length_mismatches", value=str(stats.length_mismatches)),
             KeyValue(key="decode_errors", value=str(stats.decode_errors)),
             KeyValue(key="point_sets", value=str(stats.point_sets)),
-            # Zero means no sounding has ever been decoded on this link, which
-            # is the state the hardware has been in since it was unboxed.
+            # Zero means no sounding has been decoded on this run.
             KeyValue(key="last_point_utc_ms", value=str(self._last_point_utc_ms)),
             KeyValue(
                 key="seconds_since_point",
@@ -640,10 +640,9 @@ class OmniscanBridge(Node):
 
     def _on_set_parameters(self, request, response):
         """Runtime range, gain and rate, so they can be tuned on site."""
-        # The precondition is a socket, not a data stream. If the sonar turns
-        # out to need asking before it streams, requiring data here would make
-        # the one service that could ask it unusable -- so this gates on
-        # link_up and reports honestly whether anything followed.
+        # The precondition is a socket, not a data stream. Point data only flows
+        # once the sonar is asked, so requiring it here would make the one
+        # service that could ask unusable.
         if not self.transport.link_up:
             response.success = False
             response.message = (
@@ -674,10 +673,6 @@ class OmniscanBridge(Node):
 
     def _on_start(self, request, response):
         self._pinging = True
-        # When a point set was last decoded -- the only evidence that the bytes
-        # on this socket are what we think they are. Until it moves off zero,
-        # the wire format on TCP 62312 is an assumption and the diagnostics say
-        # so out loud.
         self._last_point_utc_ms = 0
         self._last_point_monotonic = 0.0
         ok = self._send_ping_parameters(replace(self.params, ping_enable=True))

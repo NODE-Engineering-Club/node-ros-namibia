@@ -377,6 +377,7 @@ takes one connection at a time. What the probe's output would mean:
 | What the probe prints | What it means | What to do |
 |---|---|---|
 | `message 3104 (OS3D_POINT_SET) x18` | The sonar is pinging and the layout decodes, as on 2026-11-06 | Carry on to §3a |
+| `Sonar alive and idle` | Status only, which is normal until it is told to ping | §3a |
 | `N bytes arrived and none of them parsed as Ping Protocol` | Not what this unit sent on 2026-11-06. The firmware or the device may have changed | Capture it: `sudo tcpdump -i eth0 -n -w sonar.pcap host 192.168.2.21 and port 62312`, and bring the file back. Do not guess at the layout |
 | `connected, and the sonar sent nothing` | Not what this unit did idle on 2026-11-06, though it matches 2026-10-28 | Note it and try §3a. Nobody has explained the difference between the two sessions |
 
@@ -620,13 +621,16 @@ once
 
 ## 5. Test 3 — the mission GUI
 
-### Deploy `hw-alignment` on the Jetson
+### Deploy `sonar-tcp-fix` on the Jetson
+
+Use this branch: without its fixes, the bridge crashes about a second after
+starting on an idle sonar.
 
 ```bash
 # on the Jetson
 cd ~/node-ros-namibia          # wherever the repo lives
 git fetch origin
-git checkout hw-alignment
+git checkout sonar-tcp-fix
 git pull
 
 # inside the ROS container
@@ -800,19 +804,25 @@ file ~/sonar-tonight/*.svlz        # should say "gzip compressed data"
 In this order:
 
 ```bash
-# 1. GUI: Ctrl-C in the ros2 launch terminal
+# 1. Stop the pinging, while the bridge is still running, and watch the points stop
+ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger
+#    Closing a client does NOT stop the sonar (measured 2026-11-06). If you
+#    cannot confirm it has stopped, cut its power before step 4.
 
-# 2. SonarView: disconnect the session in the app first, then
+# 2. GUI: Ctrl-C in the ros2 launch terminal
+
+# 3. SonarView: disconnect the session in the app first, then
 docker compose down          # or: sudo podman stop sonarview
+#    Whether this stops the pinging has not been tested. Do not assume it does.
 
-# 3. Sonar out of the water, dry it, power off LAST
-#    (power off while it is pinging is fine; it is not pinging by then)
+# 4. Sonar out of the water, dry it, power off LAST
+#    (power off while it is pinging is fine)
 
-# 4. Undo the Jetson's temporary address
+# 5. Undo the Jetson's temporary address
 sudo ip addr del 192.168.2.1/24 dev eth0
 ip addr show eth0            # confirm it is gone
 
-# 5. Back to the branch the Jetson was on, if you changed it
+# 6. Back to the branch the Jetson was on, if you changed it
 git checkout <previous-branch>
 ```
 

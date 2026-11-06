@@ -49,8 +49,8 @@ class ParserStats:
     #: stream is being damaged somewhere; it is never normal.
     bytes_discarded: int = 0
     #: Frames whose declared point count disagreed with the payload length.
-    #: A persistent non-zero value means our layout assumption is wrong — see
-    #: docs/open_questions.md Q8 — not that the sonar is faulty.
+    #: A persistent non-zero value means our layout assumption is wrong, not
+    #: that the sonar is faulty. It was zero on the real unit on 2026-11-06.
     length_mismatches: int = 0
     pings_seen: int = 0
     pings_missing: int = 0

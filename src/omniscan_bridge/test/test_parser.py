@@ -151,7 +151,7 @@ def test_reset_clears_stream_state_but_keeps_the_tally():
 
 
 def test_length_mismatches_are_counted_separately_from_corruption():
-    """A persistent mismatch means our layout assumption is wrong (Q8), not that
+    """A persistent mismatch means our layout assumption is wrong, not that
     the sonar is faulty. Conflating the two would send someone hunting a cable."""
     import struct
 

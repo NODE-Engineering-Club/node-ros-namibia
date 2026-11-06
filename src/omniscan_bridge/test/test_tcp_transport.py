@@ -1,9 +1,8 @@
 """The TCP transport, against a socket that behaves badly on purpose.
 
 On 2026-10-28 the sonar was found to answer on **TCP 62312** and nothing else.
-That settled the transport and left the payload open: the transducer was in
-air, so not one byte of point data has ever been seen. These tests are written
-to that division.
+That settled the transport; the payload was measured on 2026-11-06. These tests
+cover the transport alone.
 
 What they prove:
 
@@ -13,13 +12,12 @@ What they prove:
 * garbage, truncation and a connection cut mid-frame are counted and
   resynchronised from, never crashed on;
 * a connection that is up and silent is reported as up and silent, which is
-  precisely the state the real hardware was in all evening;
+  precisely the state the real hardware was in on 2026-10-28;
 * a refused connection backs off instead of hammering;
 * **the transport sends nothing unless something outside it explicitly asks.**
   A transducer told to ping in air can damage itself.
 
-What they cannot prove is that a real Omniscan 3D puts Ping Protocol frames on
-this socket. Nothing here touches hardware, and nothing here may: see
+What they do not cover is a real Omniscan 3D. Nothing here touches hardware, and nothing here may: see
 docs/SONAR_BRINGUP.md for the one test that can settle it, which needs water.
 """
 
@@ -264,7 +262,7 @@ def test_a_connection_cut_mid_frame_is_seen_as_a_disconnect():
 
 
 def test_a_silent_connection_is_up_but_not_connected():
-    """The state the real sonar was in all evening, and the whole reason
+    """The state the real sonar was in on 2026-10-28, and the whole reason
     ``link_up`` exists separately from ``connected``: the transducer was in
     air. Reporting that as connected would be a green light over no data."""
     server = ScriptedServer([]).start()
