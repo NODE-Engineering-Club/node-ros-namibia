@@ -39,6 +39,7 @@ Transducer facing up in a shallow bucket, under about 10 cm of water.
 | **A pinging sonar also sends 3104, 3010, 504 and 2198** | Each at about 5 per second. 2198 is the mono profile, which `omniscan_bridge` ignores and nobody has decoded |
 | **`~/start_pinging` starts it**, at 5 Hz and 29.9 m | The ping counter puts the first ping about 11 s after the bridge started; 149 pings in 29.8 s by the sonar's clock |
 | **It keeps pinging with no client connected** | The ping counter ran at 5.0 Hz throughout about 14 minutes that included the bridge being stopped |
+| **`~/stop_pinging` stops it** | Called by the operator. A listen-only client then received 28 of message 14 and 7 of message 9, and none of 3104, 3010, 504 or 2198. The port and the status stream stayed up |
 | **A listen-only client receives point data** if the sonar is already pinging | 75 s with the bridge sending nothing |
 | **Only one TCP client at a time** | With one connection open, a second is refused; with the first closed, the port opens again. Tested with plain TCP clients, not SonarView (§5) |
 | **Its clock is not set** | `utc_msec` equals `pwr_up_msec`, its uptime, so timestamps read as 1970 and `/diagnostics` stays at error level. Expected until the NTP step in `docs/SETUP.md` |
@@ -71,7 +72,6 @@ combination that was live. It now tries TCP 62312 first.
 |---|---|
 | **Whether the points are in the right place** | Nothing has been measured against a known target or seabed. In the bucket they are reverberation, and the mounting values are unmeasured |
 | **Whether `pt_type` ever reports bottom** | Everything was unclassified in a bucket with no seabed. If it stays that way on real water, the boat's seabed-only filter publishes nothing |
-| **`~/stop_pinging` on the real unit** | Not exercised on hardware yet. Watch that the point data stops, and be ready to cut power |
 | **Whether SonarView behaves like the plain TCP clients on 62312** | The second-client refusal has not been tried with SonarView. Procedure in §5 "Both at once?" |
 | **The 2198 mono profile payload** | Seen on the wire, never decoded. `sonar_bridge_node` on `main` assumes a layout for it that has not been checked |
 | **The clock offset in the field** | Depends on §0 of `docs/SETUP.md`, the sonar's NTP server, which has not been pointed at the Jetson |
@@ -455,8 +455,9 @@ To stop, before closing anything:
 ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger
 ```
 
-`stop_pinging` has not been exercised on the real unit yet. Watch that the points
-stop, and cut the power if they do not.
+Watch that the points stop, and cut the power if they do not. Do this while the
+bridge is still running: the service goes away with it, and the sonar does not
+stop on its own.
 
 **What you should see in a bucket:** red points in a flat fan. They are **not
 real objects**. On 2026-11-06, under 10 cm of water, the median range was 23 m
