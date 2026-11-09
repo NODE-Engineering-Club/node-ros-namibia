@@ -29,41 +29,13 @@ does something else.
 
 ## 1. Architecture on one page
 
-```mermaid
-flowchart TD
-    subgraph shore["Shore — laptop in a browser"]
-        FE["React frontend<br/>MapLibre GL, Vite<br/>src/asket_gui/"]
-    end
+![ASKET mission GUI architecture: the React frontend talks only to gui_backend
+over HTTP and one WebSocket; gui_backend talks to ROS 2; ROS 2 talks to the
+hardware. The RC transmitter and hardware killswitch reach the Pico directly,
+bypassing every layer of software.](gui/architecture.svg)
 
-    subgraph jetson["Boat — Jetson AGX Orin, inside a container"]
-        BE["gui_backend<br/>FastAPI + WebSocket, port 8090<br/>src/gui_backend/"]
-        SRC["Source layer<br/>RosSource or SimSource"]
-        ROS["ROS 2 Jazzy nodes"]
-    end
 
-    subgraph hw["Hardware"]
-        PICO["Pico 2<br/>motors, RC, lights, relay"]
-        PX["Pixhawk 4 + UM982 GNSS"]
-        SONAR["Omniscan 3D sonar"]
-        BMS["BMS, camera"]
-    end
-
-    RC["RC transmitter MT12<br/>+ hardware killswitch"]
-
-    FE <-->|"HTTP + one WebSocket /ws"| BE
-    BE --> SRC
-    SRC <-->|"topics and services"| ROS
-    ROS <-->|"USB serial"| PICO
-    ROS <-->|"USB serial, MAVROS"| PX
-    ROS <-->|"TCP 62312"| SONAR
-    ROS <--> BMS
-    RC ==>|"SBUS — cuts propulsion in firmware,<br/>no software involved"| PICO
-
-    classDef sovereign fill:#7f1d1d,stroke:#fecaca,color:#fff
-    class RC sovereign
-```
-
-Read the thick red arrow first. **The RC transmitter and the hardware
+Read the red path first. **The RC transmitter and the hardware
 killswitch reach the motors without passing through the Jetson, ROS 2, the
 backend or the browser.** Nothing you write can be in that path, and nothing
 you write can take it out of that path. That is the whole safety design, and it
