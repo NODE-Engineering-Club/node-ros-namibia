@@ -4,6 +4,12 @@ import { fileURLToPath } from 'node:url';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 
+// Where `npm run dev` sends /ws, /api and /tiles. The simulator backend
+// listens on 8080 (the default); the boat's gui_backend serves on 8090:
+//   BACKEND_URL=http://<jetson-ip>:8090 npm run dev
+const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:8080').replace(/\/+$/, '');
+const BACKEND_WS = BACKEND_URL.replace(/^http/, 'ws');
+
 // The redesign is a new presentation layer on top of the existing, tested
 // functional layer in src/asket_gui (connection, mock transport, readiness,
 // live map). `@asket` points at that source so nothing is copied or forked:
@@ -31,9 +37,9 @@ export default defineConfig(({ mode }) => ({
       mode === 'mock'
         ? undefined
         : {
-            '/ws': { target: 'ws://localhost:8080', ws: true },
-            '/api': 'http://localhost:8080',
-            '/tiles': 'http://localhost:8080',
+            '/ws': { target: BACKEND_WS, ws: true },
+            '/api': BACKEND_URL,
+            '/tiles': BACKEND_URL,
           },
   },
 }));
