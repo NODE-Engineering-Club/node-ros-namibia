@@ -1,0 +1,149 @@
+/*
+ * Glass skin for components reused from src/asket_gui (ModeButtons,
+ * SonarPanel, LinkStatus, MockControls). They keep their own class names;
+ * these rules apply only inside .asket-embed / .mock-column, so the original
+ * cockpit is unaffected.
+ *
+ * Two treatments are deliberately NOT softened for the glass look, because
+ * they are what the operator is told (developer guide, section 3):
+ *   - a pending command is dashed and pulsing, visibly unlike a confirmed one;
+ *   - the propulsion cut is solid red, the loudest control on the screen.
+ */
+
+/* ------------------------------------------------- the asket Panel, flattened */
+/* The reused panels render <section class="panel"><h2>…; the glass frame
+   already has a header, so theirs is reduced to a sub-heading. */
+.asket-embed .panel {
+  display: block; overflow: visible; min-height: 0;
+  background: none; border: 0; padding: 0;
+}
+.asket-embed .panel > h2 {
+  margin: 0 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-2);
+}
+.asket-embed .panel > h2 > span:first-child,
+.asket-embed .panel > h2 > .disclose { margin-right: auto; }
+.asket-embed .panel-detail { margin-top: 8px; }
+.asket-embed .forced-note {
+  margin: 6px 0; font-size: 11px; font-weight: 700; color: var(--warn);
+}
+.asket-embed button.disclose {
+  height: auto; padding: 0; border: 0; background: none; color: inherit;
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
+  display: inline-flex; gap: 6px; align-items: center;
+}
+.asket-embed button.disclose:disabled { color: var(--warn); }
+
+.asket-embed p { margin: 0 0 6px; font-size: 12px; }
+.asket-embed .hint { font-size: 11px; color: var(--text-2); }
+.asket-embed .warnline { font-size: 12px; color: var(--warn); font-weight: 700; }
+.asket-embed .errline { font-size: 12px; color: var(--alarm); font-weight: 700; }
+.asket-embed .mono { font-family: var(--mono); }
+.asket-embed .dim-value { color: var(--text-3); }
+
+/* ---------------------------------------------------------------- rows */
+.asket-embed .rows {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
+  align-items: baseline; margin: 0; font-size: 12px;
+}
+.asket-embed .rows dt { color: var(--text-2); }
+.asket-embed .rows dd { margin: 0; font-family: var(--mono); }
+
+/* ---------------------------------------------------------------- chips */
+.asket-embed .chip, .mock-column .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid;
+  font: 700 9.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--neutral); background: var(--neutral-tint); border-color: rgba(139, 148, 158, 0.3);
+  white-space: nowrap;
+}
+.asket-embed .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.asket-embed .chip.ok { color: var(--ok); background: var(--ok-tint); border-color: rgba(63, 185, 80, 0.35); }
+.asket-embed .chip.warn { color: var(--warn); background: var(--warn-tint); border-color: rgba(210, 153, 34, 0.35); }
+.asket-embed .chip.alarm { color: #fff; background: rgba(248, 81, 73, 0.75); border-color: var(--alarm); }
+.asket-embed .chip.note { border-style: dashed; }
+
+/* -------------------------------------------------------------- buttons */
+.asket-embed button, .mock-column button {
+  min-height: 30px; padding: 4px 12px; border-radius: var(--radius-sm);
+  font: 600 12px var(--font); cursor: pointer;
+  color: var(--text); background: var(--glass); border: 1px solid var(--border);
+}
+.asket-embed button:hover:not(:disabled), .mock-column button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+.asket-embed button:disabled { opacity: 0.45; cursor: not-allowed; }
+.asket-embed .button-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.asket-embed .button-row button { flex: 1 1 auto; }
+
+/* The propulsion cut: solid red, white text. Not a tint. */
+.asket-embed button.danger {
+  background: #c62a22; border-color: var(--alarm); color: #fff; font-weight: 700;
+}
+.asket-embed button.danger:hover:not(:disabled) { background: #a3201a; }
+
+/* A command in flight: dashed and pulsing, never mistakable for confirmed. */
+.asket-embed button.pending {
+  opacity: 1;
+  background: transparent; color: var(--info); font-weight: 700;
+  border: 2px dashed var(--info);
+  animation: embed-pulse 1.1s ease-in-out infinite;
+}
+@keyframes embed-pulse { 50% { opacity: 0.45; } }
+
+.asket-embed .button-link {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
+  border-radius: var(--radius-sm); font-size: 12px; font-weight: 600;
+  color: var(--info); background: var(--info-tint); border: 1px solid rgba(121, 185, 205, 0.5);
+  text-decoration: none;
+}
+.asket-embed a { color: var(--info); }
+
+/* The deliberate way past a NO-GO: boxed, so it is not read as an ordinary
+   button. */
+.asket-embed .nogo-force {
+  margin-top: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  border: 1px dashed var(--alarm); border-radius: var(--radius-sm);
+  background: var(--alarm-tint); font-size: 12px;
+}
+.asket-embed .nogo-force label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.asket-embed .nogo-force input { accent-color: var(--alarm); }
+
+.asket-embed input[type='range'] { width: 100%; accent-color: var(--primary); }
+.asket-embed details.debug summary { cursor: pointer; font-size: 11px; color: var(--text-2); }
+
+/* ----------------------------------------------------- mock controls column */
+/* Styled as a tool, not as part of the cockpit: a purple edge no operator
+   panel uses. It renders only when connection.isMock. */
+.mock-column {
+  position: relative; z-index: 2; flex: none; display: flex; min-height: 0;
+  border-left: 1px solid rgba(163, 113, 247, 0.5);
+}
+.mock-column .mock-panel { display: flex; align-items: stretch; min-height: 0; height: 100%; }
+.mock-column .mock-handle {
+  writing-mode: vertical-rl; white-space: nowrap; border-radius: 0; padding: 10px 4px;
+  background: rgba(163, 113, 247, 0.85); border-color: #a371f7; color: #fff;
+  letter-spacing: 0.06em; font-size: 11px;
+}
+.mock-column .mock-body {
+  width: 300px; height: 100%; overflow-y: auto; padding: 10px 12px;
+  background: rgba(24, 14, 40, 0.82); backdrop-filter: blur(var(--blur-panel));
+  -webkit-backdrop-filter: blur(var(--blur-panel));
+  font-size: 12px;
+}
+.mock-column .mock-group { margin-bottom: 10px; }
+.mock-column .mock-group h3 {
+  margin: 0 0 4px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: #c297ff; font-weight: 700;
+}
+.mock-column .button-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.mock-column .mock-group button, .mock-column .button-row button {
+  min-height: 24px; padding: 2px 8px; font-size: 11px; flex: 1 1 auto;
+}
+.mock-column button.mock-on { background: #a371f7; border-color: #a371f7; color: #fff; }
+.mock-column .mock-explain {
+  margin-top: 8px; padding: 8px; white-space: pre-line;
+  border: 1px solid #a371f7; border-radius: var(--radius-sm); background: rgba(163, 113, 247, 0.12);
+}
+.mock-column .hint { font-size: 11px; color: var(--text-2); }

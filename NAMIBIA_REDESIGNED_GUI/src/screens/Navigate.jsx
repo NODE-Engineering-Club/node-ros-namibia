@@ -1,7 +1,9 @@
 import { MODE_LABELS } from '@asket/lib/labels.js';
+import { ModeButtons } from '@asket/panels/ModeCommands.jsx';
 import { duration, endurance } from '@asket/lib/format.js';
 
 import { GlassPanel, Pill, ConfirmAction } from '../components/ui.jsx';
+import { AsketEmbed } from '../components/Embed.jsx';
 import {
   IconCamera, IconFlag, IconMap, IconPlay, IconPulse, IconSend, IconStop, IconWave,
 } from '../components/Icons.jsx';
@@ -81,6 +83,39 @@ function StatusPanel({ v }) {
           sub={vessel?.hdop != null ? `HDOP ${n(vessel.hdop, 1)} · ${fix}` : fix ?? ''}
         />
       </div>
+    </GlassPanel>
+  );
+}
+
+/**
+ * Mode commands: the existing ModeButtons from src/asket_gui, unmodified, in
+ * a glass frame. Reused rather than rewritten because every rule in the
+ * developer guide's section 3 about modes lives in it: two-step confirmation,
+ * pending rendered unlike confirmed, the soft stop labelled "Cut propulsion",
+ * and all five NO-GO steps (AUTONOMOUS stays pressable while NO-GO, the
+ * backend refuses it with the reason, and only then the checkbox and the
+ * separate force button appear).
+ *
+ * The pill shows the mode the VESSEL reports (pico stream), never the one
+ * that was requested.
+ */
+function ModePanel({ v, connection }) {
+  const mode = v.pico?.mode;
+  return (
+    <GlassPanel
+      title="Mode" icon={<IconPulse />}
+      aside={(
+        <Pill
+          level={!v.pico ? 'neutral' : mode === 'ESTOP' ? 'alarm' : mode === 'AUTONOMOUS' ? 'info' : 'neutral'}
+          title="What the vessel reports, not what was requested."
+        >
+          {!v.pico ? 'Mode: no data' : `Vessel: ${MODE_LABELS[mode] ?? 'not sent'}`}
+        </Pill>
+      )}
+    >
+      <AsketEmbed className="mode-embed">
+        <ModeButtons state={v.state} connection={connection} />
+      </AsketEmbed>
     </GlassPanel>
   );
 }
@@ -293,6 +328,7 @@ export function Navigate({ v, connection, active, onNavigate }) {
           </div>
           <div className="col right">
             <StatusPanel v={v} />
+            <ModePanel v={v} connection={connection} />
             <TelemetryPanel v={v} />
             <MissionPanel v={v} connection={connection} active={active} onNavigate={onNavigate} />
           </div>
