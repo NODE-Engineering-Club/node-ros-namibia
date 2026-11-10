@@ -7,7 +7,8 @@
   min-height: 860px;
 }
 .navigate .col { display: grid; gap: 12px; min-height: 0; }
-.navigate .col.left { grid-template-rows: 1fr 1fr; }
+.navigate .col.left { grid-template-rows: minmax(260px, 1fr) minmax(220px, 0.8fr) auto; }
+.navigate .row-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: start; }
 .navigate .col.right { grid-template-rows: auto auto auto minmax(0, 1fr); }
 
 .status-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 12px 14px; }
@@ -32,13 +33,17 @@
 .compass.stale { opacity: 0.6; }
 .compass.very-stale { opacity: 0.35; filter: grayscale(1); outline: 2px dashed var(--alarm); outline-offset: -4px; border-radius: 50%; }
 .status-tile.very-stale .pill { border-style: dashed; }
-.sonar-strip {
-  display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 36px;
-  background: rgba(63, 185, 80, 0.08); border-top: 1px solid rgba(63, 185, 80, 0.25); font-size: 11px;
+.sonar-foot {
+  display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; padding: 8px 14px;
+  border-top: 1px solid var(--border-soft); background: var(--glass-raised); font-size: 11px;
 }
-.sonar-strip.down { background: var(--warn-tint); border-top-color: rgba(210, 153, 34, 0.3); }
-.sonar-strip a { color: var(--text); }
-.sonar-strip svg, .alerts-strip svg { width: 16px; height: 16px; flex: none; }
+.sonar-foot a { color: var(--info); font-weight: 600; }
+.sonar-foot .hint { flex-basis: 100%; }
+/* Health view: the glass header already carries the title and the three-word
+   verdict, so the reused panel's own heading is not repeated. The full panel
+   keeps its heading: it holds the fold toggle and the forced-open reason. */
+.sonar-embed.health .panel > h2 { display: none; }
+.alerts-strip svg { width: 16px; height: 16px; flex: none; }
 
 .mission-meta { display: flex; align-items: flex-end; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--divider); }
 .mission-meta .name { font-size: 18px; font-weight: 500; }

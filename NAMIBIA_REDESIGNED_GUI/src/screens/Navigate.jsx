@@ -1,8 +1,9 @@
 import { LINK_LABELS, MODE_LABELS, PROFILE_LABELS } from '@asket/lib/labels.js';
-import { streamAgeMs } from '@asket/lib/connection.js';
+import { streamAgeMs, streamPayload } from '@asket/lib/connection.js';
 import { staleness, thresholdsForRate } from '@asket/lib/staleness.js';
 import { PanelAge, Value } from '@asket/components/Value.jsx';
 import { ModeButtons } from '@asket/panels/ModeCommands.jsx';
+import { SonarPanel } from '@asket/panels/SonarPanel.jsx';
 import { duration, endurance } from '@asket/lib/format.js';
 
 import { GlassPanel, Pill, ConfirmAction } from '../components/ui.jsx';
@@ -180,6 +181,77 @@ function ModePanel({ v, connection }) {
   );
 }
 
+/** Gain as the sonar means it: int8, where -1 is automatic gain. */
+export const gainLabel = (g) => (g == null ? 'not sent' : g < 0 ? 'auto' : String(g));
+
+/**
+ * The three words of the health view, exactly as SonarPanel.jsx's SonarHealth
+ * decides them: alive = connected and fresher than 10 s, silent = anything
+ * else, and no sonar stream at all = omniscan_bridge is not running, which is
+ * said in words instead of left blank. Used only for the glass header pill;
+ * the panel body is the reused SonarPanel itself.
+ */
+function sonarHealth(state) {
+  const sonar = streamPayload(state, 'sonar');
+  const ageMs = streamAgeMs(state, 'sonar');
+  if (!sonar) return { level: 'warn', text: 'health not monitored' };
+  const stale = ageMs !== null && ageMs > 10_000;
+  return sonar.connected && !stale
+    ? { level: 'ok', text: 'sonar alive' }
+    : { level: 'alarm', text: 'sonar silent' };
+}
+
+/**
+ * Sonar (developer guide section 5). Which panel is config, not code:
+ * `hello.source.sonar_panel` is 'health' on the boat (SonarView runs the
+ * sonar) and 'full' in the simulator and the mock. Both are the existing
+ * SonarPanel from src/asket_gui, unmodified.
+ *
+ * No start/stop pinging control here, deliberately (guide section 5 point 2):
+ * pinging is started by a person at the boat with ~/start_pinging.
+ */
+function SonarGlass({ state, connection }) {
+  const health = state.hello?.source?.sonar_panel === 'health';
+  const sonar = streamPayload(state, 'sonar');
+  const url = state.hello?.source?.sonarview_url || '';
+  const pill = health ? sonarHealth(state) : null;
+  // An idle Omniscan is connected and sends status only; it pings only after
+  // ~/start_pinging. "Alive" is true then, and so is "not pinging".
+  const idle = health && pill.text === 'sonar alive' && !(sonar?.actual_ping_rate_hz > 0);
+  return (
+    <GlassPanel
+      title="Sonar" icon={<IconWave />} className="sonar-glass"
+      aside={pill && (
+        <>
+          <PanelAge ageMs={streamAgeMs(state, 'sonar')} rateHz={state.subscriptions.sonar?.rate_hz} />
+          <Pill level={pill.level}>{pill.text}</Pill>
+        </>
+      )}
+      footer={(
+        <div className="sonar-foot">
+          {!health && (url
+            ? <a href={url} target="_blank" rel="noreferrer">Open SonarView ↗</a>
+            : <span className="faint">No SonarView address (Setup page)</span>)}
+          {sonar && <span>Gain <strong>{gainLabel(sonar.gain_setting)}</strong></span>}
+          <span className="hint">
+            SonarView and omniscan_bridge cannot both hold the sonar&rsquo;s port: one TCP client at a time.
+          </span>
+        </div>
+      )}
+    >
+      {idle && (
+        <p className="hint" style={{ margin: '0 0 8px' }}>
+          Connected, not pinging. An idle sonar sends status only; pinging starts only
+          when somebody at the boat calls <span className="mono">~/start_pinging</span>.
+        </p>
+      )}
+      <AsketEmbed className={`sonar-embed ${health ? 'health' : 'full'}`}>
+        <SonarPanel state={state} connection={connection} />
+      </AsketEmbed>
+    </GlassPanel>
+  );
+}
+
 function Compass({ heading, level = 'fresh' }) {
   const ticks = Array.from({ length: 12 }, (_, i) => i * 30);
   return (
@@ -208,29 +280,16 @@ function Compass({ heading, level = 'fresh' }) {
 }
 
 function TelemetryPanel({ v }) {
-  const { vessel, heading, sonar } = v;
+  const { vessel, heading } = v;
   // The heading stream when it carries a heading, else the vessel's; the age
   // shown is the age of whichever one is displayed.
   const fromHeading = Number.isFinite(heading?.heading_deg);
   const hdg = fromHeading ? heading.heading_deg : vessel?.heading_deg;
   const pos = live(v, 'vessel');
   const hdgAge = fromHeading ? live(v, 'heading') : pos;
-  const sonarUrl = v.state.hello?.source?.sonarview_url || import.meta.env.VITE_SONARVIEW_URL;
   return (
     <GlassPanel title="Vessel telemetry" icon={<IconFlag />} bodyClass="flush-body"
       aside={<PanelAge {...live(v, 'vessel')} />}
-      footer={(
-        <div className={`sonar-strip ${sonar?.connected ? '' : 'down'}`}>
-          <IconWave />
-          <strong className="upper">Sonar GUI</strong>
-          <span className="muted">{sonar?.connected ? `${n(sonar.actual_ping_rate_hz, 1)} Hz ping` : 'Sonar not sending data'}</span>
-          <span style={{ marginLeft: 'auto' }}>
-            {sonarUrl
-              ? <a href={sonarUrl} target="_blank" rel="noreferrer">Open Cerulean SonarView ↗</a>
-              : <span className="faint">SonarView URL not configured</span>}
-          </span>
-        </div>
-      )}
     >
       <div className="telemetry" style={{ padding: 0 }}>
         <div>
@@ -424,6 +483,9 @@ export function Navigate({ v, connection, active, onNavigate }) {
             >
               <CameraSlot v={v} />
             </GlassPanel>
+            <div className="row-bottom">
+              <SonarGlass state={v.state} connection={connection} />
+            </div>
           </div>
           <div className="col right">
             <StatusPanel v={v} />
