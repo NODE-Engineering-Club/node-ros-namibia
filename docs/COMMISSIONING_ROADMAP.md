@@ -7,15 +7,92 @@ containers or git before. Where something is not general engineering knowledge,
 it is explained, and the reason is given as well as the command — a command you
 do not understand is a command you cannot debug at the water's edge.
 
-**This is the complete reference.** Nobody will follow every line. Read
-sections 0, 1 and 2, then work the phases that apply to what you are testing.
-
 **What this document cannot do:** nobody has had access to the Jetson while
 writing it. Every command here was checked to exist in the repository — the
 script, launch file, service, topic or path is real — but **the commands have
 not been run on the boat**. Where a value, a name or a behaviour is unknown,
 this document says UNKNOWN instead of guessing. See
 [section 6](#6-open-questions-and-pending-decisions).
+
+---
+
+# Read this first
+
+One page. Then start.
+
+### Who reads what
+
+| You are | Read |
+|---|---|
+| Testing the hardware — the main reader | this whole document, in order |
+| Operating the boat on the day | [`docs/OPERATOR_CHECKLIST.md`](OPERATOR_CHECKLIST.md), one page |
+| Working on the GUI | [`docs/GUI_DEVELOPER_GUIDE.md`](GUI_DEVELOPER_GUIDE.md) |
+| Just need the sonar | [`docs/SONAR_BRINGUP.md`](SONAR_BRINGUP.md) — the only part of the boat verified in water |
+| Checking what is actually fitted | [`docs/HARDWARE_DECISIONS.md`](HARDWARE_DECISIONS.md) — the reference. If it and this document disagree, it wins |
+
+### The three sections to read before you touch anything
+
+1. **[Section 0](#0-project-status)** — what is verified and what is not. It is
+   mostly bad news, stated plainly, and it will save you from testing something
+   that was never going to work.
+2. **[Section 1](#1-safety-rules--non-negotiable)** — the safety rules. Two of
+   them are not obvious and both come from measurement, not principle: the ESC
+   bench-supply current limits, and the fact that **the sonar keeps pinging
+   after you close the software**.
+3. **[Section 2](#2-the-basics)** — SSH, containers, ROS, git. Skip what you
+   know. Do not skip **2.3**: on the production container a `git checkout`
+   changes nothing, and the published image is from October and has none of the
+   sonar work in it. That trap catches everybody once.
+
+### The order of the phases
+
+```
+P1  Power and network      ─┬─► P5  GNSS and Pixhawk  ──┐
+                            ├─► P6  Sonar              ──┤
+                            └─► P7  Camera, lights, BMS ─┤
+                                                         │
+P2  Pico firmware ──► P3  RC and failsafe ──► P4  ESC ───┤
+                                              (BLOCKED)  │
+                                                         ▼
+                                              P9  GUI integration
+                                                         │
+                                       P8  E-stop chain  │
+                                         (BLOCKED)  ─────┤
+                                                         ▼
+                                              P10  Quay, then water
+```
+
+P1 first, always. P2 before P3, and P3 before P4 — each is the previous one's
+safety net. P5, P6 and P7 are independent of that chain and of each other, so
+do them whenever the hardware and the weather allow. P9 wants P1, P2 and P5 at
+least. **P10 needs every one of them, P8 included.**
+
+### What is blocked today
+
+| Phase | Blocked by | Who unblocks it |
+|---|---|---|
+| **P4 — ESC and motors** | The **relay on GPIO21 is not wired** (so the Pico cannot cut ESC power at all) and the **physical E-stop button is planned, not fitted** | whoever wires and tests both. A hardware job, not a software one |
+| **P8 — E-stop chain** | The same two, plus the **GPIO20 feedback divider**, also not wired | same |
+| **P10 — water trials** | P4 and P8 | same |
+
+Everything else can be done now. **P2 is the most valuable thing you can do
+first**: the firmware believed to be on the Pico is v4, the stack drives v5
+only, and until that is settled nothing about the motor path means anything.
+
+### Two things that will bite you
+
+- **The sonar keeps pinging when you close the software.** Stop it explicitly,
+  while the bridge is still running, before the transducer leaves the water.
+  Pinging in air can damage it. See [1.6](#16-the-sonar).
+- **There is no obstacle detection on this boat.** None. The navigation stack
+  knows a geofence and a speed limit and nothing about what is in the water.
+  The person holding the transmitter *is* the obstacle avoidance.
+
+### As you go
+
+Fill in the [results sheet](#4-results-sheet) while you work, not afterwards,
+and **change the labels in this document when you verify something** — with the
+date and your name. That is the most valuable thing you will leave behind.
 
 ---
 
@@ -50,14 +127,15 @@ disagree, that file wins and this one is the bug.
 
 | Item | State | Label |
 |---|---|---|
-| Jetson AGX Orin, ROS 2 Jazzy in a container | Present and running | VERIFIED by earlier team work |
+| Jetson AGX Orin, ROS 2 Jazzy in a container | Present and running. Logs in as **`node`**, hostname **`node2026`** | **VERIFIED 2026-10-28** (seen in the terminal) |
 | MikroTik CSS610 switch, NetMetal 5 ax (boat), mANTBox ax 15s (shore) | Present; nothing in the software reads the radios | NOT VERIFIED as a complete link |
-| Raspberry Pi Pico 2, USB serial | Present. **What firmware is on it is unknown** | UNKNOWN |
+| Raspberry Pi Pico 2, USB serial | Present. **v4 is declared flashed** (Auxence, not checked against the hardware). The stack drives **v5 only** — so if the declaration is right, the motor path is blocked until v5 is flashed | **NOT VERIFIED** (declared v4) |
 | `pico-node_v5` firmware | Exists in the repository; **never compiled by the Arduino toolchain, never run on a Pico**. `docs/BENCH_TEST_PHASE_B.md` §0 step 7 calls itself the first such build | TESTED IN SOFTWARE ONLY (host stub, all tests pass) |
 | 2× Blue Robotics T200 + 2× Basic ESC 30A, PWM from Pico GPIO15/16 | Present | NOT VERIFIED |
 | RP4TD ExpressLRS receiver + Radiomaster MT12, SBUS into Pico GPIO5 | Present. SBUS output mode and what it does on radio loss are unconfirmed | NOT VERIFIED |
-| **ESC relay (A3KM) on GPIO21** | **NOT WIRED** | VERIFIED absent |
+| **ESC relay (A3KM) on GPIO21** | **NOT WIRED.** Without it the Pico cannot cut ESC power at all | VERIFIED absent |
 | **E-stop button feedback on GPIO20** | **NOT WIRED**; firmware path compiled out (`ESTOP_FEEDBACK_ENABLED 0`) | VERIFIED absent |
+| **Physical E-stop button in the ESC power line** | **PLANNED, not fitted.** Blocks P4 together with the relay | declared 2026-11-10 (Auxence) |
 | 3 lights + buzzer, GPIO10/11/12/13 | Present | NOT VERIFIED on the loom |
 | Pixhawk 4 | Present. **PX4 or ArduPilot is unconfirmed** — the code assumes ArduPilot Rover by default | UNKNOWN |
 | Holybro H-RTK UM982 GNSS, dual antenna, on the Pixhawk | Present. Dual-antenna heading configuration not done | NOT VERIFIED |
@@ -249,20 +327,32 @@ except the addresses and the paths.
 
 #### What is on it
 
-| Device | Planned address | Actual | Label |
+**The `10.10.20.x` plan has never been built.** Nothing has been observed on
+that subnet. Read the "Actual" column, not the "Planned" one.
+
+| Device | Planned address | Actually seen | Label |
 |---|---|---|---|
-| MikroTik CSS610 switch | 10.10.20.2 | — | NOT VERIFIED |
+| **Jetson, wired (`eth0`)** | 10.10.20.10 | **192.168.88.10/24** — the MikroTik switch's own factory subnet | **VERIFIED 2026-10-28** |
+| **Jetson, Wi-Fi (`wlan0`)** | — | **DHCP; 192.168.1.236 that day.** It changes — look it up each time, do not write it down | **VERIFIED 2026-10-28** |
+| **Jetson, temporary** | — | **192.168.2.1/24**, added by hand to reach the sonar. Gone on reboot | **VERIFIED 2026-10-28** |
+| **Omniscan 3D sonar** | 10.10.20.31 | **192.168.2.21** | **VERIFIED 2026-11-06** |
+| Sonar's two internal boards | — | **192.168.2.201**, **192.168.2.202**, UDP 51221/51222 with the host | VERIFIED 2026-10-28 |
+| MikroTik CSS610 switch | 10.10.20.2 | not confirmed; the `192.168.88.x` addressing suggests it is still on its factory default (MikroTik ships `192.168.88.1`) | NOT VERIFIED |
 | MikroTik NetMetal 5 ax (boat radio) | 10.10.20.3 | — | NOT VERIFIED |
 | MikroTik mANTBox ax 15s (shore radio) | 10.10.20.4 | — | NOT VERIFIED |
-| **Jetson AGX Orin** | 10.10.20.10 | — | NOT VERIFIED |
-| OAK-D-LR camera | 10.10.20.21 | — | no driver, never addressed |
+| OAK-D-LR camera | 10.10.20.21 | no driver, never addressed | NOT VERIFIED |
 | Livox lidar (reserved) | 10.10.20.22 | not fitted | — |
-| **Omniscan 3D sonar** | 10.10.20.31 *(plan)* | **192.168.2.21** | **VERIFIED 2026-11-06** |
-| Sonar's two internal boards | — | **192.168.2.201**, **192.168.2.202**, UDP 51221/51222 with the host | VERIFIED 2026-10-28 |
 | Shore laptops | 10.10.20.100–199, DHCP | — | NOT VERIFIED |
 
-The GUI is at `http://10.10.20.10:8090` once the Jetson is on its planned
-address.
+So **three** subnets were live on the Jetson on 2026-10-28 — `192.168.88.x`
+wired, `192.168.1.x` over Wi-Fi, and the hand-added `192.168.2.x` for the sonar
+— and **none of them is the plan**. Whoever builds `10.10.20.0/24` will have to
+re-address the switch, the two radios and the Jetson, and then decide what
+happens to the sonar (below).
+
+The GUI is at `http://10.10.20.10:8090` **once the plan exists**. Until then it
+is on whichever address the Jetson actually has: `ip addr show` on the Jetson,
+then `http://<that address>:8090`.
 
 #### The conflict you need to know about
 
@@ -330,20 +420,27 @@ The Jetson has no screen you will want to use. You work on it over **SSH**: a
 remote terminal, from your laptop, over the network.
 
 ```bash
-ssh <user>@<jetson-address>
+ssh node@node2026
 ```
 
-**The username and hostname are UNKNOWN.** They are nowhere in this repository.
-The only SSH example in it (`ssh pi@boat.local`, `README.md`) is for the older
-Raspberry Pi deployment, not this Jetson. **Ask the team before you start**, and
-write the answer into this document.
+The user is **`node`** and the hostname is **`node2026`** — VERIFIED 2026-10-28,
+read off the Jetson's own terminal prompt. If the name does not resolve on your
+network, use the address instead:
+
+```bash
+ssh node@192.168.88.10     # the wired address seen on 2026-10-28
+ssh node@<wifi address>    # DHCP, changes; ask, or look at the Jetson's screen
+```
+
+Ignore the `ssh pi@boat.local` example in `README.md` — that is the older
+Raspberry Pi deployment, not this Jetson.
 
 Copying files **to** the Jetson, and **from** it:
 
 ```bash
-scp ./localfile          <user>@<jetson>:/home/<user>/   # to
-scp <user>@<jetson>:/srv/asket/data/missions/* ./         # from
-scp -r <user>@<jetson>:/srv/asket/data/missions ./        # a whole directory
+scp ./localfile  node@node2026:/home/node/                 # to
+scp node@node2026:/srv/asket/data/missions/* ./            # from
+scp -r node@node2026:/srv/asket/data/missions ./           # a whole directory
 ```
 
 Two SSH sessions at once is normal and useful: one to run things, one to watch
@@ -615,8 +712,17 @@ software is blamed for anything.
 **Steps**
 
 1. Power the Jetson and the switch. Confirm link lights on every connected port.
-2. From the shore laptop, on the boat LAN, ping each device in the table in
-   section 2.1 that is supposed to exist:
+2. Find out what the network **actually is** before testing what it should be.
+   On 2026-10-28 the Jetson's wired side was on `192.168.88.10/24`, the
+   MikroTik factory subnet, not on the plan. From a laptop on the same wired
+   segment:
+
+   ```bash
+   sudo nmap -sn 192.168.88.0/24     # what is really on the switch's subnet
+   ping -c 3 192.168.88.10           # the Jetson, as seen on 2026-10-28
+   ```
+
+   Only then try the plan, and expect it to fail until somebody has built it:
 
    ```bash
    ping -c 3 10.10.20.2    # switch
@@ -625,8 +731,19 @@ software is blamed for anything.
    ping -c 3 10.10.20.10   # Jetson
    ```
 
-3. SSH into the Jetson (section 2.2). If you do not yet know the username, this
-   is where you stop and ask.
+   **Four failures here is the expected result today**, and recording that is
+   itself the finding. Do not start re-addressing anything to make them pass:
+   the plan collides with the sonar (section 2.1) and the decision is open.
+
+3. SSH into the Jetson: `ssh node@node2026` (section 2.2). If the name does not
+   resolve, try `ssh node@192.168.88.10`, the wired address seen on 2026-10-28.
+   Then find out what addresses it actually has today, and write them on the
+   results sheet:
+
+   ```bash
+   ip addr show            # every interface and its address
+   ip route                # which one is the default route
+   ```
 4. On the Jetson, add the temporary address for the sonar's subnet (section
    2.1), then:
 
@@ -639,9 +756,10 @@ software is blamed for anything.
 5. Record the radio link: signal strength and rate from the MikroTik web
    interfaces, at the distance you will actually operate at.
 
-**PASS:** every device that is supposed to exist answers; the sonar shows
-exactly those three open ports; SSH works; the link holds at operating
-distance.
+**PASS:** you can say, in writing, what address every device is on today; the
+sonar shows exactly those three open ports; SSH works; the link holds at
+operating distance. **PASS does not require the `10.10.20.x` plan to exist** —
+it requires you to know what does.
 
 **FAIL:** one device silent → cable, power, and whether your laptop has an
 address on the same subnet (`ip addr show`). The sonar silent → see P6 and
@@ -663,6 +781,12 @@ firmware version* check is critical.
 
 **Hardware:** Pico 2, USB cable, a laptop with the Arduino IDE. **The Pico is
 unplugged from the Jetson for this**, so the stack does not need stopping.
+
+**What is believed to be on the board today: v4** — declared by Auxence, never
+checked against the hardware. If that is right, the stack will refuse to drive
+it (`pico_bridge` sends only `PING` and `MODE MANUAL` to anything but a v5, and
+the pre-flight fails), so this phase is not optional before any motor work.
+Step 10 settles it either way.
 
 **This is the first time `pico-node_v5` will have been compiled by the Arduino
 toolchain at all** (TESTED IN SOFTWARE ONLY until now: the host tests compile it
@@ -743,29 +867,56 @@ lost.** This is the sovereign safety path.
 
 **Hardware:** Pico (flashed), RP4TD receiver on GPIO5, MT12 transmitter.
 
-**Steps:** [`docs/BENCH_TEST_PHASE_B.md`](BENCH_TEST_PHASE_B.md) §1, steps
-1.1–1.13. In outline:
+**How to watch.** Everything in this phase is read off the Pico's own status
+line. In one terminal, inside the container:
 
-1. Watch the Pico's status: `ros2 topic echo /pico/status --field data`.
-2. Move Ch3 (throttle), Ch4 (yaw), Ch7 (arm), Ch8 (mode). Confirm each is
-   decoded, and that Ch8's three zones give E-stop / MANUAL / AUTONOMOUS.
-3. Confirm the lights follow: red = disarmed or E-stop, yellow = MANUAL armed,
-   green = AUTONOMOUS.
-4. **Receiver failsafe:** in AUTONOMOUS with motor commands being published,
-   **switch the transmitter off.** Expect, in under 0.5 s: `relay=0`, red light,
-   `mode=1 armed=0 rclatch=1 wantauto=0`.
-5. Note `sbusfs=`: 1 means the RP4TD reports a failsafe; if it stays 0 the
-   receiver simply stops sending, which the firmware also covers.
-6. **No automatic re-arm:** transmitter back on with Ch7 still high, wait 10 s.
-   It must **stay disarmed**, `rclatch=1`.
-7. Request AUTO while latched: must be refused (`[NAK] MODE AUTO refused`).
-8. Ch7 low then high: re-arms into **MANUAL**, not AUTONOMOUS.
-9. **SBUS silent** (as opposed to a failsafe flag): unplug the receiver's SBUS
-   lead in AUTONOMOUS. Same result as step 4.
+```bash
+ros2 topic echo /pico/status --field data
+```
 
-**PASS:** every channel decodes; both kinds of radio loss stop the boat in under
-0.5 s in **every** mode including AUTONOMOUS; it does not re-arm by itself;
-re-arming lands in MANUAL.
+A line looks like `STATE ver=5 mode=2 armed=1 relay=1 rclatch=0 sbusfs=0 …`.
+The fields that matter here: `mode` (1 = E-stop, 2 = MANUAL, 3 = AUTONOMOUS),
+`armed`, `relay` (1 closed, 0 open), `rclatch` (1 = an RC loss is latched) and
+the `sbus*` counters.
+
+**Requesting AUTONOMOUS without a Pixhawk.** The pre-flight will be NO-GO (no
+GNSS, no heading), so the GUI refuses Autonomous. Either use the GUI's force
+path (section 2 of the guide, and P9 step 6), or go round it from the command
+line, which is an aid and not a safety:
+
+```bash
+ros2 topic pub --once -w 1 /pico/mode_request std_msgs/msg/String "{data: AUTO}"
+ros2 topic pub --once -w 1 /pico/mode_request std_msgs/msg/String "{data: MANUAL}"
+```
+
+`-w 1` waits for `pico_bridge` to subscribe, so the single message is not lost.
+Either way **the Pico still decides**: AUTONOMOUS needs Ch8 high, armed, and
+the latch clear.
+
+**Steps.** Condensed from
+[`docs/BENCH_TEST_PHASE_B.md`](BENCH_TEST_PHASE_B.md) §1, which keeps the full
+table and is the authority if the two differ.
+
+| # | Do | Expect |
+|---|---|---|
+| 3.1 | Power the Pico with **Ch7 already high** and Ch8 down, then Ch8 to the middle | `armed=0 rclatch=1`, red light. **It must not arm.** (v4 armed here; that was the bug) |
+| 3.2 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2 relay=1`, yellow light, 2 beeps |
+| 3.3 | Move Ch3 (throttle) and Ch4 (yaw) | both decode and change in the status line |
+| 3.4 | Ch8 low | `mode=1 armed=0 relay=0`, red light, long beep |
+| 3.5 | Ch8 high, Ch7 cycled, then request AUTO (box above) | `mode=3`, green light |
+| 3.6 | **Receiver failsafe:** still in AUTONOMOUS, switch the **transmitter off** | in **under 0.5 s**: `relay=0`, red light, `mode=1 armed=0 rclatch=1 wantauto=0`. Note `sbusfs=` — 1 means the RP4TD reports failsafe; 0 means it simply stopped sending, which is also covered |
+| 3.7 | **No auto re-arm:** transmitter back on, **Ch7 still high**, wait 10 s | stays `armed=0 rclatch=1 relay=0`, red light |
+| 3.8 | Request AUTO while latched | refused — the Pico answers `[NAK] MODE AUTO refused`; stays disarmed |
+| 3.9 | Ch7 low, then high | `rclatch=0`, then `armed=1 mode=2` — **MANUAL, not AUTONOMOUS** |
+| 3.10 | **SBUS silent:** back to AUTONOMOUS, then unplug the receiver's SBUS lead | same as 3.6 (`sbusfs` irrelevant: no frames at all). Re-plug and repeat 3.7–3.9 |
+| 3.11 | **Serial never blocks:** stop the stack, then hold the port open without reading it — `sudo sh -c 'sleep 60 < /dev/pico'` | during those 60 s the RC still works: Ch8 low turns the light red at once, Ch7 low→high re-arms. Watch the **lights**; nothing is reading `STATE` |
+| 3.12 | Restart the stack after that | `STATE … txdrop=N` with N > 0 — the lines dropped while nobody read — and everything else normal |
+| 3.13 | Unplug the Pico's USB for 5 s with the stack running, then re-plug | bridge log: port lost, then within ~2 s `Pico connecte`, `Pico firmware : v5` |
+
+**PASS:** all four channels decode; 3.1 does **not** arm; both kinds of radio
+loss stop the boat in under 0.5 s in **every** mode including AUTONOMOUS; it
+does not re-arm by itself; re-arming lands in MANUAL; the Pico keeps running
+with the serial port blocked.
 
 **FAIL:** no channels decode → the receiver is not in SBUS mode, or the signal
 is not inverted as the firmware expects, or GPIO5 is not the wired pin. Channels
@@ -789,26 +940,53 @@ transmitter and autonomous commands, and stop when they should.
 > Without the relay the Pico cannot cut ESC power at all, so a wrong throttle
 > sign or a stuck command spins the thrusters until somebody pulls the battery.
 >
-> **If they are still not wired, this phase cannot be done as written.** Wire
-> them first, or accept that you are testing with the battery connector as your
-> only stop — which is not acceptable with hands near a propeller.
+> **Neither is fitted today** (the relay: VERIFIED absent; the button: planned,
+> confirmed by Auxence 2026-11-10), **so this phase cannot be done as
+> written.** Wire and test both first. The alternative is testing with the
+> battery connector as your only stop, which is not acceptable with hands near
+> a propeller.
 
 **Prerequisites:** P2 and P3 passed. Relay and E-stop button wired and tested
 (press it, ESC rail reads 0 V). Props **out of the water**, see 1.5. Bench
 supply at the limits in 1.4.
 
-**Steps:** [`docs/BENCH_TEST_PHASE_B.md`](BENCH_TEST_PHASE_B.md) §2a, then §2b,
-steps 2.1–2.9. The sequence tests: arming tones and the 2 s no-spin window,
-direction and yaw mixing, Ch8-low stopping mid-spin, autonomous commands, the
-command-staleness neutral (0.5 s), radio loss while autonomous, and a frozen
-Jetson (`pkill -STOP -f pico_bridge`) producing neutral within 0.5 s.
+**Order:** steps 4.1–4.3 **on the bench supply first**. If all three pass,
+switch off, then connect the LiPo (pack voltage ≥ 14 V first, E-stop pressed in
+while you connect, then released) and repeat 4.1–4.9.
 
-**PASS:** every step as its table says, with no unexpected spin.
+**Steps.** Condensed from
+[`docs/BENCH_TEST_PHASE_B.md`](BENCH_TEST_PHASE_B.md) §2, which keeps the full
+table and is the authority if the two differ.
+
+| # | Do | Expect |
+|---|---|---|
+| 4.1 | Arm in MANUAL (Ch8 middle, Ch7 low→high) | `relay=1`, the relay **clicks closed**, ESC start-up tones, and **no spin for 2 s** — the arm window |
+| 4.2 | A little forward throttle, then yaw | both thrusters forward; yaw spins them opposite |
+| 4.3 | Ch8 low **while they are spinning** | they stop at once, relay opens, ESC power-down tones |
+| 4.4 | AUTONOMOUS (Ch8 high, Ch7 cycled, request AUTO as in P3), then publish a small effort:<br>`ros2 topic pub -r 10 /control/effort geometry_msgs/msg/Twist "{linear: {x: 0.15}}"` | both spin slowly forward |
+| 4.5 | Stop that `ros2 topic pub` | neutral within ~0.5 s — the bridge sends `PING` after 0.3 s, the Pico goes neutral after 0.5 s. **Relay stays closed** |
+| 4.6 | Restart 4.4, then **transmitter off** | thrusters stop in under 0.5 s, relay opens |
+| 4.7 | Transmitter back on, Ch7 still high | nothing spins, even with `/control/effort` still being published |
+| 4.8 | Ch7 low→high | MANUAL; the sticks work; autonomy only after a **new** AUTO request |
+| 4.9 | **Jetson freezes** while autonomous (4.4 running): `sudo pkill -STOP -f pico_bridge` | neutral within 0.5 s; autonomy withdrawn (`link=0`, MANUAL) after 0.6 s; the transmitter still drives in MANUAL. Then `sudo pkill -CONT -f pico_bridge` |
+
+**Where the timings come from.** Every figure above is a constant in
+`firmware/pico-node_v5/pico-node_v5.ino`, so you can check them rather than
+trust this table: `ESC_ARM_DELAY_MS = 2000` (the 2 s no-spin window),
+`SERIAL_FAILSAFE_TIMEOUT_MS = 500` (neutral after the commands stop),
+`HEARTBEAT_TIMEOUT_MS = 600` (autonomy withdrawn), and
+`SBUS_FAILSAFE_TIMEOUT_MS = 300` (radio loss). The 0.3 s before the bridge
+starts sending `PING` is `cmd_timeout` in `src/control/control/pico_bridge.py`.
+Mode numbers in the status line: `1` E-stop, `2` MANUAL, `3` AUTONOMOUS.
+
+**PASS:** every row as written, and **nothing spins at any moment the table
+does not say it should**.
 
 **FAIL:** thrusters turn the wrong way → `thr_invert`/`yaw_invert` in
 `pico_bridge`, and `THR_INVERT`/`YAW_INVERT` in the firmware. Supply
-current-limits and the ESC browns out → you are at too much throttle (1.4).
-Anything spins when it should not → **stop the phase and report it.**
+current-limits and the ESC browns out → too much throttle (1.4). No click and
+no `relay=1` → the relay is not actually wired, and you should not be in this
+phase. **Anything spins when it should not → stop the phase and report it.**
 
 **Risk:** **highest of any bench phase.** Spinning propellers, and the dry-run
 limit on the T200s. Short bursts, low throttle, hand on the supply switch.
@@ -972,7 +1150,45 @@ has the full procedure and the exact expected output.
    - **Does SonarView hold the port the way a plain client does?** Procedure in
      [`docs/SONAR_BRINGUP.md`](SONAR_BRINGUP.md) §5 "Both at once?" — both
      connection orders, four named outcomes.
-9. The sonar's clock: point its NTP at the Jetson's GPS-disciplined server.
+9. **SonarView, if you need Cerulean's own application** — for its live view,
+   its settings or its recordings. It runs as a container on the Jetson, with
+   host networking because its device discovery is a broadcast:
+
+   ```bash
+   sudo podman run -d --name sonarview --network=host \
+     -v /usr/SonarView:/userdata:Z \
+     -e ENABLE_OS3D=true \
+     docker.io/nicknothom/sonarview:latest
+   ```
+
+   Then open it **from a laptop**, not on the Jetson:
+
+   ```
+   http://<jetson address>:7077
+   ```
+
+   `http://localhost:7077` works only if you installed it on the laptop itself.
+   On the Jetson's own browser it fails: `Error creating webgl context`,
+   VERIFIED 2026-10-28.
+
+   Four things about that command:
+
+   - **`sudo`.** Rootless Podman handles `--network=host` differently and
+     discovery broadcasts will not work.
+   - **`ENABLE_OS3D=true`** or there is no 3D view. Getting this wrong is the
+     likeliest reason the 3D display is missing.
+   - **No `--restart` policy.** Do not add `--restart=unless-stopped`: it
+     brings SonarView back automatically after a reboot or a crash, when
+     nobody is watching and the transducer may be in air — and it will take the
+     sonar's single TCP connection, so `omniscan_bridge` then cannot have it.
+     Start it deliberately, each time.
+   - **Never start pinging out of the water.** The same rule as 1.6, and
+     SonarView will happily do it if you press the button.
+
+   Stop it with `sudo podman stop sonarview`, and remember that stopping it
+   does **not** stop the sonar pinging — step 7 does.
+
+10. The sonar's clock: point its NTP at the Jetson's GPS-disciplined server.
    [`docs/SETUP.md`](SETUP.md) step 0. **This is the most expensive step to get
    wrong in the whole project** — its default is an internet host, there is no
    internet in the field, and a wrong sonar clock makes every mission
@@ -1069,8 +1285,11 @@ software.
 > A physical E-stop button in the ESC power line is a separate thing from the
 > GPIO20 feedback: the button cuts the battery to the ESCs with no software
 > involved, and the feedback merely lets the Pico *know* it has been pressed.
-> **Whether the button itself is fitted is UNKNOWN from the repository.** Find
-> out before P4.
+> **That button is PLANNED, not fitted** (confirmed by Auxence, 2026-11-10).
+>
+> So three hardware jobs stand between today and a powered motor test: fit the
+> button, wire the relay to GPIO21, and wire the GPIO20 divider. The first two
+> gate P4; the third only gates this phase's step 3 onwards.
 
 **When it is wired, the phase is:**
 
@@ -1305,7 +1524,7 @@ ______________________________________________________________________
 | Sonar still pinging after you closed everything | It keeps pinging with no client (VERIFIED) | `stop_pinging` **while the bridge still runs**, else cut its power |
 | GUI: blank page, HTTP 200, right title | The frontend is present as symlinks and `StaticFiles` rejected them | `follow_symlink=True` in `server.py`. Present in this branch |
 | GUI: HTTP 503, `{"error": "frontend not built"}` | `src/gui_backend/gui_backend/static/` is empty — it is gitignored and not in the repository | `cd src/asket_gui && npm install && npm run build` **before** `colcon build`. The image build does this itself |
-| GUI: map is blank or will not render, on the Jetson's own browser | Reported as missing WebGL. **UNKNOWN** — not recorded anywhere in the repository and not reproduced | Use the shore laptop. If you do reproduce it on the Jetson, record it |
+| Browser on the Jetson: `Error creating webgl context` | **VERIFIED 2026-10-28** in SonarView, in the Jetson's own browser. Anything needing WebGL will not draw there | Open it from a laptop instead: `http://<jetson address>:7077` for SonarView, `:8090` for the GUI. Whether the GUI's MapLibre map fails the same way is **NOT VERIFIED** — same cause, never tried |
 | GUI: map is a bare grid on any browser | No tiles: no `.mbtiles` file and no internet | `GET /api/tiles/info` says which. See `docs/map_tiles.md` |
 | GUI unreachable on :8090 | Container not running, or wrong subnet | `sudo podman ps`, `sudo systemctl status asket.service`, `ip addr show` on your laptop |
 | Pico: re-arms by itself after a radio loss | That is the **v4** defect | You are not running v5. `ros2 topic echo /pico/status --field data` |
@@ -1348,16 +1567,17 @@ These need a person, not a test. Each one blocks or changes something.
    planned address collides with the sonar's current one.
 6. **The LTE beacon** (LilyGO T-SIM7000G) and the **Cloudflare relay hostname**.
    Both open team decisions.
-7. **Whether a physical E-stop button is fitted** in the ESC power line. UNKNOWN
-   from the repository, and P4 must not proceed without it.
+7. **The physical E-stop button is planned, not fitted** (confirmed by Auxence).
+   Together with the unwired relay on GPIO21 this is what blocks P4: wiring and
+   testing both is the gate, and it is a hardware job somebody has to schedule.
 
 ### Facts nobody knows yet
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | The Jetson's SSH username and hostname | P1 step 3 — ask before you travel |
+| 1 | ~~The Jetson's SSH username and hostname~~ | **Answered 2026-10-28:** `node@node2026` |
 | 2 | Which firmware the Pixhawk runs, PX4 or ArduPilot | P5, and the critical pre-flight check |
-| 3 | What firmware is on the Pico right now | P2 |
+| 3 | What firmware is on the Pico right now | P2. **v4 is declared** (Auxence), never checked. The stack drives v5 only, so if that is right the motor path is blocked until v5 is flashed |
 | 4 | Whether `pico-node_v5` compiles under the Arduino toolchain | P2 — it has never been tried |
 | 5 | Whether the RP4TD is in SBUS mode, and what it does on radio loss | P3, which is the sovereign safety path |
 | 6 | Whether the sonar's points are in the right place | P6, P10 — the survey's whole value |
@@ -1367,7 +1587,7 @@ These need a person, not a test. Each one blocks or changes something.
 | 10 | The real OAK-D-LR topic name | P7, P9 |
 | 11 | Whether the MCP2221 serial numbers are unique | P7 — if not, udev must key on the USB port path |
 | 12 | The camera stream's cost on the Jetson (JPEG encode plus the vision node) | nothing yet; it is why the rate ceiling is 15 Hz, not 30 |
-| 13 | Whether the Jetson's browser really lacks WebGL | P9 — use the shore laptop regardless |
+| 13 | ~~Whether the Jetson's browser really lacks WebGL~~ | **Answered 2026-10-28:** `Error creating webgl context` in SonarView on the Jetson. Still open for the GUI's map specifically — same cause, never tried. Use a laptop either way |
 | 14 | The 2198 mono-profile payload layout | `sonar_bridge_node` in `cloud_bridge` assumes one; **do not trust its output** |
 | 15 | Whether the sonar's two boards' addresses survive a re-address | decision 1 |
 
