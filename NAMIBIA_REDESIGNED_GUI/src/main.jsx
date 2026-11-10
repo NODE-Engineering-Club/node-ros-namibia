@@ -5,6 +5,7 @@ import { Connection } from '@asket/lib/connection.js';
 
 import { App } from './App.jsx';
 import { tapStreamUnavailable } from './lib/streamNotes.js';
+import { createMockRig, refuseWhenDown } from './lib/mockRig.js';
 import './theme/app.css';
 import './theme/screens.css';
 
@@ -29,7 +30,10 @@ async function boot() {
   }
   // `stream_unavailable` is not kept by the shared Connection; record it on
   // the side so panels can say "source silent" (lib/streamNotes.js).
-  tapStreamUnavailable(connection);
+  // Mock only: the redesign's test rig for the checklist items the shared
+  // mock cannot produce (lib/mockRig.js). Never attached to a real backend.
+  if (useMock) connection.rig = createMockRig();
+  tapStreamUnavailable(connection, connection.rig ? { beforeOpen: refuseWhenDown(connection.rig) } : {});
   connection.connect();
 
   createRoot(document.getElementById('root')).render(

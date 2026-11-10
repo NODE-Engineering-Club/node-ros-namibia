@@ -120,7 +120,14 @@
   position: relative; z-index: 2; flex: none; display: flex; min-height: 0;
   border-left: 1px solid rgba(163, 113, 247, 0.5);
 }
+.mock-column.open { flex-direction: column; width: 330px; }
 .mock-column .mock-panel { display: flex; align-items: stretch; min-height: 0; height: 100%; }
+.mock-column.open .mock-panel { flex: 1; height: auto; }
+.mock-column.open .mock-body { width: auto; flex: 1; }
+.mock-column .mock-body.rig {
+  flex: none; height: auto; max-height: 45%; border-top: 1px solid rgba(163, 113, 247, 0.5);
+  margin-left: 0;
+}
 .mock-column .mock-handle {
   writing-mode: vertical-rl; white-space: nowrap; border-radius: 0; padding: 10px 4px;
   background: rgba(163, 113, 247, 0.85); border-color: #a371f7; color: #fff;
@@ -141,7 +148,8 @@
 .mock-column .mock-group button, .mock-column .button-row button {
   min-height: 24px; padding: 2px 8px; font-size: 11px; flex: 1 1 auto;
 }
-.mock-column button.mock-on { background: #a371f7; border-color: #a371f7; color: #fff; }
+.mock-column button.mock-on,
+.mock-column button.mock-on:hover:not(:disabled) { background: #a371f7; border-color: #a371f7; color: #fff; }
 .mock-column .mock-explain {
   margin-top: 8px; padding: 8px; white-space: pre-line;
   border: 1px solid #a371f7; border-radius: var(--radius-sm); background: rgba(163, 113, 247, 0.12);

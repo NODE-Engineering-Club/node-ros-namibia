@@ -62,7 +62,7 @@ export function WorkspaceHeader({ title, crumb, children }) {
 }
 
 /** Readiness, link state and data provenance — always visible. */
-export function SystemFooter({ v, connection, children }) {
+export function SystemFooter({ v, connection }) {
   const link = v.receiving
     ? 'Receiving'
     : v.state.connected
@@ -73,7 +73,6 @@ export function SystemFooter({ v, connection, children }) {
       <span>NODE ASV Control · redesign</span>
       <span>ROS 2 Humble</span>
       <span className="spacer" />
-      {children}
       <Pill level={v.receiving ? 'ok' : 'alarm'}>{link}</Pill>
       {v.simulated && <Pill level="mock" title="Every value is simulated by the backend.">Simulation</Pill>}
       {connection.isMock && <Pill level="mock" title="No backend, no vessel: generated in this browser.">Mock data — browser only</Pill>}

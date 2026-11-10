@@ -444,7 +444,7 @@ function MissionPanel({ v, connection, active, onNavigate }) {
   );
 }
 
-export function Navigate({ v, connection, active, onNavigate }) {
+export function Navigate({ v, connection, active, onNavigate, sonarState = v.state }) {
   const cam = cameraLevel(v.state);
   const verdict = preflightVerdict(v);
   const vessel = v.vessel;
@@ -500,7 +500,7 @@ export function Navigate({ v, connection, active, onNavigate }) {
               <CameraSlot v={v} />
             </GlassPanel>
             <div className="row-bottom">
-              <SonarGlass state={v.state} connection={connection} />
+              <SonarGlass state={sonarState} connection={connection} />
               {/* The reused LinkStatus: which profile is in force, what it no
                   longer carries and why, and "no connection to the vessel"
                   when the socket is gone. */}

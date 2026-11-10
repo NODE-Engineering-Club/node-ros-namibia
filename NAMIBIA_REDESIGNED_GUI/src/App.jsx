@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { isFitted } from '@asket/lib/fitted.js';
+import { MockControls } from '@asket/components/MockControls.jsx';
 import { duration } from '@asket/lib/format.js';
 
 import { Background, ROUTES, Sidebar, Splash, SystemFooter } from './components/Shell.jsx';
@@ -12,6 +13,7 @@ import { Repo } from './screens/Repo.jsx';
 import { newMission } from './lib/missionFile.js';
 import { useMissionLibrary } from './lib/missionStore.js';
 import { SUBSCRIPTIONS, useVessel } from './lib/vessel.js';
+import { setBackendDown, setFrozen, setSonarView, sonarViewState } from './lib/mockRig.js';
 
 /**
  * Link loss, said as link loss (developer guide section 3: "a frozen screen
@@ -69,6 +71,54 @@ function LinkBanner({ v }) {
   );
 }
 
+/**
+ * Mock only, under the shared MockControls: the redesign's test rig
+ * (lib/mockRig.js) for checklist items 7 and 8. Styled as the dev panel.
+ */
+function RigControls({ connection, rig, onChange }) {
+  const act = (fn) => () => { fn(); onChange(); };
+  const views = [
+    ['as-sent', 'As the mock sends it (full)'],
+    ['health', 'Boat: health view'],
+    ['health-absent', 'Boat: omniscan_bridge not running'],
+  ];
+  return (
+    <div className="mock-body rig">
+      <div className="mock-group">
+        <h3>Redesign test rig: backend</h3>
+        <div className="button-row">
+          <button type="button" className={rig.frozen ? 'mock-on' : ''} onClick={act(() => setFrozen(connection, rig, !rig.frozen))}>
+            Backend stops sending
+          </button>
+          <button type="button" className={rig.backendDown ? 'mock-on' : ''} onClick={act(() => setBackendDown(connection, rig, !rig.backendDown))}>
+            Backend down
+          </button>
+        </div>
+        <p className="hint" style={{ margin: '4px 0 0' }}>
+          Stops sending: socket open, nothing arrives (checklist 7, the case TCP takes
+          tens of seconds to notice). Down: socket closed, every reconnect refused.
+        </p>
+      </div>
+      <div className="mock-group">
+        <h3>Redesign test rig: sonar panel</h3>
+        <div className="button-row">
+          {views.map(([id, label]) => (
+            <button key={id} type="button" className={rig.sonarView === id ? 'mock-on' : ''} onClick={act(() => setSonarView(connection, rig, id))}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="hint" style={{ margin: '4px 0 0' }}>
+          The boat sends sonar_panel: health. With the bridge not running there is no
+          sonar stream at all (checklist 8): the panel must say health is not
+          monitored, never show a healthy sonar. Combine with the dev panel&rsquo;s
+          &ldquo;Sonar dropout&rdquo; for &ldquo;sonar silent&rdquo;.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 const DRAFT_KEY = 'asket.redesign.draft.v1';
 
 function routeFromHash() {
@@ -116,22 +166,21 @@ export function App({ connection }) {
   const linkLost = !v.state.connected || !v.receiving;
 
   const navigate = (id) => { window.location.hash = id; };
+  // Closed by default, as in src/asket_gui: the default view is what an
+  // operator sees, not the review rig around it.
+  const [mockOpen, setMockOpen] = useState(false);
+  const [, redrawRig] = useState(0);
+  const rig = connection.rig;
+  const sonarState = rig ? sonarViewState(v.state, rig.sonarView) : v.state;
   const endSplash = () => { sessionStorage.setItem('asket.redesign.splash', '1'); setSplash(false); };
 
   const openInDesigner = (mission) => { setDraft(mission); navigate('mission'); };
   const launch = (mission) => { library.setActive(mission.id); navigate('navigate'); };
 
-  const bringUpHealthy = () => {
-    // Mirrors the "Everything working" control in src/asket_gui's dev panel,
-    // through the ordinary command path.
-    connection.setProfile('auto');
-    connection.command('set_mode', { mode: 'AUTONOMOUS' });
-    connection.command('start_mission', { name: 'demo' });
-    connection.command('run_system_test', {});
-  };
-
   const screen = {
-    navigate: <Navigate v={v} connection={connection} active={library.active} onNavigate={navigate} />,
+    navigate: (
+      <Navigate v={v} connection={connection} active={library.active} onNavigate={navigate} sonarState={sonarState} />
+    ),
     preflight: <Preflight v={v} connection={connection} onNavigate={navigate} />,
     mission: <MissionDesign v={v} connection={connection} draft={draft} setDraft={setDraft} library={library} />,
     alerts: <Alerts v={v} onNavigate={navigate} />,
@@ -149,18 +198,16 @@ export function App({ connection }) {
           <main className={`workspace ${linkLost ? 'link-lost' : ''}`}>
             <LinkBanner v={v} />
             {screen}
-            <SystemFooter v={v} connection={connection}>
-              {connection.isMock && (
-                <button
-                  type="button" className="btn small" onClick={bringUpHealthy}
-                  style={{ height: 20, fontSize: 10 }}
-                  title="Mock mode: put the simulated boat autonomous, recording and pre-flighted."
-                >
-                  Mock: everything working
-                </button>
-              )}
-            </SystemFooter>
+            <SystemFooter v={v} connection={connection} />
           </main>
+          {connection.isMock && (
+            <div className={`mock-column ${mockOpen ? 'open' : ''}`}>
+              <MockControls connection={connection} open={mockOpen} onOpenChange={setMockOpen} />
+              {mockOpen && rig && (
+                <RigControls connection={connection} rig={rig} onChange={() => redrawRig((n) => n + 1)} />
+              )}
+            </div>
+          )}
         </div>
       )}
     </>
