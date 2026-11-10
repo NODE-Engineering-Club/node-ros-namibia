@@ -1,7 +1,7 @@
 /*
  * Glass skin for components reused from src/asket_gui (ModeButtons,
  * SonarPanel, LinkStatus, MockControls). They keep their own class names;
- * these rules apply only inside .asket-embed / .mock-column, so the original
+ * these rules apply only inside .asket-embed / .dev-drawer, so the original
  * cockpit is unaffected.
  *
  * Two treatments are deliberately NOT softened for the glass look, because
@@ -51,7 +51,7 @@
 .asket-embed .rows dd { margin: 0; font-family: var(--mono); }
 
 /* ---------------------------------------------------------------- chips */
-.asket-embed .chip, .mock-column .chip {
+.asket-embed .chip, .dev-drawer .chip {
   display: inline-flex; align-items: center; gap: 6px;
   height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid;
   font: 700 9.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase;
@@ -65,12 +65,13 @@
 .asket-embed .chip.note { border-style: dashed; }
 
 /* -------------------------------------------------------------- buttons */
-.asket-embed button, .mock-column button {
+.asket-embed button, .dev-drawer .mock-panel button, .dev-drawer .rig button {
   min-height: 30px; padding: 4px 12px; border-radius: var(--radius-sm);
   font: 600 12px var(--font); cursor: pointer;
   color: var(--text); background: var(--glass); border: 1px solid var(--border);
 }
-.asket-embed button:hover:not(:disabled), .mock-column button:hover:not(:disabled) {
+.asket-embed button:hover:not(:disabled), .dev-drawer .mock-panel button:hover:not(:disabled),
+.dev-drawer .rig button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
 }
 .asket-embed button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -113,45 +114,47 @@
 .asket-embed input[type='range'] { width: 100%; accent-color: var(--primary); }
 .asket-embed details.debug summary { cursor: pointer; font-size: 11px; color: var(--text-2); }
 
-/* ----------------------------------------------------- mock controls column */
-/* Styled as a tool, not as part of the cockpit: a purple edge no operator
-   panel uses. It renders only when connection.isMock. */
-.mock-column {
-  position: relative; z-index: 2; flex: none; display: flex; min-height: 0;
-  border-left: 1px solid rgba(163, 113, 247, 0.5);
+/* ------------------------------------------------------ mock-mode dev drawer */
+/* Not part of the cockpit layout: a glass drawer over the right edge, opened
+   only in mock mode with Ctrl+Shift+D or ?dev (App.jsx useDevDrawer). Same
+   glass tokens as the panels, a heavier blur and a shadow so it reads as
+   floating above the cockpit rather than a part of it. */
+.dev-drawer {
+  position: fixed; top: 12px; right: 12px; bottom: 12px; z-index: 30;
+  width: min(360px, calc(100vw - 24px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: rgba(13, 22, 31, 0.72);
+  backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
 }
-.mock-column.open { flex-direction: column; width: 330px; }
-.mock-column .mock-panel { display: flex; align-items: stretch; min-height: 0; height: 100%; }
-.mock-column.open .mock-panel { flex: 1; height: auto; }
-.mock-column.open .mock-body { width: auto; flex: 1; }
-.mock-column .mock-body.rig {
-  flex: none; height: auto; max-height: 45%; border-top: 1px solid rgba(163, 113, 247, 0.5);
-  margin-left: 0;
+.dev-drawer-head {
+  flex: none; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--border-soft); background: var(--glass);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
 }
-.mock-column .mock-handle {
-  writing-mode: vertical-rl; white-space: nowrap; border-radius: 0; padding: 10px 4px;
-  background: rgba(163, 113, 247, 0.85); border-color: #a371f7; color: #fff;
-  letter-spacing: 0.06em; font-size: 11px;
+.dev-drawer-head .faint { font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
+.dev-drawer-head .btn { margin-left: auto; }
+.dev-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; font-size: 12px; }
+
+/* The reused MockControls keeps its markup; its rail handle is not shown. */
+.dev-drawer .mock-handle { display: none; }
+.dev-drawer .mock-panel, .dev-drawer .mock-body { display: block; padding: 0; background: none; border: 0; height: auto; }
+.dev-drawer .mock-body.rig { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--divider); }
+.dev-drawer .mock-group { margin-bottom: 12px; }
+.dev-drawer .mock-group h3 {
+  margin: 0 0 6px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-3); font-weight: 600;
 }
-.mock-column .mock-body {
-  width: 300px; height: 100%; overflow-y: auto; padding: 10px 12px;
-  background: rgba(24, 14, 40, 0.82); backdrop-filter: blur(var(--blur-panel));
-  -webkit-backdrop-filter: blur(var(--blur-panel));
-  font-size: 12px;
+.dev-drawer .button-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.dev-drawer .button-row button {
+  flex: 1 1 auto; min-height: 26px; padding: 2px 9px; font-size: 11px;
 }
-.mock-column .mock-group { margin-bottom: 10px; }
-.mock-column .mock-group h3 {
-  margin: 0 0 4px; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: #c297ff; font-weight: 700;
+.dev-drawer button.mock-on,
+.dev-drawer button.mock-on:hover:not(:disabled) {
+  background: rgba(89, 149, 170, 0.85); border-color: rgba(121, 185, 205, 0.7); color: #fff;
 }
-.mock-column .button-row { display: flex; gap: 5px; flex-wrap: wrap; }
-.mock-column .mock-group button, .mock-column .button-row button {
-  min-height: 24px; padding: 2px 8px; font-size: 11px; flex: 1 1 auto;
+.dev-drawer .mock-explain {
+  margin-top: 8px; padding: 9px 10px; white-space: pre-line;
+  background: var(--glass-well); border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
 }
-.mock-column button.mock-on,
-.mock-column button.mock-on:hover:not(:disabled) { background: #a371f7; border-color: #a371f7; color: #fff; }
-.mock-column .mock-explain {
-  margin-top: 8px; padding: 8px; white-space: pre-line;
-  border: 1px solid #a371f7; border-radius: var(--radius-sm); background: rgba(163, 113, 247, 0.12);
-}
-.mock-column .hint { font-size: 11px; color: var(--text-2); }
+.dev-drawer .hint { font-size: 11px; color: var(--text-2); }

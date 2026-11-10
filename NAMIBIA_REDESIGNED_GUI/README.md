@@ -33,9 +33,13 @@ BACKEND_URL=http://<jetson-ip>:8090 npm run dev
 
 ### Mock mode
 
-Open **◂ Mock controls** on the right edge: it is the same dev panel as
-`asket_gui`'s (`@asket/components/MockControls.jsx`), so the whole section 6
-checklist can be run here. Press **Everything working** first: a fresh
+Press **Ctrl+Shift+D** (or open the page with `?dev`, e.g.
+`http://localhost:5174/?dev#navigate`) to show the dev panel; Escape or the
+same shortcut hides it. It is not part of the cockpit: no column or rail in
+the layout, only a glass drawer over the right edge, and only in mock mode.
+Inside is the same dev panel as `asket_gui`'s
+(`@asket/components/MockControls.jsx`), so the whole section 6 checklist can
+be run here. Press **Everything working** first: a fresh
 simulator is disarmed and un-pre-flighted, which looks like a boat that is off.
 
 Under it, a **redesign test rig** (`src/lib/mockRig.js`, mock mode only) adds
@@ -115,7 +119,7 @@ src/
   theme/app.css         glass, pills, buttons, shell
   theme/screens.css     per-screen layout
   theme/legacy-map.css  dark skin for the reused MissionMap, scoped to the GPS slot
-  theme/asket-embed.css glass skin for the reused ModeButtons, SonarPanel, LinkStatus, MockControls (scoped)
+  theme/asket-embed.css glass skin for the reused ModeButtons, SonarPanel, LinkStatus, and the mock dev drawer (scoped)
   theme/responsive.css  tablet (<1100 px) and phone (<760 px) layouts, loaded last
   components/           Shell (sidebar, header, footer, splash), ui (GlassPanel, Pill, ConfirmAction, StreamNotes…), Icons (from Figma)
   components/Embed.jsx  AsketEmbed: wrapper for a reused asket_gui component (Details view on)

@@ -75,7 +75,11 @@ export function SystemFooter({ v, connection }) {
       <span className="spacer" />
       <Pill level={v.receiving ? 'ok' : 'alarm'}>{link}</Pill>
       {v.simulated && <Pill level="mock" title="Every value is simulated by the backend.">Simulation</Pill>}
-      {connection.isMock && <Pill level="mock" title="No backend, no vessel: generated in this browser.">Mock data — browser only</Pill>}
+      {connection.isMock && (
+        <Pill level="mock" title="No backend, no vessel: generated in this browser. Ctrl+Shift+D opens the dev panel.">
+          Mock data — browser only
+        </Pill>
+      )}
       <Pill level={v.ready.level === 'ok' ? 'ok' : v.ready.level}>{v.ready.text}</Pill>
     </footer>
   );

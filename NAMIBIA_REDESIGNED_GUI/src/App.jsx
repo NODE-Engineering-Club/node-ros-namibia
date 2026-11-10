@@ -119,6 +119,32 @@ function RigControls({ connection, rig, onChange }) {
   );
 }
 
+/**
+ * The mock-mode dev panel is not part of the cockpit: no column, no rail.
+ * It exists only in mock mode, opens with Ctrl+Shift+D (or the `?dev` URL
+ * flag), closes with Escape or the same shortcut, and floats over the screen
+ * as a glass drawer.
+ */
+function useDevDrawer(enabled) {
+  const [open, setOpen] = useState(
+    () => enabled && new URLSearchParams(window.location.search).has('dev'),
+  );
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        setOpen((o) => !o);
+      } else if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled]);
+  return [open, setOpen];
+}
+
 const DRAFT_KEY = 'asket.redesign.draft.v1';
 
 function routeFromHash() {
@@ -166,9 +192,7 @@ export function App({ connection }) {
   const linkLost = !v.state.connected || !v.receiving;
 
   const navigate = (id) => { window.location.hash = id; };
-  // Closed by default, as in src/asket_gui: the default view is what an
-  // operator sees, not the review rig around it.
-  const [mockOpen, setMockOpen] = useState(false);
+  const [mockOpen, setMockOpen] = useDevDrawer(connection.isMock);
   const [, redrawRig] = useState(0);
   const rig = connection.rig;
   const sonarState = rig ? sonarViewState(v.state, rig.sonarView) : v.state;
@@ -200,13 +224,18 @@ export function App({ connection }) {
             {screen}
             <SystemFooter v={v} connection={connection} />
           </main>
-          {connection.isMock && (
-            <div className={`mock-column ${mockOpen ? 'open' : ''}`}>
-              <MockControls connection={connection} open={mockOpen} onOpenChange={setMockOpen} />
-              {mockOpen && rig && (
-                <RigControls connection={connection} rig={rig} onChange={() => redrawRig((n) => n + 1)} />
-              )}
-            </div>
+          {connection.isMock && mockOpen && (
+            <aside className="glass dev-drawer" aria-label="Developer panel, mock mode only">
+              <header className="dev-drawer-head">
+                <span>Dev panel</span>
+                <span className="faint">mock only · Ctrl+Shift+D</span>
+                <button type="button" className="btn small ghost" onClick={() => setMockOpen(false)} aria-label="Close dev panel">✕</button>
+              </header>
+              <div className="dev-drawer-body">
+                <MockControls connection={connection} open onOpenChange={setMockOpen} />
+                {rig && <RigControls connection={connection} rig={rig} onChange={() => redrawRig((n) => n + 1)} />}
+              </div>
+            </aside>
           )}
         </div>
       )}

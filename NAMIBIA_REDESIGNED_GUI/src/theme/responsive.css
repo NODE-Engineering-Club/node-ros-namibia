@@ -77,7 +77,6 @@
   .repo-head { flex-wrap: wrap; }
   .repo-head .input { width: 100%; }
 
-  /* Mock dev panel: an overlay from the right, above the bottom bar. */
-  .mock-column { position: fixed; top: 0; right: 0; bottom: 58px; z-index: 20; }
-  .mock-column.open { width: min(330px, 92vw); }
+  /* Mock dev drawer: full width, above the bottom bar. */
+  .dev-drawer { top: 8px; right: 8px; left: 8px; bottom: 66px; width: auto; }
 }
