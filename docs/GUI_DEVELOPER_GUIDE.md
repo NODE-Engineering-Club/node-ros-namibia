@@ -4,11 +4,281 @@
 to change how it looks. That is fine and expected. This document exists so that
 you can change the design without quietly breaking the boat.
 
-**What it assumes:** that you know React and a browser's developer tools. It
-does **not** assume you know ROS 2, this boat, or any of the hardware. Where
-something is not front-end knowledge, it is explained here.
+**What it assumes:** nothing. Sections A to D are for somebody who has never
+seen this project, and who may be new to web development and has certainly
+never used ROS. Sections 1 to 7 are the technical reference, for once you are
+working. Read A to D first even if you are experienced — they take fifteen
+minutes and they contain the two rules that matter.
+
+| If you want to | Read |
+|---|---|
+| Understand what this thing is | [A. The GUI in 5 minutes](#a-the-gui-in-5-minutes) |
+| Get it running on your laptop today | [B. Your first hour](#b-your-first-hour) |
+| Look up a word you do not know | [C. Glossary](#c-glossary) |
+| Know what you are allowed to change | [D. What you may change, in four lines](#d-what-you-may-change-in-four-lines) |
+| Work on the code | [1. Architecture](#1-architecture-on-one-page) onwards |
 
 ---
+
+## A. The GUI in 5 minutes
+
+### What it is
+
+ASKET is a small uncrewed boat. It carries a sonar and drives itself along
+survey lines over a kelp farm in Namibia, while a person watches from the
+shore.
+
+This GUI is **the screen that person watches.** It runs in an ordinary web
+browser on a laptop on the beach, and it shows what the boat is doing right
+now: where it is, which way it is pointing, how much battery is left, whether
+the sonar is working, whether the radio link is still good. It also has a
+handful of buttons: switch the boat between manual and automatic steering,
+start and stop recording, run the checks before launch.
+
+### What it is not
+
+**It is not what keeps the boat safe.** That is the single most important thing
+to understand before you change anything.
+
+The person on the beach also holds a radio transmitter, the kind used for model
+aircraft. One switch on it stops the boat's propellers. That signal goes
+straight to a small microcontroller on the boat and cuts the motors there, in a
+few hundred milliseconds, in hardware. It does not travel through the Jetson
+computer, or through ROS, or through this GUI, or through the browser or the
+Wi-Fi.
+
+So:
+
+- If your code crashes, the boat is still safe.
+- If the laptop's battery dies, the boat is still safe.
+- If the Wi-Fi drops, the boat is still safe.
+- **And if you add a feature that the boat's safety comes to depend on, you
+  have broken that.** Do not.
+
+The GUI's job is to tell the truth about what the boat is doing. Its failure
+mode is not crashing — it is *lying*: showing a position from thirty seconds
+ago as if it were current, or showing "autonomous" because somebody asked for
+autonomous rather than because the boat went there.
+
+### What is on the screen
+
+Nine panels, roughly: a **map** with the boat, its track, the planned survey
+lines and the geofence it may not leave; a **pre-flight** panel that runs about
+twenty checks and gives a GO or NO-GO verdict; a **boat** panel with the mode,
+the arming state and the mode buttons; **power**; **camera**; **sonar**;
+**obstacles**; **recording**; and **link**. Across the top is a one-line
+summary: ready or not ready, and why.
+
+### The two rules you will meet everywhere in the code
+
+1. **Show what the boat confirms, never what was asked for.** When you press
+   "Autonomous", the button shows *pending* until the boat's own status says it
+   is in autonomous mode. If it never does, the GUI says the command failed. It
+   never just colours the button in.
+2. **Every number on screen carries its age.** A value that stops updating must
+   visibly go stale, because on a bad radio link a frozen screen that looks
+   live is worse than a blank one.
+
+---
+
+## B. Your first hour
+
+The goal: the whole GUI running on your own laptop, with a simulated boat, in
+about ten minutes. **You need no boat, no ROS, no Python, no Jetson and no
+internet beyond the first install.** Everything you will see is generated in
+the browser.
+
+### 1. Install Node.js
+
+Node is the runtime that builds and serves the frontend. Get the **LTS**
+version from <https://nodejs.org>. On Linux or macOS you may prefer your
+package manager.
+
+Check it worked — open a terminal and type:
+
+```bash
+node --version
+```
+
+You want **v20 or newer**. (Verified here on v22.)
+
+### 2. Get the code
+
+```bash
+git clone https://github.com/NODE-Engineering-Club/node-ros-namibia.git
+cd node-ros-namibia
+git checkout integration-pre-sea-trial
+```
+
+### 3. Install the frontend's dependencies
+
+```bash
+cd src/asket_gui
+npm install
+```
+
+This downloads the libraries into a `node_modules` folder. It takes a minute or
+two the first time and is the only step that needs the internet. You run it
+once, and again whenever somebody changes `package.json`.
+
+### 4. Start it in mock mode
+
+```bash
+npm run dev:mock
+```
+
+"Mock mode" means the GUI invents its own data instead of talking to a boat.
+The terminal prints something like:
+
+```
+VITE v7.3.6   mock   ready in 1504 ms
+➜  Local:   http://localhost:5173/
+```
+
+Leave this terminal open. It is the server; closing it stops the GUI.
+
+### 5. Open it
+
+Put `http://localhost:5173/` in your browser.
+
+![The GUI on first load: a NOT READY banner, a map with the geofence and the
+planned survey lines, and most panels waiting for data.](gui/screenshots/01-first-run.png)
+
+**What you should see:** the map with a dashed brown geofence and blue planned
+survey lines, the boat as a small arrow, and panels down the right-hand side.
+At the top left it says **NOT READY: run the pre-flight**.
+
+**Nothing is wrong.** A freshly started simulator sits in manual, disarmed and
+idle. That is deliberately indistinguishable from a boat that is switched off,
+which is the honest thing for it to be.
+
+### 6. Press "Everything working"
+
+Look at the right-hand edge of the window for a purple strip labelled
+**Mock controls**. Click it. A third column slides out — this column exists
+only in mock mode and is your control over the simulated boat.
+
+Its first button, under **BASELINE**, is **Everything working**. Press it.
+
+![After pressing Everything working: READY TO GO, the boat autonomous and
+armed, a GO pre-flight with one honest warning, recording running, and the mock
+controls column open on the right.](gui/screenshots/02-everything-working.png)
+
+**What you should see now:**
+
+| Where | What |
+|---|---|
+| Top bar | **READY TO GO** in green, **Autonomous** in blue, battery 95 %, **Recording** |
+| Map | the boat moving along a survey line, painting a pale green covered strip behind it |
+| Pre-flight | a green **GO** badge |
+| Boat | **Autonomous**, **Armed**, "Mode → AUTONOMOUS: Confirmed by the vessel" |
+| Power, Sonar | real-looking numbers; sonar connected at 5 Hz |
+| Camera | "Camera not connected" — correct, there is no camera in the mock |
+
+**Press this button before anything else, every time.** Every other control in
+that column makes something *worse*, and you cannot tell whether a degraded
+state renders correctly until you have seen the healthy one.
+
+Notice the pre-flight says **GO with 1 warning — Mounting geometry is
+PROVISIONAL**. That warning is real and it is in the simulator on purpose:
+nobody has measured where the sonar sits on the boat, and the GUI says so
+rather than hiding it.
+
+### 7. Watch the two-step confirmation
+
+In the Boat panel, click **Manual** once — just once.
+
+![The Boat panel after one click on Manual: the button has changed to read
+"Confirm: Hand control to the RC transmitter?" and nothing has been sent
+yet.](gui/screenshots/03-two-step-confirm.png)
+
+The button does not send anything. It changes into **"Confirm: Hand control to
+the RC transmitter?"** and waits. Click it again and the command goes; the
+button reads *Waiting…* until the simulated boat confirms, and only then does
+the displayed mode change.
+
+That is safety rules 4 and 5 from section 3, and you have just watched both.
+If you redesign this panel, this behaviour has to survive.
+
+### 8. Now break things on purpose
+
+Go back to the mock controls column and work down it. **Link lost**,
+**GNSS degraded**, **Camera frozen**, **Sonar dropout**, **Low battery**,
+**RC link lost**, **Confirmation never arrives**. After each one, ask: *does the
+screen tell me the truth about what just happened?* Press **Everything
+working** between experiments to get back to a known state.
+
+Two worth doing slowly:
+
+- **Link lost** — the panels must visibly go stale, not keep showing the last
+  value as if it were current.
+- **GNSS degraded, then Run pre-flight, then Autonomous** — the verdict goes
+  NO-GO, and the Autonomous button is *pressable but refused*, with the reason
+  on screen. Only then does a checkbox and a second button appear to force it.
+  That sequence is explained in [section 3](#the-no-go-gate-and-the-force-button-in-detail);
+  seeing it once is worth more than reading it.
+
+### 9. When you are ready to change something
+
+`src/asket_gui/src/` holds the code. `panels/` is one file per panel,
+`components/` the shared pieces, `lib/` the logic. Vite reloads the page as you
+save. Before you merge anything, work through
+[section 6](#6-non-regression-checklist-before-merging-a-design-change).
+
+---
+
+## C. Glossary
+
+Words used in this document and in the code, one line each.
+
+| Term | Meaning |
+|---|---|
+| **Backend** | The program on the boat's computer that the GUI talks to. Here it is called `gui_backend`. It collects data from the boat and serves it to the browser. |
+| **Frontend** | The part that runs in the browser: what you see, and what you will be changing. |
+| **WebSocket** | A connection that stays open so the backend can push updates as they happen, instead of the browser asking over and over. The GUI uses exactly one. |
+| **Stream** | One named kind of live data, like `vessel` (position and heading) or `power` (battery). The GUI subscribes to the streams it wants; it is sent nothing it did not ask for. |
+| **Subscribe** | To ask the backend for a stream, at a rate. The backend may grant less than you asked and tells you why. |
+| **Link profile** | How much data the radio link can carry right now: `full`, `reduced` or `minimal`. Chosen automatically; it decides which streams survive. |
+| **Payload** | The actual contents of one update on one stream — the JSON object with the numbers in it. |
+| **Pre-flight** | The boat's self-check: about twenty tests (GNSS, battery, sonar, firmware version, geofence…) run before launch. |
+| **GO / NO-GO** | The pre-flight's verdict. NO-GO means at least one critical check failed, and the backend will then refuse to put the boat in autonomous mode. |
+| **Mock mode** | The GUI running with invented data generated in your browser. No boat, no backend, no network. How you develop. |
+| **Simulator** | The Python version of a fake boat, inside the real backend. One step more realistic than mock mode. |
+| **ROS 2** | The robotics framework the boat's software is built on. You will not write any. It is where the backend gets real data from. |
+| **Topic** | A named stream of messages inside ROS 2, such as `/pico/status`. The backend reads topics and turns them into GUI streams. |
+| **Pico** | The small microcontroller on the boat that drives the motors, reads the radio and owns the safety logic. The "vessel confirms" in rule 1 means the Pico. |
+| **Killswitch / Ch8** | The hardware stop: a physical switch and a channel on the radio transmitter. Both cut the motors without any software involved. |
+| **Arming** | Whether the motors are allowed to turn at all. Controlled by a switch on the radio transmitter, never by software. |
+| **Geofence** | A polygon on the map the boat may not leave. Enforced by the navigation stack, not by the GUI. |
+| **Stale** | A value that has stopped being updated. The GUI must show it as stale rather than as current. |
+
+---
+
+## D. What you may change, in four lines
+
+**Change freely:** every colour, font, icon, animation, panel layout, component
+structure and build tool. The whole look is yours.
+
+**Keep, or get reviewed first:** anything that decides *what the operator is
+told* — the two-step confirmations, pending-versus-confirmed state, the NO-GO
+gate and its force path, visible data age, absent hardware showing as absent,
+and visible link loss.
+
+**Never:** put the GUI in the safety chain. The radio transmitter and the
+killswitch stop the boat; nothing you add may weaken that or be relied on
+instead of it.
+
+**When in doubt:** the tables in [section 3](#3-what-you-may-change-and-what-needs-a-review)
+name the exact mechanism behind each rule, so you can check whether you have
+broken one.
+
+---
+
+# The technical reference
+
+Everything from here on assumes you have done [section B](#b-your-first-hour)
+and have the GUI running. It is written for working on the code rather than
+for a first read.
 
 ## How facts are labelled in this document
 
@@ -275,6 +545,8 @@ Three ways, in increasing order of what has to be installed. Use the lightest
 one that answers your question.
 
 ### 4.1 Mock mode — Node only, nothing else
+
+Walked through step by step in [section B](#b-your-first-hour); the short form:
 
 ```bash
 cd src/asket_gui
