@@ -280,8 +280,10 @@ fire. Values from [`docs/BENCH_TEST_PHASE_B.md`](BENCH_TEST_PHASE_B.md) §2a:
 
 Keep your hand on the supply's output switch.
 
-If the supply folds back at switch-on and the ESC tones loop, the inrush is
-tripping it: raise the limit to 3 A **for the power-up only**.
+If the supply folds back at switch-on and the ESC tones loop, the **inrush** is
+tripping it — the brief surge as the ESCs' capacitors charge, which is much
+larger than their running current. Raise the limit to 3 A **for the power-up
+only**, then put it back.
 
 **A T200 can draw over 20 A at full throttle.** On a 5 A supply it will
 current-limit and the ESC will brown out mid-test, which looks like a software
@@ -1607,6 +1609,7 @@ been edited. Where they disagree with
 | Term | Meaning |
 |---|---|
 | **ArduPilot / PX4** | The two competing open-source autopilot firmwares. Which one this Pixhawk runs is unknown, and the software has to be told. |
+| **arm window** | The 2 s after the relay closes during which the Pico holds the thrusters at neutral whatever the sticks say, so an ESC that is still booting cannot be handed a throttle. `ESC_ARM_DELAY_MS` in the firmware. |
 | **Arming** | Putting the vessel in a state where the motors may turn. Requires the RC arm switch (Ch7) and the mode switch (Ch8). |
 | **ASV** | Autonomous surface vessel. This boat. |
 | **BMS** | Battery management system. The board that monitors the LiPo's cells. |
@@ -1615,9 +1618,11 @@ been edited. Where they disagree with
 | **colcon** | The build tool for a ROS 2 workspace. `colcon build` compiles it; `colcon test` runs the ROS-dependent tests. |
 | **Container / image** | A packaged filesystem with its own installed software. An *image* is the package; a *container* is a running instance. |
 | **Dev container** | A container with your source code mounted into it, so edits take effect without rebuilding. The opposite of the production image. |
+| **DHCP** | A device being given its network address automatically when it connects, instead of having a fixed one. The Jetson's Wi-Fi uses it, so that address changes — look it up, never write it down. |
 | **Diagnostics** | `/diagnostics`, the ROS topic where nodes report their own health as key/value pairs. More informative than the GUI. |
 | **EKF** | Extended Kalman filter. Fuses GNSS and IMU into one position and heading estimate (`/odometry/filtered`). |
 | **ESC** | Electronic speed controller. Turns a PWM pulse into motor power. |
+| **failsafe** | What the radio receiver does when it loses the transmitter: either it says so with a flag (`sbusfs=1`) or it simply stops sending. The firmware treats both the same — stop the boat. |
 | **Geofence** | A polygon the boat may not leave. Nav2 treats outside it as impassable, so no path is planned or followed out of it. |
 | **GNSS** | Satellite positioning, the general term (GPS is one system). |
 | **GO / NO-GO** | The pre-flight's verdict. NO-GO blocks autonomous mode unless deliberately forced and logged. |
@@ -1642,8 +1647,11 @@ been edited. Where they disagree with
 | **Relay (A3KM)** | The relay on GPIO21 that would let the Pico cut ESC power. **Not wired.** |
 | **RTK** | Differential GNSS giving centimetre accuracy, using corrections from a fixed base. **Not implemented** in this software. |
 | **SBUS** | The serial protocol the RC receiver uses to send all channels on one wire. Inverted; the firmware decodes inverted SBUS only. |
+| **scp** | Copy files to or from another machine over SSH. Same arguments as `cp`, with `user@host:` in front of the remote side. |
 | **SonarView** | Cerulean's own application for the sonar: its settings, its live view, its recordings. **Takes the sonar's only TCP connection.** |
 | **Sourcing** | Running a script that sets environment variables in your current shell, so `ros2` commands work. Per-shell; every new terminal needs it. |
+| **SSH** | A remote terminal: you type on your laptop, the commands run on the Jetson. `ssh node@node2026`. |
+| **STATE line** | The status line the Pico prints about ten times a second, read with `ros2 topic echo /pico/status --field data`. Key fields: `ver` (firmware), `mode` (1 E-stop, 2 MANUAL, 3 AUTONOMOUS), `armed`, `relay`, `rclatch`, `wantauto` (the Jetson has asked for autonomy), `txdrop` (status lines dropped because the host stopped reading), and the `sbus*` counters including `sbusfs` (receiver failsafe flag). |
 | **systemd / `systemctl`** | Linux's service manager. `asket.service` is the unit that keeps the stack running. |
 | **T200** | Blue Robotics thruster. **Water-lubricated** — only short low-throttle bursts in air. |
 | **tcpdump** | A command-line tool that records raw network traffic to a file, for somebody else to decode later. Used when the sonar sends bytes we do not understand. |
