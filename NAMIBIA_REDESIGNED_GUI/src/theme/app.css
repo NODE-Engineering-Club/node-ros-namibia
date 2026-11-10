@@ -187,6 +187,29 @@ button { font-family: var(--font); }
 .confirm-result.failed { color: var(--alarm); }
 .confirm-result.pending { color: var(--text-2); }
 
+/* ----------------------------------------------------------------- data age */
+/* Safety rule 7, for components/Value.jsx and PanelAge from src/asket_gui.
+   On glass a "slightly greyer" value is invisible, so stale is amber and bold,
+   very stale is red AND struck through, and the age gets a tinted badge. */
+.value { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.age {
+  font: 500 10.5px var(--mono); white-space: nowrap; color: var(--text-2);
+  text-transform: none; letter-spacing: 0;
+}
+.value.stale > .value-text, .value.stale > .age, .age.stale { color: var(--warn); font-weight: 700; }
+.value.stale > .age, .age.stale { background: var(--warn-tint); padding: 0 4px; border-radius: 3px; }
+.value.very-stale > .value-text {
+  color: var(--alarm);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+.value.very-stale > .age, .age.very-stale {
+  color: #fff; font-weight: 700; background: rgba(248, 81, 73, 0.75);
+  padding: 0 4px; border-radius: 3px;
+}
+/* The one legitimate grey: a value never received is not a live value. */
+.value.missing > .value-text, .age.missing { color: var(--text-3); font-weight: 400; }
+
 /* ------------------------------------------------------------------- inputs */
 .input, select.input {
   height: 30px; padding: 0 10px; border-radius: var(--radius-sm);

@@ -1,4 +1,7 @@
-import { MODE_LABELS } from '@asket/lib/labels.js';
+import { LINK_LABELS, MODE_LABELS, PROFILE_LABELS } from '@asket/lib/labels.js';
+import { streamAgeMs } from '@asket/lib/connection.js';
+import { staleness, thresholdsForRate } from '@asket/lib/staleness.js';
+import { PanelAge, Value } from '@asket/components/Value.jsx';
 import { ModeButtons } from '@asket/panels/ModeCommands.jsx';
 import { duration, endurance } from '@asket/lib/format.js';
 
@@ -18,22 +21,51 @@ const DIRS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW'
 const dir = (deg) => (Number.isFinite(deg) ? DIRS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16] : '');
 const coord = (v, pos, neg) => (Number.isFinite(v) ? `${Math.abs(v).toFixed(4)}° ${v >= 0 ? pos : neg}` : '—');
 
-function StatusTile({ label, pill, level, sub }) {
+/**
+ * Age inputs for a stream (safety rule 7). `ageMs` is measured from the
+ * value's source timestamp against the estimated server clock
+ * (`streamAgeMs`); `rateHz` is the rate the server actually GRANTED, so a
+ * slow stream on a narrow link is not painted stale while working as agreed.
+ */
+const live = (v, stream) => ({
+  ageMs: streamAgeMs(v.state, stream),
+  rateHz: v.state.subscriptions[stream]?.rate_hz,
+});
+const ageLevel = ({ ageMs, rateHz }) => staleness(ageMs, ...thresholdsForRate(rateHz));
+
+/**
+ * One tile of the status strip.
+ *
+ * `age` is the stream's age; a stale tile greys its pill out and the value
+ * inside it is struck through, so an old green "OK" cannot read as a current
+ * one. `pill` is a plain string: absent data is said in words ("no data",
+ * "not sent"), never as a default that looks healthy.
+ */
+function StatusTile({ label, pill, level, sub, age }) {
+  const stale = age ? ageLevel(age) : 'fresh';
   return (
-    <div className="status-tile">
+    <div className={`status-tile ${stale}`}>
       <div className="label">{label}</div>
-      <Pill level={level}>{pill}</Pill>
-      <div className="sub">{sub}</div>
+      <Pill level={stale === 'very-stale' ? 'neutral' : level}>
+        {age && stale !== 'missing' ? <Value {...age} showAge={false}>{pill}</Value> : pill}
+      </Pill>
+      <div className="sub">
+        {age && stale !== 'missing' ? <Value {...age}>{sub}</Value> : sub}
+      </div>
     </div>
   );
 }
 
+const rcLine = (ok) => (ok === true ? 'RC link OK' : ok === false ? 'RC link LOST' : 'RC link: not sent');
+
 function StatusPanel({ v }) {
   const { link, power, pico, vessel, alarms } = v;
+  const connected = v.state.connected;
   const soc = power?.state_of_charge;
   const mode = pico?.mode;
   const fix = vessel?.fix_quality;
   const level = worstAlarm(alarms);
+  const profile = v.state.profile?.profile;
   return (
     <GlassPanel title="Status" icon={<IconPulse />} flush={false} bodyClass="flush-body"
       footer={(
@@ -48,39 +80,64 @@ function StatusPanel({ v }) {
       <div className="status-grid" style={{ padding: 0 }}>
         <StatusTile
           label="Link"
-          level={!link || link.active_link === 'none' ? 'alarm' : link.quality < 0.4 ? 'warn' : 'ok'}
-          pill={link?.rssi_dbm != null ? `${n(link.rssi_dbm, 0)} dBm` : (link?.active_link ?? 'no data')}
-          sub={link ? `${link.active_link} · ${n(link.rtt_ms, 0)} ms` : 'Not received'}
+          age={live(v, 'link')}
+          level={
+            !connected || link?.active_link === 'none'
+              ? 'alarm'
+              : !link || link.active_link == null
+                ? 'neutral'
+                : link.quality != null && link.quality < 0.4 ? 'warn' : 'ok'
+          }
+          pill={
+            !connected ? 'Disconnected'
+              : !link ? 'no data'
+                : link.rssi_dbm != null ? `${n(link.rssi_dbm, 0)} dBm`
+                  : LINK_LABELS[link.active_link] ?? 'not sent'
+          }
+          sub={link
+            ? `${LINK_LABELS[link.active_link] ?? 'bearer not sent'} · ${link.rtt_ms != null ? `${n(link.rtt_ms, 0)} ms` : 'latency not sent'}`
+            : 'Not received'}
         />
         <StatusTile
           label="Profile"
-          level={v.state.profile?.profile === 'full' ? 'ok' : v.state.profile ? 'warn' : 'neutral'}
-          pill={v.state.profile?.profile ?? '—'}
-          sub={link?.quality != null ? `quality ${Math.round(link.quality * 100)}%` : ''}
+          level={!connected ? 'neutral' : profile === 'full' ? 'ok' : profile ? 'warn' : 'neutral'}
+          pill={connected ? (PROFILE_LABELS[profile] ?? profile ?? 'unknown') : 'unknown'}
+          sub={link?.quality != null ? `quality ${Math.round(link.quality * 100)}%` : 'quality not sent'}
         />
         <StatusTile
           label="Battery"
+          age={live(v, 'power')}
           level={soc == null ? 'neutral' : soc < 0.25 ? 'alarm' : soc < 0.4 ? 'warn' : 'ok'}
-          pill={soc != null ? `${Math.round(soc * 100)}%` : '—'}
-          sub={power?.voltage != null ? `${n(power.voltage, 1)} V` : ''}
+          pill={!power ? 'no data' : soc != null ? `${Math.round(soc * 100)}%` : 'not sent'}
+          sub={power ? (power.voltage != null ? `${n(power.voltage, 1)} V` : 'voltage not sent') : 'Not received'}
         />
         <StatusTile
           label="Mode"
-          level={mode === 'ESTOP' ? 'alarm' : mode === 'AUTONOMOUS' ? 'info' : mode ? 'neutral' : 'neutral'}
-          pill={MODE_LABELS[mode] ?? 'Unknown'}
-          sub={pico?.rc_link_ok ? 'RC override available' : pico ? 'RC link not confirmed' : ''}
+          age={live(v, 'pico')}
+          level={!pico || mode == null ? 'neutral' : mode === 'ESTOP' ? 'alarm' : mode === 'AUTONOMOUS' ? 'info' : 'neutral'}
+          pill={!pico ? 'no data' : mode != null ? (MODE_LABELS[mode] ?? mode) : 'not sent'}
+          sub={pico ? rcLine(pico.rc_link_ok) : 'Not received'}
         />
         <StatusTile
           label="Arming"
-          level={pico?.armed ? 'ok' : pico ? 'neutral' : 'neutral'}
-          pill={pico?.armed == null ? '—' : pico.armed ? 'Armed' : 'Disarmed'}
-          sub={pico?.estop_latched ? 'E-stop latched' : pico?.armed ? 'Thrusters enabled' : ''}
+          age={live(v, 'pico')}
+          level={pico?.armed ? 'ok' : 'neutral'}
+          pill={!pico ? 'no data' : pico.armed == null ? 'not sent' : pico.armed ? 'Armed' : 'Disarmed'}
+          sub={
+            !pico ? 'Not received'
+              : pico.estop_latched === true ? 'Propulsion cut latched'
+                : pico.estop_latched == null ? 'cut latch: not sent'
+                  : pico.armed ? 'Thrusters enabled' : 'Thrusters off'
+          }
         />
         <StatusTile
           label="GPS"
-          level={!fix || fix === 'none' ? 'alarm' : fix === 'gps' ? 'warn' : 'ok'}
-          pill={vessel?.num_sats != null ? `${vessel.num_sats} sats` : (fix ?? '—')}
-          sub={vessel?.hdop != null ? `HDOP ${n(vessel.hdop, 1)} · ${fix}` : fix ?? ''}
+          age={live(v, 'vessel')}
+          level={!vessel || fix == null ? 'neutral' : fix === 'none' ? 'alarm' : fix === 'gps' ? 'warn' : 'ok'}
+          pill={!vessel ? 'no data' : vessel.num_sats != null ? `${vessel.num_sats} sats` : (fix ?? 'not sent')}
+          sub={vessel
+            ? `${vessel.hdop != null ? `HDOP ${n(vessel.hdop, 1)}` : 'HDOP not sent'} · ${fix ?? 'fix not sent'}`
+            : 'Not received'}
         />
       </div>
     </GlassPanel>
@@ -105,12 +162,15 @@ function ModePanel({ v, connection }) {
     <GlassPanel
       title="Mode" icon={<IconPulse />}
       aside={(
+        <>
+        <PanelAge {...live(v, 'pico')} />
         <Pill
           level={!v.pico ? 'neutral' : mode === 'ESTOP' ? 'alarm' : mode === 'AUTONOMOUS' ? 'info' : 'neutral'}
           title="What the vessel reports, not what was requested."
         >
           {!v.pico ? 'Mode: no data' : `Vessel: ${MODE_LABELS[mode] ?? 'not sent'}`}
         </Pill>
+        </>
       )}
     >
       <AsketEmbed className="mode-embed">
@@ -120,10 +180,10 @@ function ModePanel({ v, connection }) {
   );
 }
 
-function Compass({ heading }) {
+function Compass({ heading, level = 'fresh' }) {
   const ticks = Array.from({ length: 12 }, (_, i) => i * 30);
   return (
-    <svg className="compass" viewBox="0 0 150 150">
+    <svg className={`compass ${level}`} viewBox="0 0 150 150">
       <circle cx="75" cy="75" r="62" fill="var(--glass-well)" stroke="var(--border)" />
       {ticks.map((t) => {
         const a = ((t - 90) * Math.PI) / 180;
@@ -136,7 +196,7 @@ function Compass({ heading }) {
           </g>
         );
       })}
-      {Number.isFinite(heading) && (
+      {Number.isFinite(heading) && level !== 'missing' && (
         <g transform={`rotate(${heading} 75 75)`}>
           <path d="M75 24 L81 75 L75 82 L69 75 Z" fill="#fff" />
           <path d="M75 126 L81 75 L69 75 Z" fill="var(--text-3)" />
@@ -149,10 +209,16 @@ function Compass({ heading }) {
 
 function TelemetryPanel({ v }) {
   const { vessel, heading, sonar } = v;
-  const hdg = heading?.heading_deg ?? vessel?.heading_deg;
+  // The heading stream when it carries a heading, else the vessel's; the age
+  // shown is the age of whichever one is displayed.
+  const fromHeading = Number.isFinite(heading?.heading_deg);
+  const hdg = fromHeading ? heading.heading_deg : vessel?.heading_deg;
+  const pos = live(v, 'vessel');
+  const hdgAge = fromHeading ? live(v, 'heading') : pos;
   const sonarUrl = v.state.hello?.source?.sonarview_url || import.meta.env.VITE_SONARVIEW_URL;
   return (
     <GlassPanel title="Vessel telemetry" icon={<IconFlag />} bodyClass="flush-body"
+      aside={<PanelAge {...live(v, 'vessel')} />}
       footer={(
         <div className={`sonar-strip ${sonar?.connected ? '' : 'down'}`}>
           <IconWave />
@@ -169,20 +235,25 @@ function TelemetryPanel({ v }) {
       <div className="telemetry" style={{ padding: 0 }}>
         <div>
           <div className="label">Coordinates</div>
-          <div className="mono" style={{ fontSize: 16 }}>{coord(vessel?.lat, 'N', 'S')}<br />{coord(vessel?.lon, 'E', 'W')}</div>
+          <div className="mono" style={{ fontSize: 16 }}>
+            <Value {...pos} showAge={false}>{coord(vessel?.lat, 'N', 'S')}</Value><br />
+            <Value {...pos}>{coord(vessel?.lon, 'E', 'W')}</Value>
+          </div>
           <div className="label">Heading</div>
-          <div className="big">{Number.isFinite(hdg) ? `${Math.round(hdg)}°` : '—'}<small>{dir(hdg)}</small></div>
-          {vessel?.heading_valid === false && <Pill level="alarm">Heading invalid</Pill>}
+          <div className="big">
+            <Value {...hdgAge}>{Number.isFinite(hdg) ? `${Math.round(hdg)}°` : 'not sent'}<small>{dir(hdg)}</small></Value>
+          </div>
+          {(heading?.valid ?? vessel?.heading_valid) === false && <Pill level="alarm">Heading invalid</Pill>}
         </div>
         <div>
           <div className="label">Speed</div>
-          <div className="big">{n(vessel?.sog_ms, 1)}<small>m/s</small></div>
+          <div className="big"><Value {...pos}>{n(vessel?.sog_ms, 1)}<small>m/s</small></Value></div>
           <div style={{ display: 'flex', gap: 22 }}>
-            <div><div className="label">Roll</div><div className="big" style={{ fontSize: 18 }}>{n(vessel?.roll_deg, 1)}°</div></div>
-            <div><div className="label">Pitch</div><div className="big" style={{ fontSize: 18 }}>{n(vessel?.pitch_deg, 1)}°</div></div>
+            <div><div className="label">Roll</div><div className="big" style={{ fontSize: 18 }}><Value {...pos} showAge={false}>{n(vessel?.roll_deg, 1)}°</Value></div></div>
+            <div><div className="label">Pitch</div><div className="big" style={{ fontSize: 18 }}><Value {...pos} showAge={false}>{n(vessel?.pitch_deg, 1)}°</Value></div></div>
           </div>
         </div>
-        <Compass heading={hdg} />
+        <Compass heading={hdg} level={ageLevel(hdgAge)} />
       </div>
     </GlassPanel>
   );
@@ -196,14 +267,18 @@ function MissionPanel({ v, connection, active, onNavigate }) {
   const legM = legs(wps);
   let cum = 0;
   const canFinish = power?.can_finish_survey;
+  const powerAge = live(v, 'power');
   const here = Number.isFinite(vessel?.lat) ? { lat: vessel.lat, lon: vessel.lon } : null;
 
   return (
     <GlassPanel title="Mission" icon={<IconFlag />}
       aside={(
-        <Pill level={mission?.state === 'ERROR' ? 'alarm' : recording ? 'alarm' : 'neutral'}>
-          {mission?.state ? mission.state : 'No data'}
-        </Pill>
+        <>
+          <PanelAge {...live(v, 'mission')} />
+          <Pill level={mission?.state === 'ERROR' ? 'alarm' : recording ? 'alarm' : 'neutral'}>
+            {!mission ? 'No data' : mission.state ?? 'state not sent'}
+          </Pill>
+        </>
       )}
       bodyClass="flush-body"
       footer={(
@@ -230,12 +305,28 @@ function MissionPanel({ v, connection, active, onNavigate }) {
             </button>
           </div>
           <div className="mission-stats">
-            <div><div className="label">Mission time</div><div className="value">{recording ? duration(mission.elapsed_s) : '—'}</div></div>
-            <div><div className="label">Battery</div><div className="value">{power?.state_of_charge != null ? `${Math.round(power.state_of_charge * 100)}%` : '—'}</div></div>
+            <div>
+              <div className="label">Mission time</div>
+              <div className="stat">
+                <Value {...live(v, 'mission')}>{!mission ? 'no data' : recording ? duration(mission.elapsed_s) : 'not recording'}</Value>
+              </div>
+            </div>
+            <div>
+              <div className="label">Battery</div>
+              <div className="stat">
+                <Value {...powerAge}>{!power ? 'no data' : power.state_of_charge != null ? `${Math.round(power.state_of_charge * 100)}%` : 'not sent'}</Value>
+              </div>
+            </div>
             <div>
               <div className="label">Est. left</div>
-              <div className="value">{power?.endurance_s != null ? endurance(power.endurance_s) : '—'}</div>
-              {canFinish != null && <Pill level={canFinish ? 'ok' : 'alarm'}>{canFinish ? 'Sufficient' : 'Insufficient'}</Pill>}
+              <div className="stat">
+                <Value {...powerAge}>{!power ? 'no data' : power.endurance_s != null ? endurance(power.endurance_s) : 'not sent'}</Value>
+              </div>
+              {canFinish != null && (
+                <Pill level={ageLevel(powerAge) === 'very-stale' ? 'neutral' : canFinish ? 'ok' : 'alarm'}>
+                  <Value {...powerAge} showAge={false}>{canFinish ? 'Sufficient' : 'Insufficient'}</Value>
+                </Pill>
+              )}
             </div>
           </div>
         </div>
@@ -299,10 +390,18 @@ export function Navigate({ v, connection, active, onNavigate }) {
             <GlassPanel
               title="GPS basemap" icon={<IconMap />} flush
               aside={(
-                <Pill level={!vessel?.fix_quality || vessel.fix_quality === 'none' ? 'alarm' : 'ok'}>
+                <>
+                <PanelAge {...live(v, 'vessel')} />
+                <Pill
+                  level={
+                    ageLevel(live(v, 'vessel')) === 'very-stale' ? 'neutral'
+                      : !vessel?.fix_quality || vessel.fix_quality === 'none' ? 'alarm' : 'ok'
+                  }
+                >
                   {vessel?.fix_quality && vessel.fix_quality !== 'none' ? 'GPS lock' : 'No fix'}
                   {vessel?.num_sats != null ? ` · ${vessel.num_sats} sats` : ''}
                 </Pill>
+                </>
               )}
             >
               <GpsSlot v={v} connection={connection} />
