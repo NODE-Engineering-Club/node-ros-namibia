@@ -8,6 +8,7 @@ import { tapStreamUnavailable } from './lib/streamNotes.js';
 import { createMockRig, refuseWhenDown } from './lib/mockRig.js';
 import './theme/app.css';
 import './theme/screens.css';
+import './theme/responsive.css';
 
 /**
  * Same boot as src/asket_gui/src/main.jsx: the only difference between real
