@@ -1,6 +1,7 @@
 # Brand assets
 
-Put the background pattern here as `pattern.jpg`.
+The background pattern lives here as `pattern.jpg` (1440 × 1024, exported
+from Figma). To update it, overwrite that file.
 
 Export it from the Figma file (*GUI - Design*): select the `Pattern image` layer
 inside the `ASKET/Background` component → Export → JPG, 2x → save as

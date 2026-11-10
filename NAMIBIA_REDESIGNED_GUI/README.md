@@ -133,7 +133,7 @@ src/
   lib/streamNotes.js    subscription reasons + stream_unavailable ("source silent")
   lib/mockRig.js        mock-only test rig (backend stops / down, boat sonar view)
 public/missions/walvis_survey_01.json   example mission
-public/brand/           put pattern.jpg here (see below)
+public/brand/pattern.jpg  background pattern exported from Figma (see below)
 ```
 
 ### Design tokens
@@ -143,7 +143,8 @@ Figma → change the matching variable → every screen follows.
 
 **Background pattern:** export the `Pattern image` layer of the
 `ASKET/Background` component in Figma as JPG and save it as
-`public/brand/pattern.jpg`. Until then a CSS approximation is drawn.
+`public/brand/pattern.jpg` (in place; replace it to update the background).
+If the file is missing, a CSS approximation is drawn instead.
 
 ## Mission .json format
 
