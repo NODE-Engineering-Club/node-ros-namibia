@@ -89,8 +89,8 @@ class SonarHealthTracker:
         self.commanded_ping_rate_hz = 0.0
         self.range_setting_m = 0.0
         self.gain_setting = 0
-        #: From END_PING_INFO. ``None`` until the device has told us.
-        self.realized_ping_rate_hz: float | None = None
+        #: (ping_number, pwr_up_msec) from recent END_PING_INFO.
+        self._device_pings: deque[tuple[int, int]] = deque(maxlen=26)
 
     # -- inputs -----------------------------------------------------------
 
@@ -129,19 +129,26 @@ class SonarHealthTracker:
 
     def on_end_ping(
         self,
-        realized_ping_rate_hz: float,
+        ping_number: int = 0,
+        pwr_up_msec: int = 0,
         gain_index: int | None = None,
         range_end_m: float | None = None,
     ) -> None:
         """The device's own account of the ping it just finished.
 
-        Preferred over timing arrivals here, because a rate measured at this end
-        also measures the network: a sonar pinging happily at 5 Hz behind a
-        congested switch would otherwise be reported as slow, sending somebody
-        to look at the wrong thing.
+        Its ping counter and uptime give a rate preferred over timing arrivals
+        here, because a rate measured at this end also measures the network: a
+        sonar pinging happily at 5 Hz behind a congested switch would otherwise
+        be reported as slow, sending somebody to look at the wrong thing. Using
+        the counter also means a dropped frame does not read as a slower ping.
         """
-        if realized_ping_rate_hz > 0:
-            self.realized_ping_rate_hz = realized_ping_rate_hz
+        if pwr_up_msec > 0:
+            if self._device_pings and (
+                ping_number <= self._device_pings[-1][0]
+                or pwr_up_msec <= self._device_pings[-1][1]
+            ):
+                self._device_pings.clear()  # the sonar restarted
+            self._device_pings.append((ping_number, pwr_up_msec))
         if gain_index is not None:
             self.gain_setting = gain_index
         # The device also reports the range window it actually used, which in
@@ -155,15 +162,24 @@ class SonarHealthTracker:
         while self._ping_times and now - self._ping_times[0] > self.window_s:
             self._ping_times.popleft()
 
+    @property
+    def realized_ping_rate_hz(self) -> float | None:
+        """From the sonar's own counter and uptime; ``None`` until it can be."""
+        if len(self._device_pings) < 2:
+            return None
+        first, last = self._device_pings[0], self._device_pings[-1]
+        return (last[0] - first[0]) * 1000.0 / (last[1] - first[1])
+
     def ping_rate_hz(self, now_monotonic: float | None = None) -> float:
         """The device's realized rate where we have it, otherwise measured.
 
-        Falls back to measurement so the panel is not blank before the first
-        END_PING_INFO arrives, and so a device that never sends one still
+        Falls back to measurement so the panel is not blank before enough
+        END_PING_INFO have arrived, and so a device that never sends one still
         reports something.
         """
-        if self.realized_ping_rate_hz is not None and self._recently_active(now_monotonic):
-            return self.realized_ping_rate_hz
+        realized = self.realized_ping_rate_hz
+        if realized is not None and self._recently_active(now_monotonic):
+            return realized
         return self.measured_ping_rate_hz(now_monotonic)
 
     def _recently_active(self, now_monotonic: float | None = None) -> bool:

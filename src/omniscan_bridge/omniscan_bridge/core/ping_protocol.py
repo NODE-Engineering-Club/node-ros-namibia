@@ -233,10 +233,10 @@ class AttitudeReport:
 @dataclass
 class EndPingInfo:
     ping_number: int
-    #: The rate the sonar actually achieved, which is not always the one it was
-    #: asked for — a long range forces a slower ping. Better than measuring it
-    #: ourselves, because it is the device's own figure.
-    ping_hz_realized: float
+    #: The acoustic frequency of the ping, NOT how often it pings. Measured
+    #: 451127 on the real unit (2026-11-06), pinging at 5 Hz with
+    #: ``target_ping_hz`` at 450000.
+    acoustic_hz: float
     range_start_m: float
     range_end_m: float
     gain_index: int
@@ -375,7 +375,7 @@ def encode_end_ping_info(info: EndPingInfo, **frame_kwargs) -> bytes:
             info.water_bar,
             0.0,
             0.0, 0.0, 0.0,
-            info.ping_hz_realized,
+            info.acoustic_hz,
             info.gain_index,
             info.pulse_usec,
             info.n_range_bins,
@@ -502,7 +502,7 @@ def decode_end_ping_info(payload: bytes) -> EndPingInfo:
     ) = _END_PING_INFO.unpack_from(payload, 0)
     return EndPingInfo(
         ping_number=ping_number,
-        ping_hz_realized=ping_hz,
+        acoustic_hz=ping_hz,
         range_start_m=range_start,
         range_end_m=range_end,
         gain_index=gain_index,

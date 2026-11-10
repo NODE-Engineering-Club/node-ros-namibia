@@ -15,13 +15,13 @@ ported from node-ros-2026 `1606eb7`, see `docs/gui/PORTING_NOTES.md`).
 |---|---|
 | Autopilot | **Pixhawk 4.** Provides position, heading and IMU through MAVROS. **It does not drive the motors.** Firmware believed to be PX4 by the team, but the code assumes ArduPilot Rover (`README.md:40` records `FRAME_CLASS=2`, an ArduPilot parameter, read off the real Pixhawk) — **TO VERIFY**. |
 | Propulsion | 2× Blue Robotics T200 + 2× Blue Robotics Basic ESC 30A (bidirectional). ESC signal wires go to the **Pico** (GPIO15 left, GPIO16 right). |
-| Low-level controller | Raspberry Pi Pico 2. Firmware flashed: **pico-node_v4** — **TO VERIFY** by a `STATE ver=4 …` line on `/pico/status`. |
+| Low-level controller | Raspberry Pi Pico 2. The firmware this stack drives is **pico-node_v5** (`EXPECTED_FIRMWARE_VERSION = 5` in `src/asket_common/asket_common/pico_link.py`, `FW_VERSION 5` in the sketch, `PROTOCOL_VERSION = 5` in the GUI parser). **What is on the Pico right now is NOT VERIFIED** — check with a `STATE ver=5 …` line on `/pico/status`. v5 has never been compiled by the Arduino toolchain (`docs/BENCH_TEST_PHASE_B.md` §0 step 7). |
 | Radio | Radiomaster MT12 + RP4TD ExpressLRS 2.4 GHz receiver, **set to SBUS output** (the firmware decodes inverted SBUS only). Behaviour on radio loss (failsafe flag vs. silence) — **TO VERIFY on the bench**. |
 | ESC relay / E-stop feedback | Relay (A3KM, 47 Ω precharge) and E-stop button feedback **not wired yet**. Pins kept as in v4: GPIO21 relay, GPIO20 E-stop feedback, GPIO10/11/12 lights, GPIO13 buzzer. |
 | Signalling | 3 lights (green/yellow/red) as in the firmware. |
 | Energy | 2× LiPo 4S 8000 mAh **in parallel** ≈ 2 × 14.8 V × 8 Ah ≈ **237 Wh**. Probably **2 BQ76920 BMS** boards, one per pack — **TO VERIFY**. |
 | GNSS | Holybro H-RTK Unicore UM982 (dual antenna, heading) **on the Pixhawk**. RTK base Holybro F9P ashore; corrections wanted along base → shore laptop → WiFi → Jetson → MAVROS → Pixhawk (**not implemented**, see Phase B). |
-| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. Reached over **TCP 62312 at 192.168.2.21** — measured 2026-10-28, see §2. What that stream contains is **not verified**: the transducer was in air and no point data has ever been seen. |
+| Sonar | **One** Cerulean Omniscan 3D 450 SS Modular, run by **SonarView** (Cerulean, ideally in Docker on the Jetson) on a **separate screen**. The mission GUI shows at most a simple health state. Reached over **TCP 62312 at 192.168.2.21** — measured 2026-10-28, see §2. That stream is Ping Protocol and its point data decodes, measured 2026-11-06 in a bucket; see `docs/SONAR_BRINGUP.md`. |
 | Camera | **OAK-D-LR** over PoE replaces the USB camera, which is no longer used. Object recognition by camera only. **No driver in the image yet**; prepared behind `enable_oak` (off), see `docs/CAMERA_OAK.md`. |
 | Lidars | **No Livox and no RPLidar on board for now.** ⇒ **The boat has no obstacle detection.** |
 | BlueOS / Raspberry Pi 5 | **Not used.** |
@@ -62,11 +62,12 @@ The plan above is a plan. What was measured on the hardware:
 | Two boards, **AX** and **BX**, firmware **V1.8.2** and **V1.7.2** | SonarView's device list |
 | Boards at **192.168.2.201/.202** exchange **UDP** with the host on **51221/51222** | observed traffic, control packets of 10–105 bytes |
 
-**NOT verified:** what the bytes on TCP 62312 are. The transducer was in air,
-so the sonar produced no soundings and no point data has ever been seen.
-Neither is it known whether the sonar streams unasked, nor whether SonarView
-and `omniscan_bridge` can hold that port at once. See `docs/SONAR_BRINGUP.md`,
-which carries the test for each.
+**Measured since, on 2026-11-06, in a bucket:** the stream is Ping Protocol and
+`OS3D_POINT_SET` decodes. An idle sonar sends only status, and point data needs
+the sonar told to ping. It keeps pinging with no client connected. The port
+refused a second plain TCP client, so expect SonarView and `omniscan_bridge` to
+exclude each other. **Not verified:** that refusal with SonarView itself, and
+point positions against a real target. See `docs/SONAR_BRINGUP.md`.
 
 ### IP conflict — a network decision nobody has taken
 
@@ -123,7 +124,7 @@ Status: ✅ integrated and testable · ⚠️ code present but incomplete · ❌
 | UM982 GNSS (dual antenna) | to the Pixhawk | — | via MAVROS as above | — | Heading (source shown as EKF) | ⚠️ ArduPilot/PX4 GPS-yaw config to verify |
 | F9P RTK base | shore laptop → WiFi → Jetson | — | none (MAVROS `gps_rtk` plugin not fed) | — | — | ❌ (Phase B) |
 | Pico 2 | USB CDC 115200 (via hub) | `pico_port` default `/dev/pico` (udev, `deploy/udev/`) | `pico_bridge` → `/pico/status`; `/pico/mode_request`, `/control/effort` in | **yes** (`use_pico_bridge:=true` is the default since Phase B a) | Mode, Vessel, pre-flight | ⚠️ bench test first |
-| 2× T200 + Basic ESC 30A | PWM from Pico GPIO15/16, 1000–2000 µs, 1500 neutral | `firmware/pico-node_v4/pico-node_v4.ino` | firmware | always (firmware) | Vessel | ⚠️ motor path default (Phase B) |
+| 2× T200 + Basic ESC 30A | PWM from Pico GPIO15/16, 1000–2000 µs, 1500 neutral | `firmware/pico-node_v5/pico-node_v5.ino` (v4 is kept only to roll back to) | firmware | always (firmware) | Vessel | ⚠️ motor path default (Phase B) |
 | RP4TD (ELRS) + MT12 | SBUS into Pico GPIO5 (inverted, 100 kbaud 8E2) | firmware; Ch3 throttle, Ch4 yaw, Ch7 arm, Ch8 mode | firmware | always | Vessel (RC) | ⚠️ SBUS output and failsafe behaviour to verify |
 | ESC relay (A3KM) | Pico GPIO21 | firmware | firmware | — | Vessel ("ESC power") | ❌ not wired |
 | E-stop button feedback | Pico GPIO20 (divider) | `ESTOP_FEEDBACK_ENABLED 0` | firmware | — | "not sent" | ❌ not wired |
@@ -373,15 +374,15 @@ Unicore UM982"; Holybro's UM982 setup guide.
 | # | Item | How |
 |---|---|---|
 | V1 | Pixhawk firmware: PX4 or ArduPilot | USB IDs (`udevadm info`, see `deploy/udev/README.md`), or `ros2 topic echo /mavros/state --once` (`mode:` `MANUAL/HOLD/GUIDED` = ArduPilot Rover; `MANUAL/POSCTL/OFFBOARD` = PX4) |
-| V2 | Pico firmware is pico-node_v4 | `ros2 topic echo /pico/status --field data` shows `STATE ver=4 …` |
+| V2 | Pico firmware is pico-node_v5 | `ros2 topic echo /pico/status --field data` shows `STATE ver=5 …`. The stack refuses motion and `MODE AUTO` to anything else, and the pre-flight's *Pico firmware version* is critical, so this gates the whole motor path. v5 has never been built by the Arduino toolchain or run on a Pico: `docs/BENCH_TEST_PHASE_B.md` §0 |
 | V3 | RP4TD outputs SBUS, and what it does on radio loss | bench, ESC unpowered: switch the MT12 off, watch `sbusfs=` / `sbuslost=` / `sbusok=` in the STATE line |
 | V4 | Two BMS boards, one per pack | count MCP2221 devices (`ls -l /dev/serial/by-id/`) |
 | V5 | MCP2221 serial numbers are unique | `udevadm info` (they are often blank or identical — then use the USB port path) |
 | V6 | UM982 yaw reaches the EKF | `ros2 topic echo /odometry/filtered` heading vs. a known bearing |
 | V7 | ~~Sonar re-addressed to 10.10.20.31~~ | **Superseded.** The sonar answers on 192.168.2.21 (2026-10-28) and whether it moves at all is an open network decision — see §2 |
-| V8 | SonarView and `omniscan_bridge` can both read TCP 62312 | **Open.** Procedure in `docs/SONAR_BRINGUP.md` §5 "Both at once?". Needs the transducer in water, both connection orders, and one of four named outcomes recorded |
-| V9 | What the Omniscan actually sends on TCP 62312 | **Open, and the blocking one.** The transport is measured; the format is not. `scripts/sonar_probe.py` with the transducer in water — point sets decode, bytes arrive that do not decode (capture them), or nothing arrives |
-| V10 | Whether the sonar streams unasked, or must be commanded | **Open.** Nothing in this repository sends a start command, by design: `send_ping_parameters` is `false` because those parameters start the transducer |
+| V8 | SonarView and `omniscan_bridge` can both read TCP 62312 | **Probably not.** On 2026-11-06 a second plain TCP client was refused. Still to confirm with SonarView itself: `docs/SONAR_BRINGUP.md` §5 "Both at once?" |
+| V9 | What the Omniscan actually sends on TCP 62312 | **Closed 2026-11-06.** Ping Protocol: status when idle, and point sets (3104) when pinging, which decode with no length mismatches. Accuracy against a real target is still unmeasured |
+| V10 | Whether the sonar streams unasked, or must be commanded | **Answered 2026-11-06.** It must be commanded to ping (`~/start_pinging`), it then **keeps pinging with no client connected**, and `~/stop_pinging` stops it. An idle sonar still sends status frames. `send_ping_parameters` stays `false` by default because those parameters start the transducer. See `docs/SONAR_BRINGUP.md` |
 | O1 | LTE beacon (LilyGO T-SIM7000G) | team decision |
 | O2 | Where SonarView runs (Docker on the Jetson?) | team decision |
 | O3 | Cloudflare relay hostname and deployment | team decision |

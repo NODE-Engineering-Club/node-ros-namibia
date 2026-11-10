@@ -12,15 +12,15 @@ Two kinds of fake are used, for the two transports the probe now knows about:
   was measured to answer on **TCP 62312 only**: 51200 and 7077 were closed.
 
 What these prove is that the probe reads a live sonar correctly, reports an
-absent one honestly, and — the case that actually happened — reports a
-connection that opens and stays silent as exactly that. What they cannot prove
-is what a real Omniscan 3D puts on TCP 62312, because the transducer was in air
-and nothing was sent. See docs/SONAR_BRINGUP.md §3.
+absent one honestly, reports a connection that opens and stays silent as exactly
+that, and does not call an idle sonar a fault. They use no hardware. See
+docs/SONAR_BRINGUP.md §3.
 """
 
 from __future__ import annotations
 
 import socket
+import struct
 import sys
 import threading
 import time
@@ -199,9 +199,8 @@ def test_tcp_point_sets_are_seen_and_named():
 
 
 def test_a_connection_that_opens_and_says_nothing_is_reported_as_such():
-    """The actual 2026-10-28 result. It must not read as a failure to connect,
-    and it must not read as a working sonar: it is a live device with a dry
-    transducer, and the operator's next move is water, not a cable."""
+    """The actual 2026-10-28 result, with a dry transducer. It must not read as
+    a failure to connect, and it must not read as a working sonar."""
     fake = _TcpFake([])
     try:
         up, seen, total = sonar_probe.listen_tcp("127.0.0.1", fake.port, seconds=1.5)
@@ -213,8 +212,8 @@ def test_a_connection_that_opens_and_says_nothing_is_reported_as_such():
 
 
 def test_bytes_that_are_not_ping_protocol_are_reported_not_swallowed():
-    """The outcome nobody has ruled out. "Connected, bytes, nothing parsed" is
-    a finding, and the probe has to be able to say it."""
+    """Not what the real unit did on 2026-11-06, but "connected, bytes, nothing
+    parsed" is a finding, and the probe has to be able to say it."""
     fake = _TcpFake([bytes(range(256)) * 4])
     try:
         up, seen, total = sonar_probe.listen_tcp("127.0.0.1", fake.port, seconds=1.5)
@@ -226,15 +225,35 @@ def test_bytes_that_are_not_ping_protocol_are_reported_not_swallowed():
 
 
 def test_the_probe_sends_nothing_to_the_sonar():
-    """It is a probe. A sonar that needs asking before it streams is an open
-    question, and inventing the request to find out is how a transducer gets
-    driven in air."""
+    """It is a probe. Telling the sonar to ping is how a transducer gets driven
+    in air, so that stays with a person calling ``~/start_pinging``."""
     fake = _TcpFake([])
     try:
         sonar_probe.listen_tcp("127.0.0.1", fake.port, seconds=1.0)
         assert bytes(fake.bytes_from_client) == b""
     finally:
         fake.stop()
+
+
+def test_an_idle_sonar_is_reported_as_idle_not_as_a_format_problem(capsys):
+    """What the real unit does (2026-11-06): valid status frames and no point
+    data. Calling that "bytes that did not parse" would be a false alarm."""
+    def frame(message_id, payload=b""):
+        body = b"BR" + struct.pack("<HHBB", len(payload), message_id, 0, 0) + payload
+        return body + struct.pack("<H", sum(body) & 0xFFFF)
+
+    fake = _TcpFake([frame(14), frame(9, b'{"type": "os3d_temperature"}'), frame(14)])
+    try:
+        code = sonar_probe.main([
+            "--host", "127.0.0.1", "--port", str(fake.port), "--listen", "1",
+            "--broadcast", "127.0.0.1", "--no-probe-old-ports",
+        ])
+    finally:
+        fake.stop()
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "idle" in out
+    assert "did not parse" not in out
 
 
 def test_a_dead_tcp_port_is_a_clean_false_not_a_traceback():

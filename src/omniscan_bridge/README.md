@@ -10,21 +10,42 @@ documented port for the 450 family) and 7077 (SonarLink) were closed, and
 SonarView reported `CONNECTED, tcp://192.168.2.21:62312`. The port this package
 was built around was right; the transport was not, and is now `tcp`.
 
-**The format of that stream is not verified.** The transducer was in air, so no
-point data has ever been seen. This package assumes nothing: the parser rejects
-and counts what it cannot read, the diagnostics will not say OK until a point
-set has decoded, and `bytes_received` against `point_sets` in `/diagnostics` is
-how you tell "nothing is being sent" from "something is being sent and it is
-not what we parse".
+**The stream is Ping Protocol, measured 2026-11-06.** With the transducer in a
+bucket, `OS3D_POINT_SET` decoded with no length mismatches and no invalid frames.
+That checks structure, not accuracy: nothing has been measured against a real
+target. An idle sonar sends only status, so `frames_valid` against `point_sets`
+in `/diagnostics` tells "idle" from "pinging". The parser still rejects and
+counts what it cannot read, and the diagnostics will not say OK until a point set
+has decoded.
 
-**This node never tells the sonar to ping.** `send_ping_parameters` is `false`
+**This node never starts the sonar on its own.** `send_ping_parameters` is `false`
 by default, because those parameters start the transducer and a transducer
-driven in air can damage itself. The `~/set_ping_parameters` service still
-works — a person asking is not a node deciding.
+driven in air can damage itself. `~/start_pinging`, `~/stop_pinging` and
+`~/set_ping_parameters` still work: a person asking is not a node deciding.
 
-The unit is the **AIO variant**: beamforming happens inside the sonar's own
-Pi 5, so the Jetson receives processed data. One unit, so **one side only** —
-which is why coverage gaps are easy to leave and hard to notice.
+**Stopping this node does not stop the sonar.** It kept pinging with no client
+connected (measured 2026-11-06). Call `~/stop_pinging` first.
+
+**The port takes one client at a time.** A second plain TCP client was refused
+while another was connected (measured 2026-11-06, not yet tried with SonarView).
+
+The unit is the **Modular** kit (`docs/HARDWARE_DECISIONS.md`). It sends angle
+and time of flight per point, so the beamforming happens before the data leaves
+the box. One unit, so **one side only** — which is why coverage gaps are easy to
+leave and hard to notice.
+
+## Viewing it in RViz
+
+```bash
+ros2 launch omniscan_bridge sonar_rviz.launch.py
+ros2 service call /omniscan_bridge/start_pinging std_srvs/srv/Trigger   # transducer in water
+ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger    # before closing anything
+```
+
+The launch file never starts the sonar. It turns on `publish_all_points`, because
+in a bucket every point is unclassified and the boat's seabed-only filter shows
+nothing. Do not use that setting for bathymetry. See `docs/SONAR_BRINGUP.md` §3a
+for what the picture means.
 
 ## Published
 
@@ -33,6 +54,7 @@ which is why coverage gaps are easy to leave and hard to notice.
 | `/sonar/points` | `sensor_msgs/PointCloud2` | up to 20 Hz, vessel frame, **not georeferenced** |
 | `/sonar/status` | `asket_interfaces/SonarStatus` | 1 Hz |
 | `/sonar/attitude` | `sensor_msgs/Imu` | as received |
+| `/sonar/raw` | `std_msgs/UInt8MultiArray` | the bytes as received, for `mission_recorder` (`publish_raw`) |
 | `/diagnostics` | `diagnostic_msgs/DiagnosticArray` | 1 Hz |
 
 ## Services
@@ -100,7 +122,12 @@ measurement rather than a guess.
 Every layout is transcribed from **Cerulean's published documentation**
 (docs.ceruleansonar.com) and cited against the message it defines. The
 frame layout was confirmed byte for byte; several payload layouts had been
-guessed wrong and are corrected — see the table in `docs/open_questions.md`.
+guessed wrong and were corrected against those documents.
+
+The frame layout and `OS3D_POINT_SET` have since been decoded from the real unit
+(2026-11-06). `END_PING_INFO`'s `ping_hz` turned out to be the acoustic frequency
+(451127 at a 5 Hz ping), so the ping rate comes from its ping counter and uptime.
+The mono profile (2198) also arrives, and this package ignores it.
 
 Two things the documentation does not state, and which are therefore
 assumptions:

@@ -12,7 +12,7 @@ GUI says.
 - [ ] **Pre-flight** panel → **Run pre-flight**. Badge **GO** or **NO-GO**; red and amber rows say what to do.
 - [ ] Top bar: **READY TO GO** (green), or **NOT READY: …** with the one thing to fix first.
 - [ ] Geofence loaded: the map's dashed **Geofence** line is around today's area (file `/data/setup/geofence.yaml`). With the survey profile, the pre-flight row **Geofence** is ok.
-- [ ] **Sonar** card → **Open SonarView** (new tab): sonar settings and sonar recording are done there.
+- [ ] **Sonar** card → **Open SonarView** (new tab): sonar settings and sonar recording are done there. Transducer **in water** before it pings.
 
 ## 2. Arming
 
@@ -35,10 +35,12 @@ GUI says.
 | **NOT READY** | **NOT READY:** followed by the reason | Fix that reason, then **Run pre-flight** again. |
 | **Weak link** | **Weak link: reduced detail** (amber) or **Weak link: beacon only — position, mode and battery** | Less data, slower; the camera is a thumbnail every 5 s or nothing. Bring the boat closer or turn the tripod. The RC does not depend on this link. |
 | **Outside the geofence** | Red alarm **N m outside the geofence** (amber **N m from the geofence** before) | Take it in manual (Ch8 middle) and drive back inside: Autonomous will not plan from outside, and nothing stops the boat crossing the line in manual. |
+| **SonarView will not connect** | SonarView's own connection error | The sonar's data port refused a second client when tested, so another program may hold it. If the stack runs with `enable_sonar:=true`, that is `omniscan_bridge`: run one or the other. |
 | **No data** | **NOT READY: no data from the boat**, **No data for …** | Everything on screen is old. Check the shore station; the RC still works in range. |
 
 ## 5. End of session
 
-1. **Recording** panel → **Stop recording** (and stop recording in SonarView).
-2. Plug a USB drive into the Jetson; **Details** → **Recording** → the mission → **Export to …**. Wait for it to finish.
-3. Switch off in this order: **Ch8 down** → ESC battery off (killswitch / disconnect) → stop the stack (`sudo systemctl stop asket.service`) → `sudo poweroff` on the Jetson → boat power off → transmitter off **last**.
+1. **Stop the sonar pinging before it leaves the water.** Closing the bridge does not stop it, and closing SonarView may not either; pinging in air can damage it. With the bridge running: `ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger`. Otherwise, or if unsure, cut its power.
+2. **Recording** panel → **Stop recording** (and stop recording in SonarView).
+3. Plug a USB drive into the Jetson; **Details** → **Recording** → the mission → **Export to …**. Wait for it to finish.
+4. Switch off in this order: **Ch8 down** → ESC battery off (killswitch / disconnect) → stop the stack (`sudo systemctl stop asket.service`) → `sudo poweroff` on the Jetson → boat power off → transmitter off **last**.

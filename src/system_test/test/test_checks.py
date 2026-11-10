@@ -116,9 +116,8 @@ def test_a_sonar_on_the_network_and_a_sonar_absent_are_different_faults():
     assert absent.message != silent.message
     assert "Ethernet cable" in absent.remedy
     # The silent case sends you to the water, not to the cable. A sonar that
-    # answers and sends nothing is, on this hardware, overwhelmingly a dry
-    # transducer -- that was its state for the whole 2026-10-28 session -- and
-    # "power-cycle it", which this used to say, is advice that wastes the one
+    # answers and sends nothing was, on this hardware, a dry transducer for the
+    # whole 2026-10-28 session -- and "power-cycle it", which this used to say, is advice that wastes the one
     # thing nobody has spare on a beach.
     assert "transducer" in silent.remedy
     assert "Ethernet cable" not in silent.remedy

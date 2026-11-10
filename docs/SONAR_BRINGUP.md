@@ -9,22 +9,42 @@ The job, in order:
 3. The mission GUI — does it report the sonar as alive, and does the
    *Open SonarView* button work?
 
-**Status after 2026-10-28:** step 1 got as far as a TCP connection and no
-further, because the transducer was in air. **The one measurement still
-missing is step 1 with the sonar in water** — see "What is known about this
-sonar" immediately below, and §3.
+**Status after 2026-11-06:** step 1 is done. With the transducer in a bucket, the
+sonar pinged and `omniscan_bridge` decoded its point data and showed it in RViz
+(§3a). **Still to do:** a real target or seabed, SonarView against this unit,
+the mission GUI, and all of it on the Jetson. That session ran on a Windows
+laptop, in the dev container.
 
 Read §0 before touching anything. There is one way to damage this device in an
-evening and it is in §0.
+evening and it is in §0. **Closing the bridge does not stop the sonar pinging.**
 
 ---
 
 ## What is known about this sonar
 
-Updated after the bench session of **2026-10-28**. The split below is the point
-of this section: everything in the first list was measured on the device, and
-nothing in the second one has been. Do not promote a line from the second list
-to the first without a measurement to point at.
+Updated after the bench session of **2026-11-06**. The split below is the point
+of this section: everything in the first two lists was measured on the device,
+and nothing in the third has been. Do not promote a line from the third list
+to the first two without a measurement to point at.
+
+### VERIFIED — measured on the hardware, 2026-11-06
+
+Transducer facing up in a shallow bucket, under about 10 cm of water.
+
+| Fact | How it was established |
+|---|---|
+| **The stream on TCP 62312 is Ping Protocol** | Every frame passed its checksum; 1628 frames in 75 s, 0 invalid, 0 bytes discarded |
+| **The OS3D_POINT_SET (3104) layout decodes** | 388 point sets, 0 length mismatches, 0 decode errors. Ranges stop at the reported 29.9 m range, and power is on the same scale as the sonar's own thresholds. This checks structure and plausibility, not accuracy: nothing has been measured against a known target |
+| **An idle sonar still sends status** | Unprompted: an empty message 14 about once a second, and message 9 about every 5 s, JSON with `"type": "os3d_temperature"`. On 2026-10-28 the probe saw nothing in 8 s; why that differs is unexplained |
+| **A pinging sonar also sends 3104, 3010, 504 and 2198** | Each at about 5 per second. 2198 is the mono profile, which `omniscan_bridge` ignores and nobody has decoded |
+| **`~/start_pinging` starts it**, at 5 Hz and 29.9 m | The ping counter puts the first ping about 11 s after the bridge started; 149 pings in 29.8 s by the sonar's clock |
+| **It keeps pinging with no client connected** | The ping counter ran at 5.0 Hz throughout about 14 minutes that included the bridge being stopped |
+| **`~/stop_pinging` stops it** | Called by the operator. A listen-only client then received 28 of message 14 and 7 of message 9, and none of 3104, 3010, 504 or 2198. The port and the status stream stayed up |
+| **A listen-only client receives point data** if the sonar is already pinging | 75 s with the bridge sending nothing |
+| **Only one TCP client at a time** | With one connection open, a second is refused; with the first closed, the port opens again. Tested with plain TCP clients, not SonarView (§5) |
+| **Its clock is not set** | `utc_msec` equals `pwr_up_msec`, its uptime, so timestamps read as 1970 and `/diagnostics` stays at error level. Expected until the NTP step in `docs/SETUP.md` |
+| **The `ping_hz` field in END_PING_INFO is the acoustic frequency** | It reads 451127 while pinging at 5 Hz. The bridge now gets the rate from the ping counter and uptime |
+| **Every point in the bucket is unclassified** (`pt_type` 0) | 67508 of 67508 points, so the boat's seabed-only filter shows nothing here. Use `publish_all_points` (§3a) |
 
 ### VERIFIED — measured on the hardware, 2026-10-28
 
@@ -50,11 +70,12 @@ combination that was live. It now tries TCP 62312 first.
 
 | Open question | Why it is still open |
 |---|---|
-| **What the bytes on TCP 62312 actually are** | The transducer was in air, so the sonar produced no soundings. Not one byte of point data has ever been seen. That the stream is Ping Protocol is an assumption, and `omniscan_bridge` is written not to rely on it |
-| **Whether the sonar streams on its own, or must be asked** | Unknown. Nothing in this repository sends a start command, and nothing will until Cerulean documents one or somebody observes SonarView's. Inventing one is how a transducer gets driven in air |
-| **Whether SonarView and `omniscan_bridge` can both hold TCP 62312** | Untested. Procedure in §5 "Both at once?" |
-| **The OS3D_POINT_SET (3104) byte layout** | Taken from Cerulean's published documentation, never checked against a device |
+| **Whether the points are in the right place** | Nothing has been measured against a known target or seabed. In the bucket they are reverberation, and the mounting values are unmeasured |
+| **Whether `pt_type` ever reports bottom** | Everything was unclassified in a bucket with no seabed. If it stays that way on real water, the boat's seabed-only filter publishes nothing |
+| **Whether SonarView behaves like the plain TCP clients on 62312** | The second-client refusal has not been tried with SonarView. Procedure in §5 "Both at once?" |
+| **The 2198 mono profile payload** | Seen on the wire, never decoded. `sonar_bridge_node` on `main` assumes a layout for it that has not been checked |
 | **The clock offset in the field** | Depends on §0 of `docs/SETUP.md`, the sonar's NTP server, which has not been pointed at the Jetson |
+| **All of this on the Jetson** | The 2026-11-06 session ran on a Windows laptop, through a dev container |
 
 ### The IP conflict, which is a decision nobody has taken
 
@@ -95,6 +116,9 @@ In practice:
 - **The rule, every time: the transducer face goes in water before anything
   pings.** A builder's bucket or a storage crate is enough — it only has to
   cover the transducer face and the RX16 array, not the whole unit.
+- **Once started, it keeps pinging until told to stop or powered off.** Closing
+  the bridge, RViz or the terminal does not stop it (measured 2026-11-06). Before
+  lifting it out of the water, call `~/stop_pinging` or cut the power.
 - If you must ping dry to check it is alive, keep it under a minute and let it
   cool.
 
@@ -323,8 +347,11 @@ else. It needs no ROS, no container and no GUI, and it checks five things:
 ICMP, discovery, **TCP 62312** (the measured transport), optionally UDP 62312,
 and the two ports we used to assume.
 
-**What you should see, with the transducer in air** — which is as far as
-anybody has got:
+The output below is from 2026-10-28, and the probe has not been re-run since.
+On 2026-11-06 a plain TCP client received status messages from the idle sonar
+(message 14 and message 9), so expect them where this shows silence.
+
+**What was seen with the transducer in air:**
 
 ```
 1. On the network?
@@ -339,19 +366,20 @@ anybody has got:
          Expected with the transducer in air. ...
 ```
 
-**That is a pass, not a failure.** The connection opening is the whole of what
-has ever been confirmed. The `FAIL` marker on the second line is the script
-being literal about having received no data, and the text under it says so.
+**That is a pass, not a failure.** The `FAIL` marker on the second line is the
+script being literal about having received no data, and the text under it says
+so.
 
-**With the transducer in water** — and this is the measurement that is missing
-— one of three things happens, and which one it is matters more than anything
-else in this guide:
+**Water alone does not start it.** Point data only arrives once something has
+told the sonar to ping (§3a). Close any other client first, because the port
+takes one connection at a time. What the probe's output would mean:
 
 | What the probe prints | What it means | What to do |
 |---|---|---|
-| `message 3104 (OS3D_POINT_SET) x18` | The stream *is* Ping Protocol and the layout decodes. First confirmation ever | Write it down. Mark Q8 closed against hardware in `docs/open_questions.md` |
-| `N bytes arrived and none of them parsed as Ping Protocol` | The transport is right and the **format** is not what we expect | Capture it: `sudo tcpdump -i eth0 -n -w sonar.pcap host 192.168.2.21 and port 62312`, and bring the file back. Do not guess at the layout |
-| `connected, and the sonar sent nothing` | The sonar has to be **asked** to stream | Start a SonarView session (§4) and re-run the probe while it is live. If data appears only then, that is the finding: the stream needs a client, and we do not know what it sends |
+| `message 3104 (OS3D_POINT_SET) x18` | The sonar is pinging and the layout decodes, as on 2026-11-06 | Carry on to §3a |
+| `Sonar alive and idle` | Status only, which is normal until it is told to ping | §3a |
+| `N bytes arrived and none of them parsed as Ping Protocol` | Not what this unit sent on 2026-11-06. The firmware or the device may have changed | Capture it: `sudo tcpdump -i eth0 -n -w sonar.pcap host 192.168.2.21 and port 62312`, and bring the file back. Do not guess at the layout |
+| `connected, and the sonar sent nothing` | Not what this unit did idle on 2026-11-06, though it matches 2026-10-28 | Note it and try §3a. Nobody has explained the difference between the two sessions |
 
 ### Why the earlier version of this guide sent you to the wrong place
 
@@ -369,18 +397,14 @@ not that corner, it reported a dead sonar that was in fact perfectly alive.
 Both are kept in the probe's step 5 as a cross-check: if 51200 ever opens, the
 firmware has changed and we want to know.
 
-The *one* claim from the old text that survives is that the sonar may stream
-only once a client asks. That is still unknown, and nothing in this repository
-sends a start command.
-
-### Nothing we run tells the sonar to ping
+### Nothing we run tells the sonar to ping on its own
 
 Neither the probe nor `omniscan_bridge` sends anything to the sonar by default.
 That is deliberate: the parameters that would start it also start the
 transducer, a transducer driven in air can damage itself, and a launch file
 runs when nobody is beside the boat. The bridge's `send_ping_parameters`
-parameter is `false`, and the `~/set_ping_parameters` service only ever fires
-because a person pressed something.
+parameter is `false`, and the `~/start_pinging`, `~/stop_pinging` and
+`~/set_ping_parameters` services only ever fire because a person asked.
 
 ### Watching raw packets
 
@@ -403,6 +427,73 @@ than one port:
 
 ```bash
 sudo tcpdump -i eth0 -n -w sonar-session.pcap net 192.168.2.0/24
+```
+
+---
+
+## 3a. See the data in RViz
+
+**Sonar in the water for this step** (see §0). Close SonarView and anything else
+on TCP 62312 first, because the port takes one client at a time.
+
+The bridge and RViz, which listen only and do not start the sonar:
+
+```bash
+source /opt/ros/jazzy/setup.bash && source install/setup.bash
+ros2 launch omniscan_bridge sonar_rviz.launch.py
+```
+
+Then, in a second terminal with the same two `source` commands, once somebody has
+checked the transducer is covered:
+
+```bash
+ros2 service call /omniscan_bridge/start_pinging std_srvs/srv/Trigger
+```
+
+To stop, before closing anything:
+
+```bash
+ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger
+```
+
+Watch that the points stop, and cut the power if they do not. Do this while the
+bridge is still running: the service goes away with it, and the sonar does not
+stop on its own.
+
+**What you should see in a bucket:** red points in a flat fan. They are **not
+real objects**. On 2026-11-06, under 10 cm of water, the median range was 23 m
+and the closest point 0.68 m, which can only be reverberation. Each ping is one
+slice, so all points share one `x`, and 3D only builds up as the boat moves.
+
+**What this launch file changes from the boat's setup, so do not read the
+positions as real geometry:**
+
+- `publish_all_points` is on, so unclassified points are shown too.
+- Mounting comes from `mounting.yaml` alone, which is unmeasured.
+- Vessel attitude is off.
+
+**If everything is one colour,** a few very strong echoes are squashing the scale.
+In `Sonar points`, turn off Autocompute Intensity Bounds and try Min `1e9`, Max
+`1e10`, roughly the sonar's own thresholds on 2026-11-06.
+
+**What healthy looks like** in `/sonar/status` and `/diagnostics`, from 75 s on
+2026-11-06: `actual_ping_rate_hz` 5.00, `packet_loss_ratio` 0, `rx_chunks_dropped`
+0, `bytes_discarded` 0. `/diagnostics` still reads error level until the clock is
+set. That is the unset clock, not a data fault.
+
+**To reach the sonar from a Windows laptop's dev container:** Windows needs the
+address, not the container. In an Administrator PowerShell, using your adapter's
+name:
+
+```powershell
+New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.2.1 -PrefixLength 24
+```
+
+This persists across reboots. To undo it:
+
+```powershell
+Remove-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.2.1
+Set-NetIPInterface -InterfaceAlias "Ethernet" -Dhcp Enabled
 ```
 
 ---
@@ -530,13 +621,16 @@ once
 
 ## 5. Test 3 — the mission GUI
 
-### Deploy `hw-alignment` on the Jetson
+### Deploy `sonar-tcp-fix` on the Jetson
+
+Use this branch: without its fixes, the bridge crashes about a second after
+starting on an idle sonar.
 
 ```bash
 # on the Jetson
 cd ~/node-ros-namibia          # wherever the repo lives
 git fetch origin
-git checkout hw-alignment
+git checkout sonar-tcp-fix
 git pull
 
 # inside the ROS container
@@ -593,9 +687,9 @@ card.
 ### What to check, in order
 
 1. **Sonar card.** `sonar alive` (green) means `omniscan_bridge` is receiving
-   *and decoding* `OS3D_POINT_SET` — which has never happened yet, so if you
-   see it, that is the headline of the evening.
-   - `sonar silent` with the transducer in air is the **expected** reading.
+   *and decoding* `OS3D_POINT_SET`. The bridge has done that (§3a), but this card
+   has not been tried against the real sonar yet.
+   - `sonar silent` is the **expected** reading when the sonar is not pinging.
    - To tell apart the three states behind "silent", read `/diagnostics`
      rather than guessing:
 
@@ -626,17 +720,18 @@ card.
    - Save. The button updates immediately.
    - Click it. It should open SonarView in a new tab.
 
-### Both at once? — OPEN QUESTION, to test
+### Both at once? — probably not; confirm with SonarView
 
-**Can SonarView and `omniscan_bridge` hold TCP 62312 at the same time? Nobody
-knows.** It is not answered by the 2026-10-28 session, it is not in Cerulean's
-documentation, and the shape of the answer matters: the data port is a single
-TCP port, and a device that accepts one connection at a time would make the
-mission GUI and SonarView mutually exclusive on the boat. That is a design
-constraint, not a nuisance, and it is worth one deliberate test.
+**On 2026-11-06 the sonar refused a second TCP client on 62312 while another was
+connected.** Expect SonarView and `omniscan_bridge` to be mutually exclusive, and
+so the mission GUI's sonar panel to be off whenever SonarView is recording. That
+is a design constraint, not a nuisance.
 
-It is **not** guessed at anywhere in this repository. `omniscan_bridge` opens
-one connection, sends nothing, and reports what happens.
+That test used plain TCP clients, not SonarView, which also talks to the boards
+over UDP (§3). It is still worth the one deliberate test below.
+
+`omniscan_bridge` opens one connection, sends nothing unless asked, and reports
+what happens.
 
 #### The test
 
@@ -678,8 +773,7 @@ If `/usr/SonarView` holds a `.svlz` from that evening, its **size** is worth a
 look and that is all. The transducer was in air, so an empty or tiny file tells
 you nothing about the protocol — not that the format is wrong, not that the
 recording path is broken, not that the sonar is faulty. It is unreliable data
-and should not be used to settle anything. The only thing that settles the
-format is a sonar in water.
+and should not be used to settle anything.
 
 ---
 
@@ -710,19 +804,25 @@ file ~/sonar-tonight/*.svlz        # should say "gzip compressed data"
 In this order:
 
 ```bash
-# 1. GUI: Ctrl-C in the ros2 launch terminal
+# 1. Stop the pinging, while the bridge is still running, and watch the points stop
+ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger
+#    Closing a client does NOT stop the sonar (measured 2026-11-06). If you
+#    cannot confirm it has stopped, cut its power before step 4.
 
-# 2. SonarView: disconnect the session in the app first, then
+# 2. GUI: Ctrl-C in the ros2 launch terminal
+
+# 3. SonarView: disconnect the session in the app first, then
 docker compose down          # or: sudo podman stop sonarview
+#    Whether this stops the pinging has not been tested. Do not assume it does.
 
-# 3. Sonar out of the water, dry it, power off LAST
-#    (power off while it is pinging is fine; it is not pinging by then)
+# 4. Sonar out of the water, dry it, power off LAST
+#    (power off while it is pinging is fine)
 
-# 4. Undo the Jetson's temporary address
+# 5. Undo the Jetson's temporary address
 sudo ip addr del 192.168.2.1/24 dev eth0
 ip addr show eth0            # confirm it is gone
 
-# 5. Back to the branch the Jetson was on, if you changed it
+# 6. Back to the branch the Jetson was on, if you changed it
 git checkout <previous-branch>
 ```
 
@@ -737,8 +837,10 @@ should have touched them, but check.
 |---|---|---|
 | No `ping` reply from the sonar | Power, cable, or wrong interface | Check polarity, `ip addr show`, try the other RJ45 adapter |
 | `ping` works, TCP 62312 refuses | Sonar still booting, or not the device this guide describes | Wait a minute from power-on, then `sudo nmap -p- 192.168.2.21` and expect 22, 80, 62312 |
-| TCP 62312 connects, nothing arrives | **Expected with the transducer in air.** Otherwise the stream may have to be asked for | Put it in water and re-probe. If still silent, run §4 and re-probe while SonarView is live |
-| TCP 62312 sends bytes that do not parse | The format is not what we expect — the one remaining unknown | `sudo tcpdump -i eth0 -n -w sonar.pcap host 192.168.2.21 and port 62312` and bring the file back. Do not guess at the layout |
+| TCP 62312 refuses, and it worked a moment ago | **Another client holds the port**: it takes one at a time. Check for a bridge, SonarView or probe still running | Close the other client and retry. Closing it does not stop the sonar pinging |
+| TCP 62312 connects, only status arrives (messages 14 and 9) | **Normal: the sonar is idle** | Transducer in water, somebody present, then `~/start_pinging` (§3a) |
+| TCP 62312 connects, nothing arrives | Seen on 2026-10-28, not on 2026-11-06; unexplained | Try §3a. If still silent, run §4 and re-probe while SonarView is live |
+| TCP 62312 sends bytes that do not parse | Not what this unit sent on 2026-11-06. The firmware or the device may have changed | `sudo tcpdump -i eth0 -n -w sonar.pcap host 192.168.2.21 and port 62312` and bring the file back. Do not guess at the layout |
 | 51200 or 7077 **open** on the sonar | Different firmware from 2026-10-28 | Record it; `omniscan.yaml`'s transport may need revisiting |
 | SonarView finds no devices | Discovery is broadcast and Wi-Fi drops it | Get on the wired segment (§1b) |
 | Device listed with an **orange** address | Not on your subnet | Give yourself an address on its subnet, or change the device's from that screen |
@@ -747,8 +849,9 @@ should have touched them, but check.
 | GUI shows `sonar silent` | `omniscan_bridge` has no *decoded points* — which is not the same as no connection | `ros2 topic echo /diagnostics --once` and read `link_up`, `bytes_received`, `point_sets` (§5). They separate four different faults |
 | GUI pre-flight NO-GO | **Expected on a sonar-only bench** | Ignore it; read the Sonar card |
 | "Open SonarView" goes nowhere | Address still the boat LAN default | Setup page → SonarView address |
-| SonarView session drops when the GUI starts | The device may accept one client at a time — **untested** | Stop one, then run the test in §5 "Both at once?" properly and record which of its four outcomes you got |
-| Sonar does not ping when the bridge is running | By design: `send_ping_parameters` is `false` | Transducer in water, somebody present, then `-p send_ping_parameters:=true` or the GUI's sonar controls |
+| RViz shows nothing, status looks fine | The boat's seabed-only filter: in a bucket every point is unclassified | Use `sonar_rviz.launch.py`, which sets `publish_all_points` (§3a) |
+| SonarView session drops when the GUI starts | The device takes one client at a time, measured with plain TCP clients but not with SonarView | Stop one, then run the test in §5 "Both at once?" properly and record which of its four outcomes you got |
+| Sonar does not ping when the bridge is running | By design: `send_ping_parameters` is `false` | Transducer in water, somebody present, then `~/start_pinging` (§3a), `-p send_ping_parameters:=true` or the GUI's sonar controls |
 | `colcon build` fails | Missing deps, or frontend not built | §9 |
 | Jetson lost its network | Wrong interface in `ip addr add` | `sudo ip addr del ...`, or reboot |
 
@@ -894,5 +997,5 @@ SONAR BRINGUP — <date>        people: ______________________
 - [Docker Hub: nicknothom/sonarview](https://hub.docker.com/r/nicknothom/sonarview/tags) — arm64 availability
 
 Everything in "VERIFIED" above has no source in this list, and that is the
-point: it came off the hardware on 2026-10-28, which is the only authority that
-outranks a document.
+point: it came off the hardware on 2026-10-28 and 2026-11-06, which is the only
+authority that outranks a document.

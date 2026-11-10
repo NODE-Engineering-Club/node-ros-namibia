@@ -1,7 +1,7 @@
 """Network transport for the Omniscan 3D.
 
-What is known, from the bench session of 2026-10-28
-===================================================
+What is known, from the bench sessions of 2026-10-28 and 2026-11-06
+===================================================================
 
 The sonar answers on **192.168.2.21** and **nmap finds exactly one open TCP
 port: 62312**. 51200 (which Cerulean's SonarView documentation names for the
@@ -10,15 +10,15 @@ port: 62312**. 51200 (which Cerulean's SonarView documentation names for the
 this package was already built around, and the default here is
 :class:`TcpTransport`.
 
-What is **not** known is what travels over that socket. The transducer was dry,
-so no soundings were produced and no byte of point data has ever been seen.
-This module therefore does exactly two things — connect, and hand bytes to the
+What travels over that socket is Ping Protocol (2026-11-06): status when idle,
+and point sets once the sonar is told to ping. It takes one client at a time.
+This module still does exactly two things — connect, and hand bytes to the
 parser — and asserts nothing about their shape. The parser
 (:mod:`omniscan_bridge.core.parser`) rejects and counts what it cannot make
 sense of, and the node refuses to report OK until a point set has actually been
-decoded. If the stream turns out not to be Ping Protocol, the honest outcome is
-a rising ``bytes_discarded`` and a sonar panel that says so, not a crash and
-not a green light.
+decoded. If a device ever sends something else, the honest outcome is a rising
+``bytes_discarded`` and a sonar panel that says so, not a crash and not a green
+light.
 
 Nothing here ever tells the sonar to start pinging. That is a deliberate
 constraint, not an oversight: a transducer commanded to ping in air can damage
@@ -147,7 +147,7 @@ class SonarTransport:
         """A socket is open. Says nothing about data.
 
         Deliberately separate from :attr:`connected`. On 2026-10-28 the sonar
-        accepted a TCP connection and sent no soundings, because the transducer
+        accepted a TCP connection and sent nothing, with the transducer
         was in air — and those two facts have to be reportable apart, or the
         panel either lies about having data or lies about having a link.
         """
@@ -382,21 +382,20 @@ class UdpTransport(SonarTransport):
 class TcpTransport(SonarTransport):
     """TCP on port 62312 — how the Omniscan 3D was actually found to answer.
 
-    The 2026-10-28 bench session settled the transport and left the payload
-    open, so this class is written to be correct about the first and silent
-    about the second:
+    The transport was measured on 2026-10-28 and the payload on 2026-11-06, but
+    this class stays silent about the payload, which is the parser's job:
 
-    * **It connects and listens. It sends nothing.** No handshake, no
-      subscribe, no start-pinging command. Whether this stream needs to be
-      asked for is an open question (docs/SONAR_BRINGUP.md); inventing a
-      command to find out is how a transducer gets driven in air.
+    * **It connects and listens. It sends nothing of its own.** No handshake,
+      no subscribe, no start-pinging command. Status arrives unasked; point sets
+      need the node's ``~/start_pinging``, which is a person asking. See
+      docs/SONAR_BRINGUP.md.
     * **A stream, not datagrams.** TCP gives no frame boundaries, so a message
       can arrive in two reads and two messages in one. The parser is
       byte-oriented and resynchronising for exactly this reason, and a chunk
       that happens to cut a frame in half is normal here rather than a fault.
     * **A connection that is up and silent is reported as such**, via
       :attr:`link_up` against :attr:`connected`. That is the state the sonar
-      was observed in all evening, with the transducer in air.
+      was observed in on 2026-10-28, with the transducer in air.
     """
 
     def _connect(self) -> socket.socket:

@@ -28,11 +28,10 @@ omniscan_bridge:
     # "CONNECTED, tcp://192.168.2.21:62312". The port this package was built
     # around was right; the transport was not.
     #
-    # What is on that socket is NOT verified. The transducer was in air all
-    # evening, so no point data has ever been seen and nothing here assumes the
-    # stream is Ping Protocol. The parser rejects and counts what it cannot
-    # read, and the sonar diagnostics refuse to say OK until a point set has
-    # actually decoded. See docs/SONAR_BRINGUP.md.
+    # What is on that socket is Ping Protocol, measured 2026-11-06 with the
+    # transducer in water: status when idle, point sets once told to ping. The
+    # parser still rejects and counts what it cannot read, and the diagnostics
+    # refuse to say OK until a point set has decoded. See docs/SONAR_BRINGUP.md.
     transport: "tcp"
 
     # Whether this node may command the sonar to ping. OFF, and not as a

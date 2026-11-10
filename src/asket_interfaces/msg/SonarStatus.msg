@@ -8,7 +8,7 @@ float32 commanded_ping_rate_hz   # what we last asked for; divergence is a sympt
 uint32  points_per_ping          # from the most recent OS3D_POINT_SET
 float32 speed_of_sound           # m/s, as reported by the sonar (not assumed)
 float32 range_setting_m
-uint8   gain_setting
+int8    gain_setting             # -1 is auto gain, 0..10 is manual
 float32 packet_loss_ratio        # 0..1, estimated from ping_number gaps
 int64   clock_offset_ms          # sonar utc_msec minus Jetson clock. Drift here
                                  # silently ruins the whole dataset — see docs.

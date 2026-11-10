@@ -29,8 +29,8 @@ Usage::
     python3 -m asket_sim.core.fake_sonar_server --port 62312 &
     python3 scripts/sonar_probe.py --host 127.0.0.1 --udp
 
-WHAT THE 2026-10-28 BENCH SESSION SETTLED
-=========================================
+WHAT THE BENCH SESSIONS SETTLED
+===============================
 
 An earlier version of this script defaulted to UDP 62312, warned that the port
 was uncorroborated, and also tried TCP 51200 because Cerulean's SonarView
@@ -47,10 +47,13 @@ transport, a combination neither source predicted:
 * SonarView: ``CONNECTED, tcp://192.168.2.21:62312, Product: Omniscan 3D``.
 
 So that is what this script now probes first, and it is why it failed on the
-night it was needed. **The format of the bytes on that socket is still
-unverified**: the transducer was in air, so nothing was sent. A connection that
-opens and stays silent is the expected result until the sonar is in water, and
-this script reports it as exactly that rather than as a fault.
+night it was needed.
+
+On 2026-11-06, with the transducer in water, that socket turned out to carry Ping
+Protocol: status only when the sonar is idle, and point sets once something tells
+it to ping. This script never does, so an idle sonar is reported as idle, not as
+a fault. It also takes one client at a time, so close anything else on the port
+first.
 """
 
 from __future__ import annotations
@@ -84,8 +87,12 @@ SONARLINK_PORT = 7077
 MESSAGE_NAMES = {
     0: "NOP", 1: "ACK", 2: "NACK", 3: "ASCII_TEXT",
     4: "DEVICE_INFORMATION", 6: "GENERAL_REQUEST",
+    # Named from what the real unit sends (2026-11-06), not from documentation:
+    # 9 carries JSON such as {"type": "os3d_temperature", ...}, 14 is empty.
+    9: "JSON_STATUS", 14: "EMPTY_STATUS",
     109: "NMEA_WRAPPER", 150: "MAVLINK_WRAPPER",
-    504: "ATTITUDE_REPORT", 3010: "END_PING_INFO", 3104: "OS3D_POINT_SET",
+    504: "ATTITUDE_REPORT", 2198: "OS_MONO_PROFILE", 3010: "END_PING_INFO",
+    3104: "OS3D_POINT_SET",
 }
 
 
@@ -187,17 +194,15 @@ def listen_tcp(host: str, port: int, seconds: float) -> tuple[bool, dict[int, in
     distinct and the operator needs to tell them apart:
 
     * not connected                -> wrong address, or nothing listening;
-    * connected, zero bytes        -> the state on 2026-10-28: a live sonar
-                                      with a transducer in air. Also what a
-                                      sonar that must be asked to stream would
-                                      look like;
-    * connected, bytes, no 3104    -> something is being sent and it is not
-                                      the point sets we parse. That is the
-                                      finding worth having.
+    * connected, zero bytes        -> the state on 2026-10-28, with a
+                                      transducer in air. Not what an idle sonar
+                                      did on 2026-11-06, and unexplained;
+    * connected, frames, no 3104   -> a healthy idle sonar: status only;
+    * connected, bytes, no frames  -> something is being sent and it is not Ping
+                                      Protocol. That is the finding worth having.
 
-    Nothing is sent to the sonar. If this stream needs asking for, that is an
-    open question (docs/SONAR_BRINGUP.md) and inventing a command to answer it
-    is how a transducer gets driven in air.
+    Nothing is sent to the sonar. Telling it to ping is the bridge's
+    ``~/start_pinging``, because a transducer driven in air can damage itself.
     """
     seen: dict[int, int] = {}
     total_bytes = 0
@@ -234,8 +239,8 @@ def listen_tcp(host: str, port: int, seconds: float) -> tuple[bool, dict[int, in
     if total_bytes == 0:
         _say(False, f"TCP {port}: connected, and the sonar sent nothing in "
                     f"{seconds:.0f} s")
-        print("         Expected with the transducer in air. If it IS in water,")
-        print("         the stream may have to be asked for — see")
+        print("         Seen with the transducer in air on 2026-10-28. An idle sonar")
+        print("         normally sends status about once a second — see")
         print("         docs/SONAR_BRINGUP.md.")
     elif not seen:
         _say(False, f"TCP {port}: {total_bytes} bytes arrived and none of them "
@@ -356,21 +361,25 @@ def main(argv: list[str] | None = None) -> int:
     if tcp_seen.get(3104) or udp_seen.get(3104):
         where = f"TCP {args.port}" if tcp_seen.get(3104) else f"UDP {args.port}"
         print(f"Sonar alive and sending OS3D_POINT_SET on {where}.")
-        print("This is the first time that has been seen. The packet layout is")
-        print("now confirmed against real hardware — say so in")
-        print("docs/SONAR_BRINGUP.md and docs/HARDWARE_DECISIONS.md.")
+        print("The sonar is pinging. If you did not expect that, keep the")
+        print("transducer in water until it is stopped.")
+        return 0
+    if tcp_seen:
+        print(f"Sonar alive and idle: valid frames on TCP {args.port}, no point data.")
+        print("That is normal until it is told to ping. Transducer in water, then")
+        print("~/start_pinging on omniscan_bridge. See docs/SONAR_BRINGUP.md §3a.")
         return 0
     if tcp_bytes:
         print(f"TCP {args.port} is up and sent {tcp_bytes} bytes that did not parse")
-        print("as Ping Protocol. This is the finding worth having: the transport is")
-        print("right and the FORMAT is not what omniscan_bridge expects. Capture it")
-        print("with tcpdump and bring the file back.")
+        print("as Ping Protocol, which this unit did not do on 2026-11-06. The firmware")
+        print("or the device may have changed. Capture it with tcpdump and bring the")
+        print("file back.")
         return 2
     if tcp_up:
         print(f"TCP {args.port} accepted a connection and nothing came down it.")
-        print("With the transducer in air this is the correct, expected result —")
-        print("it is exactly where the 2026-10-28 session stopped. Put the sonar")
-        print("in water and run this again; that is the one remaining unknown.")
+        print("That matches 2026-10-28, with the transducer in air, but an idle sonar")
+        print("normally sends status about once a second. Check the transducer is in")
+        print("water and run this again. See docs/SONAR_BRINGUP.md §3.")
         return 0
     if udp_seen:
         print(f"Nothing on TCP {args.port}, but frames arrived on UDP {args.port}.")

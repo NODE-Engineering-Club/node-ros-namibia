@@ -151,6 +151,7 @@ def point_set_to_vessel_frame(
     pitch_deg: float = 0.0,
     max_range_m: float | None = None,
     speed_of_sound_override: float | None = None,
+    include_all_types: bool = False,
 ) -> list[tuple[float, float, float, float]]:
     """A whole ping, as ``(x, y, z, power)`` in the vessel frame.
 
@@ -160,6 +161,10 @@ def point_set_to_vessel_frame(
     seabed that are not on the bottom. Beams with no detection are dropped
     rather than emitted at range zero, where they would sit on the hull and
     read as a boulder underneath the boat.
+
+    ``include_all_types`` keeps the unclassified and water-column points too.
+    It is for looking at the sonar on a bench, where there is no seabed to
+    detect; never use it for bathymetry. Beams with no detection stay dropped.
 
     ``speed_of_sound_override`` exists only for testing against a known value;
     in normal operation the sonar's own reported figure is used, because it is
@@ -171,7 +176,7 @@ def point_set_to_vessel_frame(
 
     out: list[tuple[float, float, float, float]] = []
     for p in point_set.points:
-        if p.pt_type not in BOTTOM_TYPES:
+        if not include_all_types and p.pt_type not in BOTTOM_TYPES:
             continue
         rng = range_from_tof(p.tof_s, sos)
         if rng <= 0.0 or (max_range_m is not None and rng > max_range_m):

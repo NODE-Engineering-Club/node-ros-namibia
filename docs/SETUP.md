@@ -15,6 +15,10 @@ Cerulean **removed** the Omniscan 3D's `SET_NTP_INFO` packet. The NTP server is
 configured on the device, not by us, and **the default is an internet host**
 (`time.google.com`). There is no internet in the field.
 
+Measured on 2026-11-06, with no NTP server reachable: the sonar's `utc_msec`
+simply equals its uptime, so timestamps read as 1970 and `/diagnostics` stays at
+error level.
+
 So:
 
 1. Run an NTP server on the Jetson, disciplined by GPS time. There is no
