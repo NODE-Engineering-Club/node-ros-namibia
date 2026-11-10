@@ -547,17 +547,23 @@ reason the 3D view is missing.
 Podman can run this, with two differences:
 
 ```bash
-podman run -d --name sonarview --network=host \
+sudo podman run -d --name sonarview --network=host \
   -v /usr/SonarView:/userdata:Z \
   -e ENABLE_OS3D=true \
-  --restart=unless-stopped \
   docker.io/nicknothom/sonarview:latest
 ```
 
 - `--network=host` behaves differently under rootless Podman — **run this
   rootful (`sudo podman`)** or discovery broadcasts will not work.
 - `:Z` relabels the volume for SELinux. Harmless if SELinux is not enforcing.
-- `podman generate systemd` if you want it to survive a reboot.
+- **No restart policy, deliberately.** An earlier version of this guide had
+  `--restart=unless-stopped`; it is removed. SonarView holds the sonar's
+  **single** TCP connection, so a container that comes back by itself after a
+  reboot takes the port from `omniscan_bridge` with nobody watching — and it
+  can be used to start pinging, which must never happen with the transducer in
+  air. Start it deliberately, each time, and `sudo podman stop sonarview` when
+  you are done. The same goes for `podman generate systemd`: do not, until
+  somebody has decided who owns the sonar per mission (V8).
 
 **JetPack r35.4 / Ubuntu 20.04:** the image is `linux/arm64` and the container
 brings its own userspace, so the host's Ubuntu version does not matter. What
@@ -575,6 +581,9 @@ http://<jetson-ip>:7077
 or `http://localhost:7077` if you installed it on the laptop.
 
 **What you should see:** the SonarView interface.
+
+**Open it from a laptop, not from the Jetson's own browser.** On the Jetson it
+fails with `Error creating webgl context` — VERIFIED 2026-10-28.
 
 **If it doesn't work:**
 
