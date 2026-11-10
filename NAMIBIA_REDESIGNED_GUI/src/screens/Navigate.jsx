@@ -6,7 +6,7 @@ import { ModeButtons } from '@asket/panels/ModeCommands.jsx';
 import { SonarPanel } from '@asket/panels/SonarPanel.jsx';
 import { duration, endurance } from '@asket/lib/format.js';
 
-import { GlassPanel, Pill, ConfirmAction } from '../components/ui.jsx';
+import { GlassPanel, Pill, ConfirmAction, StreamNotes } from '../components/ui.jsx';
 import { AsketEmbed } from '../components/Embed.jsx';
 import {
   IconCamera, IconFlag, IconMap, IconPlay, IconPulse, IconSend, IconStop, IconWave,
@@ -16,6 +16,7 @@ import { GpsSlot } from '../slots/GpsSlot.jsx';
 import { CameraSlot, CAMERA_PILL, cameraLevel } from '../slots/CameraSlot.jsx';
 import { distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } from '../lib/missionFile.js';
 import { preflightVerdict, worstAlarm } from '../lib/vessel.js';
+import { streamNotes } from '../lib/streamNotes.js';
 
 const n = (x, d = 1) => (Number.isFinite(x) ? x.toFixed(d) : '—');
 const DIRS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
@@ -32,6 +33,9 @@ const live = (v, stream) => ({
   ageMs: streamAgeMs(v.state, stream),
   rateHz: v.state.subscriptions[stream]?.rate_hz,
 });
+const notesFor = (v, connection, streams, state = v.state) => (
+  <StreamNotes notes={streamNotes(connection, state, streams)} />
+);
 const ageLevel = ({ ageMs, rateHz }) => staleness(ageMs, ...thresholdsForRate(rateHz));
 
 /**
@@ -59,7 +63,7 @@ function StatusTile({ label, pill, level, sub, age }) {
 
 const rcLine = (ok) => (ok === true ? 'RC link OK' : ok === false ? 'RC link LOST' : 'RC link: not sent');
 
-function StatusPanel({ v }) {
+function StatusPanel({ v, connection }) {
   const { link, power, pico, vessel, alarms } = v;
   const connected = v.state.connected;
   const soc = power?.state_of_charge;
@@ -69,6 +73,7 @@ function StatusPanel({ v }) {
   const profile = v.state.profile?.profile;
   return (
     <GlassPanel title="Status" icon={<IconPulse />} flush={false} bodyClass="flush-body"
+      notes={notesFor(v, connection, ['link', 'power', 'pico', 'vessel'])}
       footer={(
         <div className={`alerts-strip ${level === 'ok' ? 'clear' : level}`}>
           <strong>{level === 'ok' ? '✓ NO ALERTS' : '⚠ ALERTS'}</strong>
@@ -162,6 +167,7 @@ function ModePanel({ v, connection }) {
   return (
     <GlassPanel
       title="Mode" icon={<IconPulse />}
+      notes={notesFor(v, connection, ['pico'])}
       aside={(
         <>
         <PanelAge {...live(v, 'pico')} />
@@ -221,6 +227,7 @@ function SonarGlass({ state, connection }) {
   return (
     <GlassPanel
       title="Sonar" icon={<IconWave />} className="sonar-glass"
+      notes={<StreamNotes notes={streamNotes(connection, state, ['sonar'])} />}
       aside={pill && (
         <>
           <PanelAge ageMs={streamAgeMs(state, 'sonar')} rateHz={state.subscriptions.sonar?.rate_hz} />
@@ -279,7 +286,7 @@ function Compass({ heading, level = 'fresh' }) {
   );
 }
 
-function TelemetryPanel({ v }) {
+function TelemetryPanel({ v, connection }) {
   const { vessel, heading } = v;
   // The heading stream when it carries a heading, else the vessel's; the age
   // shown is the age of whichever one is displayed.
@@ -289,6 +296,7 @@ function TelemetryPanel({ v }) {
   const hdgAge = fromHeading ? live(v, 'heading') : pos;
   return (
     <GlassPanel title="Vessel telemetry" icon={<IconFlag />} bodyClass="flush-body"
+      notes={notesFor(v, connection, ['vessel', 'heading'])}
       aside={<PanelAge {...live(v, 'vessel')} />}
     >
       <div className="telemetry" style={{ padding: 0 }}>
@@ -331,6 +339,7 @@ function MissionPanel({ v, connection, active, onNavigate }) {
 
   return (
     <GlassPanel title="Mission" icon={<IconFlag />}
+      notes={notesFor(v, connection, ['mission', 'power'])}
       aside={(
         <>
           <PanelAge {...live(v, 'mission')} />
@@ -448,6 +457,7 @@ export function Navigate({ v, connection, active, onNavigate }) {
           <div className="col left">
             <GlassPanel
               title="GPS basemap" icon={<IconMap />} flush
+              notes={notesFor(v, connection, ['vessel', 'track'])}
               aside={(
                 <>
                 <PanelAge {...live(v, 'vessel')} />
@@ -467,6 +477,11 @@ export function Navigate({ v, connection, active, onNavigate }) {
             </GlassPanel>
             <GlassPanel
               title="OAK camera" icon={<IconCamera />} flush
+              notes={(
+                <StreamNotes
+                  notes={streamNotes(connection, v.state, ['camera']).filter((x) => x.kind !== 'refused')}
+                />
+              )}
               aside={<Pill level={CAMERA_PILL[cam.level]}>{cam.text}</Pill>}
               footer={(
                 <div className="camera-controls">
@@ -488,9 +503,9 @@ export function Navigate({ v, connection, active, onNavigate }) {
             </div>
           </div>
           <div className="col right">
-            <StatusPanel v={v} />
+            <StatusPanel v={v} connection={connection} />
             <ModePanel v={v} connection={connection} />
-            <TelemetryPanel v={v} />
+            <TelemetryPanel v={v} connection={connection} />
             <MissionPanel v={v} connection={connection} active={active} onNavigate={onNavigate} />
           </div>
         </div>

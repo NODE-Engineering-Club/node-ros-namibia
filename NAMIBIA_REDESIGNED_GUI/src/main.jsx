@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Connection } from '@asket/lib/connection.js';
 
 import { App } from './App.jsx';
+import { tapStreamUnavailable } from './lib/streamNotes.js';
 import './theme/app.css';
 import './theme/screens.css';
 
@@ -26,6 +27,9 @@ async function boot() {
   } else {
     connection = new Connection();
   }
+  // `stream_unavailable` is not kept by the shared Connection; record it on
+  // the side so panels can say "source silent" (lib/streamNotes.js).
+  tapStreamUnavailable(connection);
   connection.connect();
 
   createRoot(document.getElementById('root')).render(

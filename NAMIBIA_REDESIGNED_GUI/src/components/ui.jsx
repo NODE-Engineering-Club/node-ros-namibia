@@ -4,7 +4,9 @@ import { latestCommand } from '../lib/vessel.js';
 import { IconCheck, IconUnknown, IconWarn, IconX } from './Icons.jsx';
 
 /** A frosted-glass panel: Figma ASKET/Glass/Surface + Border + Panel blur. */
-export function GlassPanel({ title, icon, aside, children, flush = false, className = '', bodyClass = '', footer }) {
+export function GlassPanel({
+  title, icon, aside, children, flush = false, className = '', bodyClass = '', footer, notes,
+}) {
   return (
     <section className={`glass panel ${className}`}>
       {title && (
@@ -14,9 +16,30 @@ export function GlassPanel({ title, icon, aside, children, flush = false, classN
           {aside && <span className="aside">{aside}</span>}
         </header>
       )}
+      {notes}
       <div className={`panel-body ${flush ? 'flush' : ''} ${bodyClass}`}>{children}</div>
       {footer}
     </section>
+  );
+}
+
+/**
+ * Subscription reasons and silent sources for the streams a panel shows
+ * (lib/streamNotes.js). Rendered under the panel header, never folded away:
+ * "I am not being sent it" and "nothing is producing it" must not look like
+ * "nothing is happening".
+ */
+export function StreamNotes({ notes }) {
+  if (!notes?.length) return null;
+  return (
+    <div className="stream-notes" role="status">
+      {notes.map((n) => (
+        <div key={n.stream} className={`stream-note ${n.kind}`}>
+          <strong>{n.stream}: {n.label}</strong>
+          {n.reason ? <span> — {n.reason}</span> : null}
+        </div>
+      ))}
+    </div>
   );
 }
 

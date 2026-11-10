@@ -187,6 +187,14 @@ button { font-family: var(--font); }
 .confirm-result.failed { color: var(--alarm); }
 .confirm-result.pending { color: var(--text-2); }
 
+/* ------------------------------------------------------------- stream notes */
+.stream-notes { flex: none; display: grid; gap: 2px; padding: 6px 14px; border-bottom: 1px solid var(--border-soft); font-size: 11px; }
+.stream-note strong { text-transform: none; }
+.stream-note.refused { color: var(--text-2); }
+.stream-note.refused strong { color: var(--text); }
+.stream-note.reduced strong, .stream-note.silent strong { color: var(--warn); }
+.stream-note.silent { background: var(--warn-tint); margin: 0 -14px; padding: 2px 14px; }
+
 /* ----------------------------------------------------------------- data age */
 /* Safety rule 7, for components/Value.jsx and PanelAge from src/asket_gui.
    On glass a "slightly greyer" value is invisible, so stale is amber and bold,
