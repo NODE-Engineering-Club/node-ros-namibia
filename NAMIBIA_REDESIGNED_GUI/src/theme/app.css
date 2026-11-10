@@ -104,6 +104,25 @@ body {
 }
 .system-footer .spacer { flex: 1; }
 
+/* ---------------------------------------------------------------- link loss */
+.link-banner {
+  flex: none; padding: 8px 24px; font-size: 12px; border-bottom: 1px solid;
+  backdrop-filter: blur(var(--blur-sidebar)); -webkit-backdrop-filter: blur(var(--blur-sidebar));
+}
+.link-banner.alarm { background: rgba(198, 42, 34, 0.85); border-color: var(--alarm); color: #fff; }
+.link-banner.warn { background: rgba(210, 153, 34, 0.25); border-color: rgba(210, 153, 34, 0.6); }
+.link-banner.warn strong { color: var(--warn); }
+.link-banner.info { background: var(--info-tint); border-color: rgba(121, 185, 205, 0.4); }
+/* With the link gone every panel must look stale, not only the footer:
+   desaturated, with a red edge and a hatched header. */
+.workspace.link-lost .glass.panel {
+  filter: grayscale(0.75) brightness(0.85);
+  border-color: rgba(248, 81, 73, 0.7);
+}
+.workspace.link-lost .panel-header {
+  background: repeating-linear-gradient(135deg, rgba(248, 81, 73, 0.22) 0 8px, transparent 8px 16px);
+}
+
 /* -------------------------------------------------------------------- glass */
 .glass {
   background: var(--glass);

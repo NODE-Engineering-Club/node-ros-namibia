@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { isFitted } from '@asket/lib/fitted.js';
+import { duration } from '@asket/lib/format.js';
 
 import { Background, ROUTES, Sidebar, Splash, SystemFooter } from './components/Shell.jsx';
 import { Alerts } from './screens/Alerts.jsx';
@@ -11,6 +12,62 @@ import { Repo } from './screens/Repo.jsx';
 import { newMission } from './lib/missionFile.js';
 import { useMissionLibrary } from './lib/missionStore.js';
 import { SUBSCRIPTIONS, useVessel } from './lib/vessel.js';
+
+/**
+ * Link loss, said as link loss (developer guide section 3: "a frozen screen
+ * that looks live is the worst failure this GUI can have"). Shown on every
+ * screen, above everything, with the time since anything was RECEIVED: a
+ * socket can stay open long after the link behind it has gone.
+ *
+ * Plus the original cockpit's "starved" banner: connected, but the server is
+ * serving no streams, or has sent a notice saying why nothing arrives.
+ */
+function LinkBanner({ v }) {
+  const { state, receiving, sinceMs } = v;
+  if (state.connected && receiving) {
+    const subs = Object.values(state.subscriptions || {});
+    const starved = subs.length > 0 && !subs.some((x) => x.granted);
+    if (state.notice) {
+      return (
+        <div className="link-banner warn" role="alert">
+          <strong>{state.notice.text}</strong>
+          {state.notice.detail && <span> {state.notice.detail}</span>}
+        </div>
+      );
+    }
+    if (starved) {
+      const refused = subs.find((x) => x.reason);
+      return (
+        <div className="link-banner warn" role="alert">
+          <strong>Connected, but the server is serving no streams.</strong>
+          <span> {refused?.reason || `link profile ${state.profile?.profile ?? '?'}`}</span>
+        </div>
+      );
+    }
+    return null;
+  }
+  if (!state.lastMessageAt) {
+    return (
+      <div className="link-banner info" role="status">
+        <strong>Connecting to the vessel…</strong>
+        <span> Nothing has been received yet; no value on screen is live.</span>
+      </div>
+    );
+  }
+  return (
+    <div className="link-banner alarm" role="alert">
+      <strong>
+        {state.connected
+          ? `Link lost: nothing received for ${duration((sinceMs ?? 0) / 1000)}`
+          : `Link lost: disconnected${state.attempts ? `, retrying (attempt ${state.attempts})` : ''}`}
+      </strong>
+      <span>
+        {' '}Every value on screen is the last one received, and its age keeps growing.
+        The RC transmitter and the hardware killswitch do not depend on this link.
+      </span>
+    </div>
+  );
+}
 
 const DRAFT_KEY = 'asket.redesign.draft.v1';
 
@@ -55,6 +112,9 @@ export function App({ connection }) {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
+  // Every panel greys out and gets a red edge, not just the footer pill.
+  const linkLost = !v.state.connected || !v.receiving;
+
   const navigate = (id) => { window.location.hash = id; };
   const endSplash = () => { sessionStorage.setItem('asket.redesign.splash', '1'); setSplash(false); };
 
@@ -86,7 +146,8 @@ export function App({ connection }) {
       ) : (
         <div className="shell">
           <Sidebar route={route} onNavigate={navigate} alarms={v.alarms} />
-          <main className="workspace">
+          <main className={`workspace ${linkLost ? 'link-lost' : ''}`}>
+            <LinkBanner v={v} />
             {screen}
             <SystemFooter v={v} connection={connection}>
               {connection.isMock && (

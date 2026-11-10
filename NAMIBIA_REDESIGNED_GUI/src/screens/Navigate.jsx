@@ -4,6 +4,7 @@ import { staleness, thresholdsForRate } from '@asket/lib/staleness.js';
 import { PanelAge, Value } from '@asket/components/Value.jsx';
 import { ModeButtons } from '@asket/panels/ModeCommands.jsx';
 import { SonarPanel } from '@asket/panels/SonarPanel.jsx';
+import { LinkStatus } from '@asket/panels/LinkStatus.jsx';
 import { duration, endurance } from '@asket/lib/format.js';
 
 import { GlassPanel, Pill, ConfirmAction, StreamNotes } from '../components/ui.jsx';
@@ -500,6 +501,18 @@ export function Navigate({ v, connection, active, onNavigate }) {
             </GlassPanel>
             <div className="row-bottom">
               <SonarGlass state={v.state} connection={connection} />
+              {/* The reused LinkStatus: which profile is in force, what it no
+                  longer carries and why, and "no connection to the vessel"
+                  when the socket is gone. */}
+              <GlassPanel
+                title="Shore link" icon={<IconPulse />}
+                aside={<PanelAge {...live(v, 'link')} />}
+                notes={notesFor(v, connection, ['link'])}
+              >
+                <AsketEmbed className="link-embed">
+                  <LinkStatus state={v.state} connection={connection} />
+                </AsketEmbed>
+              </GlassPanel>
             </div>
           </div>
           <div className="col right">
