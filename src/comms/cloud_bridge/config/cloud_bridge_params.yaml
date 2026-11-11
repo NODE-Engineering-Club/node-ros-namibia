@@ -19,7 +19,9 @@ cloud_telemetry_bridge_node:
     # Azure Blob Storage history (cloud_bridge/azure_sink.py, cloud/azure/README.md).
     # The connection string is a secret: keep it in this file on the Jetson
     # (chmod 600), never in git. AZURE_STORAGE_CONNECTION_STRING overrides it.
-    azure_enabled: true
+    # Off by default: gui_cloud_mirror (below) feeds the cloud cockpit, and
+    # running both doubles the Azure writes for the same picture.
+    azure_enabled: false
     azure_connection_string_file: "/data/secrets/azure_storage_connection_string"
     azure_container: "telemetry"
     azure_spool_dir: "/data/cloud_spool"
@@ -35,15 +37,21 @@ sonar_bridge_node:
     decimate_to_pps: 5.0
 
 # gui_backend -> Azure mirror for the cloud-hosted cockpit (gui_mirror_node.py).
+# LIGHT profile: the full record stays on the Jetson; the cloud gets a small live
+# state and a sparse history. Nothing is deleted in Azure automatically.
+# About 1 M Azure writes a month (~$5-7) and ~0.3 GB/day on the boat's uplink.
 gui_cloud_mirror:
   ros__parameters:
     gui_ws_url: "ws://127.0.0.1:8090/ws"
     asv_id: "ASKET_02"              # blobs under ASKET_02/gui/
     record_rate_hz: 1.0
-    image_interval_s: 5.0
-    upload_interval_s: 5.0          # history appends + images
-    latest_interval_s: 1.0          # latest.json; about 2.6 M writes/month, roughly $15-20
-    track_max_points: 5000
+    latest_interval_s: 3.0          # live view refresh; keep < 6 s (the cockpit's link-loss limit)
+    history_interval_s: 15.0        # one light history line (position, status, alarms)
+    upload_interval_s: 30.0         # history appends
+    image_interval_s: 30.0          # one snapshot every 30 s (0 = none)
+    image_max_width: 320
+    image_quality: 60
+    track_max_points: 300           # live track tail; the full track is on the Jetson
     azure_connection_string_file: "/data/secrets/azure_storage_connection_string"
     azure_container: "telemetry"
     spool_dir: "/data/cloud_spool_gui"

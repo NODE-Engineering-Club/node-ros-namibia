@@ -40,6 +40,10 @@ export function CameraSlot({ v }) {
           {status.level === 'lagged' && (
             <span className="age pill warn"><span className="dot" />{(status.age / 1000).toFixed(1)} s old</span>
           )}
+          {v.isCloud && status.level === 'live' && (
+            // Cloud view: one snapshot every 30 s, so always say how old it is.
+            <span className="age pill neutral"><span className="dot" />Snapshot, {(status.age / 1000).toFixed(0)} s old</span>
+          )}
         </>
       ) : (
         <div className="blank">

@@ -75,6 +75,7 @@ class SinkStatus:
 class _FileState:
     uploaded: int  # bytes of the local file already in the blob
     verified: bool = True  # False after an error: re-read the blob length first
+    remote: str = ""  # blob path (under the asv prefix) this local file goes to
 
 
 class AzureBlobSink:
@@ -112,6 +113,7 @@ class AzureBlobSink:
         self._latest: Optional[bytes] = None
         self._latest_dirty = False
         self._last_image_blob: Optional[str] = None
+        self._aux: dict[str, bytes] = {}       # name -> body, waiting to upload
         self._files: dict[str, _FileState] = {}
         self._finished: dict[str, int] = {}  # past hours fully uploaded -> size then
         self.status = SinkStatus(enabled=True)
@@ -163,6 +165,30 @@ class AzureBlobSink:
             self._latest_dirty = True
             self.status.packets_spooled += 1
 
+    def set_latest(self, packet: dict, latest_extra: Optional[dict] = None) -> None:
+        """Replace what latest.json will say, without adding a history line.
+
+        For a live view that refreshes more often than history is worth
+        keeping: the boat's full record stays on the Jetson, the cloud keeps
+        only a light history (see gui_mirror_node).
+        """
+        body = json.dumps(
+            {**packet, **(latest_extra or {}), "last_image_blob": self._last_image_blob},
+            separators=(",", ":")).encode()
+        with self._lock:
+            self._latest = body
+            self._latest_dirty = True
+
+    def set_aux(self, name: str, doc: dict) -> None:
+        """Another small JSON blob next to latest.json (e.g. state.json).
+
+        Uploaded, gzip-encoded, before latest.json on the next pass, so
+        latest.json never refers to a version not uploaded yet.
+        """
+        body = json.dumps(doc, separators=(",", ":")).encode()
+        with self._lock:
+            self._aux[name] = body
+
     # -- lifecycle --------------------------------------------------------
 
     def start(self) -> None:
@@ -196,9 +222,8 @@ class AzureBlobSink:
         """
         try:
             self._upload_images()
+            self._upload_aux()
             self._upload_latest()
-            if history:
-                self._upload_telemetry()
         except Exception as exc:  # noqa: BLE001 — network, auth, throttling: retry later
             self.status.connected = False
             self.status.last_error = f"{type(exc).__name__}: {exc}"[:300]
@@ -213,6 +238,17 @@ class AzureBlobSink:
         self.status.connected = True
         self.status.last_error = ""
         self.status.last_upload_utc = round(time.time(), 3)
+        if history:
+            # Separate from the live files on purpose: a problem with the
+            # history (seen 2026-11-11: a wiped spool) must not hold back
+            # latest.json, which is what a viewer is waiting for.
+            try:
+                self._upload_telemetry()
+            except Exception as exc:  # noqa: BLE001
+                self.status.last_error = f"history: {type(exc).__name__}: {exc}"[:300]
+                self._log(f"Azure history upload failed, will retry: {self.status.last_error}")
+                for st in self._files.values():
+                    st.verified = False
         self._refresh_backlog()
         return True
 
@@ -231,17 +267,21 @@ class AzureBlobSink:
             self._finished.pop(rel, None)
             st = self._files.get(rel)
             if st is None or not st.verified:
-                st = self._open_remote(f"telemetry/{rel}")
+                st = self._open_remote(st.remote if st and st.remote else f"telemetry/{rel}")
                 self._files[rel] = st
             if st.uploaded > size:
-                # Blob longer than the local file: the spool was wiped or
-                # replaced. Never append on top of unrelated bytes.
-                raise RuntimeError(
-                    f"blob {self._blob('telemetry/' + rel)} has {st.uploaded} bytes, "
-                    f"local spool only {size}; refusing to append"
-                )
+                # The blob is longer than the local file: the spool was wiped
+                # or replaced. Never append on top of unrelated bytes, and
+                # never stop recording either: keep what is in Azure as it is
+                # and continue this hour in a new blob next to it.
+                stem = f"telemetry/{rel[:-len('.jsonl')]}"
+                new = f"{stem}.{int(time.time())}.jsonl"
+                self._log(f"{self._blob('telemetry/' + rel)} has {st.uploaded} bytes, local spool "
+                          f"only {size}: continuing in {self._blob(new)}")
+                st = self._open_remote(new)
+                self._files[rel] = st
             if st.uploaded < size:
-                self._append_lines(f, f"telemetry/{rel}", st, size)
+                self._append_lines(f, st.remote, st, size)
             if st.uploaded == size and not rel.startswith(current):
                 self._finished[rel] = size
                 self._files.pop(rel, None)
@@ -250,12 +290,12 @@ class AzureBlobSink:
         bc = self._cc.get_blob_client(self._blob(rel))
         try:
             props = bc.get_blob_properties()
-            return _FileState(uploaded=int(props.size))
+            return _FileState(uploaded=int(props.size), remote=rel)
         except Exception as exc:  # noqa: BLE001
             if type(exc).__name__ != "ResourceNotFoundError":
                 raise
         bc.create_append_blob(content_settings=_content("application/x-ndjson"))
-        return _FileState(uploaded=0)
+        return _FileState(uploaded=0, remote=rel)
 
     def _append_lines(self, f: Path, rel: str, st: _FileState, size: int) -> None:
         bc = self._cc.get_blob_client(self._blob(rel))
@@ -293,16 +333,39 @@ class AzureBlobSink:
             else:
                 img.unlink()
 
+    def _upload_aux(self) -> None:
+        import gzip
+        with self._lock:
+            pending, self._aux = self._aux, {}
+        try:
+            for name, body in pending.items():
+                self._cc.get_blob_client(self._blob(name)).upload_blob(
+                    gzip.compress(body, compresslevel=6), overwrite=True,
+                    content_settings=_content("application/json", cache="no-cache, max-age=0",
+                                              encoding="gzip"),
+                )
+        except Exception:
+            with self._lock:
+                for name, body in pending.items():
+                    self._aux.setdefault(name, body)  # a newer version wins
+            raise
+
     def _upload_latest(self) -> None:
         with self._lock:
             if not self._latest_dirty or self._latest is None:
                 return
             body = self._latest
             self._latest_dirty = False
+        # Stored gzip-encoded: JSON shrinks 5-8x, which is most of the boat's
+        # uplink use, and every browser decodes Content-Encoding: gzip on its
+        # own. (History stays plain: appended blocks would make one gzip file
+        # of many members, which not every reader accepts.)
+        import gzip
         try:
             self._cc.get_blob_client(self._blob("latest.json")).upload_blob(
-                body, overwrite=True,
-                content_settings=_content("application/json", cache="no-cache, max-age=0"),
+                gzip.compress(body, compresslevel=6), overwrite=True,
+                content_settings=_content("application/json", cache="no-cache, max-age=0",
+                                          encoding="gzip"),
             )
         except Exception:
             with self._lock:
@@ -322,9 +385,9 @@ class AzureBlobSink:
         self.status.pending_images = sum(1 for _ in self._img_pending.rglob("*.jpg"))
 
 
-def _content(ctype: str, cache: Optional[str] = None):
+def _content(ctype: str, cache: Optional[str] = None, encoding: Optional[str] = None):
     from azure.storage.blob import ContentSettings
-    return ContentSettings(content_type=ctype, cache_control=cache)
+    return ContentSettings(content_type=ctype, cache_control=cache, content_encoding=encoding)
 
 
 def load_connection_string(path: str) -> Optional[str]:

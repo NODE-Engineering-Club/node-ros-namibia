@@ -116,3 +116,20 @@ test('token rejected / nothing mirrored close the socket with the reason', async
   assert.equal(h2.c.getSnapshot().connected, false);
   h2.stop();
 });
+
+test('slow state comes from state.json, fetched only when state_seq changes', async () => {
+  const base = packet(1);
+  const slow = { state_seq: 1, hello: base.hello, subscribed: base.subscribed, stream_unavailable: {},
+    frames: { track: { type: 'data', stream: 'track', source_utc_ms: 900, server_utc_ms: 900, detail: 'full', payload: { from: 0, total: 1, points: [[15.1, -26.6]] } } } };
+  let p = { ...base, hello: undefined, subscribed: undefined, state_seq: 1 };
+  const h = make((path) => (path.endsWith('/latest.json') ? { body: p } : path.endsWith('/state.json') ? { body: slow } : null));
+  await sleep(150);
+  const s = h.c.getSnapshot();
+  assert.equal(s.hello.protocol_version, 1);
+  assert.deepEqual(s.streams.track.payload.points, [[15.1, -26.6]]);
+  const n = h.calls.filter((u) => u.includes('state.json')).length;
+  p = { ...p, seq: 2, frames: { vessel: { ...base.frames.vessel, server_utc_ms: 2000, source_utc_ms: 2000 } } };
+  await sleep(150);
+  assert.equal(h.calls.filter((u) => u.includes('state.json')).length, n);
+  h.stop();
+});

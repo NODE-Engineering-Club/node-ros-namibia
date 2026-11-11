@@ -78,6 +78,7 @@ export function useVessel(connection) {
     mission: p('mission'),
     alarms: state.alarms || [],
     isMock: connection.isMock,
+    isCloud: Boolean(connection.isCloud),
     simulated: state.hello?.source?.mode === 'sim',
   };
 }

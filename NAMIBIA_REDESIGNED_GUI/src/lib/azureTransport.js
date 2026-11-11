@@ -84,6 +84,8 @@ class AzureSocket {
     this.helloSent = false;
     this.lastImage = null;
     this.packet = null;
+    this.slow = null;       // state.json: hello, subscriptions, trails, plan
+    this.slowSeq = null;
     this.busy = false;
     this.timer = setTimeout(() => this.#poll(), 0);
   }
@@ -117,6 +119,22 @@ class AzureSocket {
         if (r.status === 404) return this.#fail(`Nothing mirrored yet under ${this.prefix}/ (is gui_mirror_node running on the boat?).`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const packet = await r.json();
+        // The slow part lives in state.json and is fetched only when the boat
+        // says it changed: trails, plan, hello and subscriptions are most of
+        // the bytes and change rarely.
+        if (packet.state_seq !== undefined && packet.state_seq !== this.slowSeq) {
+          const s = await fetch(this.url(`${this.prefix}/state.json`, `&_=${packet.state_seq}`), { cache: 'no-store' });
+          if (s.ok) {
+            this.slow = await s.json();
+            this.slowSeq = packet.state_seq;
+          }
+        }
+        if (this.slow) {
+          packet.hello = packet.hello || this.slow.hello;
+          packet.subscribed = packet.subscribed || this.slow.subscribed;
+          packet.stream_unavailable = { ...(this.slow.stream_unavailable || {}), ...(packet.stream_unavailable || {}) };
+          packet.frames = { ...(this.slow.frames || {}), ...(packet.frames || {}) };
+        }
         if (this.readyState === 0) {
           this.readyState = OPEN;
           if (this.onopen) this.onopen({});
@@ -238,7 +256,7 @@ class AzureSocket {
  * this file does not depend on the shared module's path.
  */
 export function createAzureConnection(Connection, cfg) {
-  const full = { pollMs: 1000, cameraRateHz: 0.2, ...cfg, clock: new AzureClock() };
+  const full = { pollMs: 1000, cameraRateHz: 1 / 30, ...cfg, clock: new AzureClock() };
   const connection = new Connection(`azure://${full.asv}`, {
     transport: () => new AzureSocket(full),
     tileInfo: () => Promise.resolve(CLOUD_TILE_INFO),

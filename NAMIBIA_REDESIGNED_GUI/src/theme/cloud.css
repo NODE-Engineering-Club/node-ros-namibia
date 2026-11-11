@@ -25,3 +25,5 @@
   .cloud-badge { top: auto; bottom: 44px; left: 8px; right: 8px; transform: none; justify-content: center; }
   .cloud-signin { margin: 6vh 16px 0; }
 }
+/* "Snapshot, N s old" over the camera picture: readable on a bright sky. */
+.camera-slot .age.pill.neutral { color: #fff; background: rgba(0, 0, 0, 0.6); border-color: rgba(255, 255, 255, 0.25); }

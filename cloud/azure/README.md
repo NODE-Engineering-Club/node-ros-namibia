@@ -128,9 +128,34 @@ browser: NAMIBIA_REDESIGNED_GUI cloud build ──► src/lib/azureTransport.js 
 
 Start the stack with `enable_gui:=true enable_gui_cloud_mirror:=true`. It
 uses the same connection string file as above. The parameters are under
-`gui_cloud_mirror:` in `cloud_bridge_params.yaml`. Writing `latest.json`
-once a second is about 2.6 M writes a month, roughly $15–20 at standard
-LRS prices; `latest_interval_s: 2.0` halves that, at about 1 s more delay.
+`gui_cloud_mirror:` in `cloud_bridge_params.yaml`.
+
+**Light profile (the default).** The cloud is a light viewer; the full record
+stays on the Jetson (mission recorder, bags, local spool). Measured
+2026-11-11 against the simulator:
+
+| Blob | What | How often | Size |
+|---|---|---|---|
+| `gui/latest.json` | position, status, alarms, sonar, mode… | every 3 s | ~1.7 KB (gzip) |
+| `gui/state.json` | track/coverage tail (300 pts), plan, backend hello | every 15 s or on change | ~6.4 KB (gzip) |
+| `gui/telemetry/…/HH.jsonl` | one light line: vessel, heading, pico, power, link, sonar, mission, alarms | every 15 s (uploaded every 30 s) | ~3.8 KB/line |
+| `gui/images/…jpg` | camera snapshot, 320 px | every 30 s | 3 KB sim, ~10–15 KB real |
+
+**About 1.2 M Azure writes a month, roughly $6–8**, plus a few cents of
+storage that grows about 1.5–2 GB a month. **Nothing is deleted
+automatically**, by decision. A viewer polling `latest.json` costs about
+$1 a month in reads if left open 24/7. On the boat's internet link this
+is about 0.15 GB a day.
+
+The live view refreshes every 3 s and must stay under 6 s, or the cockpit
+reports link loss. The map's trail follows every 15 s; the boat marker
+every 3 s. A problem with the history never holds back the live files. If
+an hour's history blob in Azure doesn't match the local spool (for example
+a wiped spool), the existing blob is kept and the hour continues in
+`HH.<unix time>.jsonl` next to it.
+
+`cloud_telemetry_node`'s own Azure upload (`azure_enabled`) is now off by
+default: the mirror feeds the cockpit, and both together double the writes.
 
 ### Hosting the cockpit
 

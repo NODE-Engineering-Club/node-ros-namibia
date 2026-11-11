@@ -40,6 +40,14 @@ SUBSCRIPTIONS = [
     {"name": "camera", "rate_hz": 1},
 ]
 
+#: What a light history line keeps: small, and enough to replay a route
+#: and the boat's condition. Track, coverage, lidar, plan and the pre-flight
+#: report are left to the Jetson's own recording.
+HISTORY_STREAMS = ("vessel", "heading", "pico", "power", "link", "sonar", "mission")
+
+#: Large, slow-changing parts kept out of latest.json and sent as state.json.
+SLOW_STREAMS = ("track", "coverage", "plan")
+
 #: Streams that arrive as increments ({"from", "total", points|segments}).
 APPEND_ONLY = ("track", "coverage")
 
@@ -55,13 +63,12 @@ def decode_video(frame: bytes) -> tuple[dict, bytes]:
 
 
 class MirrorState:
-    def __init__(self, track_max_points: int = 5000):
+    def __init__(self, track_max_points: int = 300):
         self.track_max = track_max_points
         self.hello: Optional[dict] = None
         self.meta: dict[str, dict] = {}       # subscribed / profile / alarms / notice
         self.unavailable: dict[str, dict] = {}  # stream_unavailable, by stream
         self.frames: dict[str, dict] = {}     # latest data message per stream
-        self.changed: set[str] = set()        # streams/meta updated since last record
         self.camera_header: Optional[dict] = None
         self.camera_image: Optional[bytes] = None
         self.camera_new = False
@@ -80,13 +87,10 @@ class MirrorState:
             return {"type": "pong", "id": msg.get("id")}
         if kind == "hello":
             self.hello = msg
-            self.changed.add("hello")
         elif kind in ("subscribed", "profile", "alarms", "notice"):
             self.meta[kind] = msg
-            self.changed.add(kind)
         elif kind == "stream_unavailable":
             self.unavailable[msg.get("stream", "?")] = msg
-            self.changed.add("stream_unavailable")
         elif kind == "data":
             name = msg.get("stream")
             if not name:
@@ -96,7 +100,6 @@ class MirrorState:
                 if msg is None:
                     return None
             self.frames[name] = msg
-            self.changed.add(name)
         return None
 
     def handle_video(self, frame: bytes, now_ms: int) -> None:
@@ -135,40 +138,66 @@ class MirrorState:
         names, self.resync_needed = self.resync_needed, set()
         return [s for s in SUBSCRIPTIONS if s["name"] in names]
 
-    def record(self, *, backend_connected: bool, now_s: float) -> tuple[dict, dict, Optional[bytes]]:
-        """One history record, the latest.json extras, and a snapshot if new.
+    def latest(self, *, backend_connected: bool, now_s: float) -> dict:
+        """The fast part of the cockpit's state: small, uploaded every few s.
 
-        History carries only what changed since the previous record, without
-        the append-only streams (the vessel positions already are the track);
-        latest.json carries everything needed to draw "now".
+        The slow part (trails, plan, hello, subscriptions) is `state()`.
         """
-        changed, self.changed = self.changed, set()
-        rec: dict = {
+        cam = self.camera_header
+        status = cam if cam and cam.get("type") != "camera_frame" else None
+        return {
             "kind": "gui_mirror",
             "timestamp": round(now_s, 3),
             "mirror": {"backend_connected": backend_connected, "last_rx_utc_ms": self.last_rx_utc_ms},
-            "frames": {k: v for k, v in self.frames.items() if k in changed and k not in APPEND_ONLY},
+            "frames": {k: v for k, v in self.frames.items() if k not in SLOW_STREAMS},
+            "camera_status": status,
+            **{k: v for k, v in self.meta.items() if k != "subscribed"},
         }
-        for k in ("subscribed", "profile", "alarms", "notice"):
-            if k in changed and k in self.meta:
-                rec[k] = self.meta[k]
-        if "stream_unavailable" in changed:
-            rec["stream_unavailable"] = self.unavailable
-        jpeg = None
-        if self.camera_new and self.camera_image:
-            jpeg, self.camera_new = self.camera_image, False
-        if self.camera_header:
-            rec["camera"] = self.camera_header
 
-        frames_now = dict(self.frames)
-        tr = frames_now.get("track")
-        if tr and len(tr["payload"].get("points", [])) > self.track_max:
-            pts = tr["payload"]["points"][-self.track_max:]
-            frames_now["track"] = {**tr, "payload": {**tr["payload"], "points": pts, "truncated": True}}
-        extra = {
+    def state_key(self) -> str:
+        """Changes when hello, subscriptions, plan or unavailable streams change."""
+        plan = (self.frames.get("plan") or {}).get("server_utc_ms")
+        sub = json.dumps(self.meta.get("subscribed"), sort_keys=True)
+        return json.dumps([bool(self.hello), (self.hello or {}).get("client_id"), sub, plan,
+                           sorted(self.unavailable)], sort_keys=True)
+
+    def state(self) -> dict:
+        """The slow part: trails capped to their last `track_max` points (the
+        whole track is in the Jetson's own recording), plan, hello,
+        subscriptions, unavailable streams."""
+        frames = {k: v for k, v in self.frames.items() if k in SLOW_STREAMS}
+        for name, key in (("track", "points"), ("coverage", "segments")):
+            f = frames.get(name)
+            if f and len(f["payload"].get(key, [])) > self.track_max:
+                kept = f["payload"][key][-self.track_max:]
+                frames[name] = {**f, "payload": {**f["payload"], key: kept, "truncated": True}}
+        return {
             "hello": self.hello,
-            "frames": frames_now,
+            "subscribed": self.meta.get("subscribed"),
             "stream_unavailable": self.unavailable,
-            **{k: v for k, v in self.meta.items()},
+            "frames": frames,
         }
-        return rec, extra, jpeg
+
+    def history(self, *, backend_connected: bool, now_s: float) -> dict:
+        """One light history line: the current value of the small streams.
+
+        A sample every history interval, not every change: enough to see
+        where the boat went and how it was doing. The full record is on the
+        Jetson.
+        """
+        rec: dict = {
+            "kind": "gui_mirror_history",
+            "timestamp": round(now_s, 3),
+            "mirror": {"backend_connected": backend_connected},
+            "frames": {k: self.frames[k] for k in HISTORY_STREAMS if k in self.frames},
+        }
+        if "alarms" in self.meta:
+            rec["alarms"] = self.meta["alarms"]
+        return rec
+
+    def take_image(self) -> tuple[Optional[bytes], Optional[dict]]:
+        """The newest picture, once."""
+        if self.camera_new and self.camera_image:
+            self.camera_new = False
+            return self.camera_image, self.camera_header
+        return None, None

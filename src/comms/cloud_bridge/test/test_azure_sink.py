@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover
     sys.modules.setdefault("azure.storage", types.ModuleType("azure.storage"))
     sys.modules["azure.storage.blob"] = blob
 
+from cloud_bridge import azure_sink as _sink_mod  # noqa: E402
 from cloud_bridge.azure_sink import AzureBlobSink, hour_path  # noqa: E402
 
 
@@ -63,9 +64,20 @@ class FakeBlob:
         self.store[self.name] = bytes(data)
 
 
+class _Store(dict):
+    """latest.json is stored gzip-encoded; tests read it decoded."""
+
+    def __getitem__(self, key):
+        val = super().__getitem__(key)
+        if key.endswith("latest.json"):
+            import gzip
+            return gzip.decompress(val)
+        return val
+
+
 class FakeContainer:
     def __init__(self):
-        self.store = {}
+        self.store = _Store()
         self.fail = {"on": False}
 
     def get_blob_client(self, name):
@@ -115,7 +127,8 @@ def test_lost_response_does_not_duplicate(tmp_path):
     s = AzureBlobSink(cc, str(tmp_path), "T")
     s.submit(_pkt(0, TS))
     cc.fail["lose_response"] = True
-    assert not s.upload_once()  # write landed, client saw an error
+    s.upload_once()  # write landed, client saw an error (history only: the live part is fine)
+    assert s.status.last_error.startswith("history:")
     s.submit(_pkt(1, TS + 1))
     assert s.upload_once()
     assert [p["seq"] for p in _lines(cc, f"T/telemetry/{HP}.jsonl")] == [0, 1]
@@ -154,14 +167,34 @@ def test_image_goes_to_own_blob_and_packet_references_it(tmp_path):
     assert not list((tmp_path / "images_pending").rglob("*.jpg"))
 
 
-def test_refuses_to_append_onto_longer_blob(tmp_path):
+def test_longer_blob_kept_and_history_continues_in_new_blob(tmp_path):
     cc = FakeContainer()
     cc.store[f"T/telemetry/{HP}.jsonl"] = b"x" * 10_000  # unrelated, longer
     s = AzureBlobSink(cc, str(tmp_path), "T")
     s.submit(_pkt(0, TS))
-    assert not s.upload_once()
-    assert "refusing to append" in s.status.last_error
-    assert cc.store[f"T/telemetry/{HP}.jsonl"] == b"x" * 10_000
+    assert s.upload_once()
+    assert cc.store[f"T/telemetry/{HP}.jsonl"] == b"x" * 10_000  # untouched
+    new = [k for k in cc.store if k.startswith(f"T/telemetry/{HP}.") and k != f"T/telemetry/{HP}.jsonl"]
+    assert len(new) == 1 and [p["seq"] for p in _lines(cc, new[0])] == [0]
+    s.submit(_pkt(1, TS + 1))
+    assert s.upload_once()
+    assert [p["seq"] for p in _lines(cc, new[0])] == [0, 1]
+
+
+def test_history_failure_does_not_hold_back_latest(tmp_path):
+    cc = FakeContainer()
+    s = AzureBlobSink(cc, str(tmp_path), "T")
+    s.submit(_pkt(0, TS))
+    real = cc.get_blob_client
+
+    def broken(name):
+        if "/telemetry/" in name:
+            raise ConnectionError("history endpoint down")
+        return real(name)
+    cc.get_blob_client = broken
+    assert s.upload_once()  # live part succeeded
+    assert json.loads(cc.store["T/latest.json"])["seq"] == 0
+    assert s.status.connected and s.status.last_error.startswith("history:")
 
 
 @pytest.mark.parametrize("ts,expected", [(0.0, "1970/01/01/00"), (1794400000.0, HP)])
@@ -219,3 +252,38 @@ def test_latest_only_pass_leaves_history_for_later(tmp_path):
     assert f"T/telemetry/{HP}.jsonl" not in cc.store
     assert s.upload_once(history=True)
     assert f"T/telemetry/{HP}.jsonl" in cc.store
+
+
+def test_set_latest_adds_no_history(tmp_path):
+    cc = FakeContainer()
+    s = AzureBlobSink(cc, str(tmp_path), "T")
+    s.submit(_pkt(0, TS), jpeg=b"\xff\xd8")
+    s.set_latest({"seq": 5}, latest_extra={"frames": {}})
+    s.upload_once()
+    latest = json.loads(cc.store["T/latest.json"])
+    assert latest["seq"] == 5 and latest["last_image_blob"]
+    assert len(_lines(cc, f"T/telemetry/{HP}.jsonl")) == 1
+
+
+def test_latest_is_gzip_encoded(tmp_path):
+    cc = FakeContainer()
+    s = AzureBlobSink(cc, str(tmp_path), "T")
+    s.submit(_pkt(0, TS))
+    s.upload_once()
+    raw = dict.__getitem__(cc.store, "T/latest.json")
+    assert raw[:2] == b"\x1f\x8b"
+    assert _sink_mod._content("application/json", encoding="gzip").content_encoding == "gzip"
+
+
+def test_aux_uploaded_before_latest(tmp_path):
+    cc = FakeContainer()
+    order = []
+    real = cc.get_blob_client
+    cc.get_blob_client = lambda n: (order.append(n), real(n))[1]
+    s = AzureBlobSink(cc, str(tmp_path), "T")
+    s.set_aux("state.json", {"state_seq": 1})
+    s.set_latest({"state_seq": 1})
+    assert s.upload_once(history=False)
+    assert order.index("T/state.json") < order.index("T/latest.json")
+    import gzip
+    assert json.loads(gzip.decompress(dict.__getitem__(cc.store, "T/state.json")))["state_seq"] == 1
