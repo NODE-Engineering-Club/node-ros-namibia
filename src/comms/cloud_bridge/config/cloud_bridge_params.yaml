@@ -33,3 +33,17 @@ sonar_bridge_node:
     sonarlink_ws_url: "ws://127.0.0.1:7077/connect_ws?session_id=1"
     n_bins: 100
     decimate_to_pps: 5.0
+
+# gui_backend -> Azure mirror for the cloud-hosted cockpit (gui_mirror_node.py).
+gui_cloud_mirror:
+  ros__parameters:
+    gui_ws_url: "ws://127.0.0.1:8090/ws"
+    asv_id: "ASKET_02"              # blobs under ASKET_02/gui/
+    record_rate_hz: 1.0
+    image_interval_s: 5.0
+    upload_interval_s: 5.0          # history appends + images
+    latest_interval_s: 1.0          # latest.json; about 2.6 M writes/month, roughly $15-20
+    track_max_points: 5000
+    azure_connection_string_file: "/data/secrets/azure_storage_connection_string"
+    azure_container: "telemetry"
+    spool_dir: "/data/cloud_spool_gui"

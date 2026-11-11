@@ -132,3 +132,5 @@
 .repo-head .input { width: 320px; }
 .course { width: 92px; height: 56px; }
 .repo-name { font-weight: 600; }
+.map-unavailable { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; background: var(--glass-well); z-index: 2; }
+.map-unavailable strong { font-size: 14px; }

@@ -53,6 +53,8 @@ const FONT = ['Noto Sans Regular'];
  * @param {string}  opts.mockTileUrl mock-mode synthetic raster protocol, if any
  * @param {string}  opts.basemapAttribution  licence text from the backend
  * @param {string}  opts.seamarkAttribution
+ * @param {object}  opts.tileUrls  absolute upstream templates {basemap, seamark, glyphs};
+ *                                 only the cloud build sets it (no /tiles proxy there)
  */
 export function buildStyle({
   origin,
@@ -62,6 +64,7 @@ export function buildStyle({
   mockTileUrl = '',
   basemapAttribution = '',
   seamarkAttribution = '',
+  tileUrls = null,
 } = {}) {
   const base = origin || (typeof window !== 'undefined' ? window.location.origin : '');
   const sources = {};
@@ -71,7 +74,7 @@ export function buildStyle({
   // means they are cached with everything else: without them MapLibre draws
   // the geometry and no place names, which is most of what makes a basemap
   // useful for working out where you are.
-  const glyphs = `${base}/tiles/fonts/{fontstack}/{range}.pbf`;
+  const glyphs = tileUrls?.glyphs || `${base}/tiles/fonts/{fontstack}/{range}.pbf`;
 
   // Land colour. Omitted when an offline raster is underneath, or it would
   // paint over it.
@@ -107,7 +110,7 @@ export function buildStyle({
   if (basemap) {
     sources.openmaptiles = {
       type: 'vector',
-      tiles: [`${base}/tiles/source/basemap/{z}/{x}/{y}.pbf`],
+      tiles: [tileUrls?.basemap || `${base}/tiles/source/basemap/{z}/{x}/{y}.pbf`],
       minzoom: 0,
       // OpenFreeMap's planet build stops at 14 and MapLibre overzooms above it.
       // That is the efficiency of vector tiles: one tile serves every zoom
@@ -123,7 +126,7 @@ export function buildStyle({
   if (seamark) {
     sources.seamark = {
       type: 'raster',
-      tiles: [`${base}/tiles/source/seamark/{z}/{x}/{y}.png`],
+      tiles: [tileUrls?.seamark || `${base}/tiles/source/seamark/{z}/{x}/{y}.png`],
       tileSize: 256,
       minzoom: 0,
       maxzoom: 18,

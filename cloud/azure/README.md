@@ -94,6 +94,76 @@ shows the age of the newest packet.
 | `sonar_cloud_points` | `60` | Sonar returns per ping kept |
 | `cloud_ws_url` | `""` | Old live relay (Cloudflare), off unless set |
 
+## The cockpit in the cloud (NAMIBIA_REDESIGNED_GUI)
+
+The team's redesigned cockpit can run from anywhere, read-only, on the same
+storage account:
+
+```
+boat: gui_backend ──ws──► gui_mirror_node ──► Azure  ASKET_02/gui/latest.json          (every 1 s)
+      (unchanged)         read-only client          ASKET_02/gui/telemetry/…/HH.jsonl  (changes, every 5 s)
+                                                    ASKET_02/gui/images/…jpg           (one every 5 s)
+browser: NAMIBIA_REDESIGNED_GUI cloud build ──► src/lib/azureTransport.js ──► the same Connection, screens and rules
+```
+
+- **Why a mirror of `gui_backend`** and not the telemetry packets above: the
+  cockpit reads `gui_backend`'s streams (pico, pre-flight, alarms, mission,
+  link profile…). Mirroring them means every panel, age and readiness verdict
+  is the boat's own. `gui_mirror_node` connects as a normal client,
+  subscribes and answers pings, and never sends a command.
+- **Read-only.** In the cloud build every command (mode, cut propulsion,
+  run checks, missions) comes back refused: "Read-only cloud view: commands
+  are only accepted from the GUI on the boat network." A badge on every
+  screen says so.
+- **Honest ages.** Data is about 2–3 s behind the boat (tested 2026-11-11).
+  Ages are measured against Azure's clock. If the boat or its backend goes
+  quiet, nothing new is delivered and the cockpit's own "Link lost: nothing
+  received for N s" banner appears. It does not show a frozen screen as
+  live.
+- **Map tiles.** The map asks for `/tiles/...` as it does on the boat. The
+  hosting config forwards those paths to OpenFreeMap and OpenSeaMap, the same
+  public sources `gui_backend` proxies.
+
+### On the boat
+
+Start the stack with `enable_gui:=true enable_gui_cloud_mirror:=true`. It
+uses the same connection string file as above. The parameters are under
+`gui_cloud_mirror:` in `cloud_bridge_params.yaml`. Writing `latest.json`
+once a second is about 2.6 M writes a month, roughly $15–20 at standard
+LRS prices; `latest_interval_s: 2.0` halves that, at about 1 s more delay.
+
+### Hosting the cockpit
+
+Both hosts build `NAMIBIA_REDESIGNED_GUI` with `npm run build:cloud`. The
+build reads `../src/asket_gui`, so the host needs the whole repository, which
+both clone by default.
+
+**Vercel:** New Project → import the repo → Root Directory
+`NAMIBIA_REDESIGNED_GUI`. Leave "Include files outside the root directory"
+on, which is the default. `NAMIBIA_REDESIGNED_GUI/vercel.json` sets the
+build, the output and the `/tiles` rewrites. Production branch:
+`Namibia_mission`.
+
+**Render:** New → Blueprint → the repo. `render.yaml` at the repository root
+describes the static site. Not deployed yet; Render's support for rewrites to
+another site's URL is assumed from its docs, not tested.
+
+**Giving people access**, two ways:
+
+1. **Viewer link (recommended).** Deploy with no Azure variables. Send the team
+   `https://<your-site>/#blob=…&sas=…`; `provision.py --cockpit-url
+   https://<your-site>` prints it. Each browser remembers it after the first
+   visit; someone with only the bare site address gets a sign-in box.
+2. **Token baked in.** Set `VITE_AZURE_BLOB` (e.g.
+   `https://<account>.blob.core.windows.net`) and `VITE_AZURE_SAS`
+   (the `sas` value from the link) in the host's environment variables.
+   Then **anyone who can open the site can read the telemetry**, because the
+   token is in the published JavaScript. Fine for a public demo; for anything
+   else use a Vercel password or Deployment Protection, or option 1.
+
+To try the cloud build locally: `cd NAMIBIA_REDESIGNED_GUI && npm run
+dev:cloud` and open `http://localhost:5174/#blob=…` with your viewer link.
+
 ## Limits, honestly
 
 - The Wi-Fi reading is the **Jetson's own** `wlan0`. On the boat the shore
@@ -102,6 +172,9 @@ shows the age of the newest packet.
   2 s, and the boat uploads every 2 s.
 - Sonar points are one ping's fan in the bridge's frame, not georeferenced,
   and the sonar's clock is unset until it has NTP.
+- Cockpit mirror tested 2026-11-11 against the `gui_backend` simulator and the
+  real storage account, in headless Chromium (screens, camera, refusal of
+  Cut propulsion and Run checks, 2–3 s data age). Not yet run on the boat.
 - Tested end to end against the Azurite emulator on 2026-11-11, with fake
   sensors, a 25 s storage outage, and the dashboard in Chromium. Not yet
   run against the real Azure account, and the static website step can't be

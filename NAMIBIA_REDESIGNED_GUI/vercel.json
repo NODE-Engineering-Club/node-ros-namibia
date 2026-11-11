@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build:cloud",
+  "outputDirectory": "dist-cloud",
+  "rewrites": [
+    { "source": "/tiles/source/basemap/:path*", "destination": "https://tiles.openfreemap.org/planet/latest/:path*" },
+    { "source": "/tiles/fonts/:path*", "destination": "https://tiles.openfreemap.org/fonts/:path*" },
+    { "source": "/tiles/source/seamark/:path*", "destination": "https://tiles.openseamap.org/seamark/:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    },
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+  ]
+}

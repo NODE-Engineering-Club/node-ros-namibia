@@ -142,6 +142,11 @@ export class Connection {
       return;
     }
     this.ws = ws;
+    // Camera frames are binary (gui_backend/core/video_frame.py). Without
+    // this they arrived as Blobs, failed JSON.parse below and were dropped,
+    // so #handleVideo was never reached and the camera panel never showed
+    // a picture.
+    try { ws.binaryType = 'arraybuffer'; } catch { /* transports without it */ }
 
     ws.onopen = () => {
       this.#set({
@@ -152,6 +157,18 @@ export class Connection {
     };
 
     ws.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        this.state.lastMessageAt = Date.now();
+        this.#handleVideo(event.data);
+        return;
+      }
+      if (typeof Blob !== 'undefined' && event.data instanceof Blob) {
+        event.data.arrayBuffer().then((buffer) => {
+          this.state.lastMessageAt = Date.now();
+          this.#handleVideo(buffer);
+        });
+        return;
+      }
       let message;
       try {
         message = JSON.parse(event.data);

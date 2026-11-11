@@ -21,6 +21,19 @@ npm run dev        # against a real gui_backend, through the dev proxy (below)
 npm run build      # → NAMIBIA_REDESIGNED_GUI/dist (NOT gui_backend/static)
 ```
 
+### Cloud build (read-only, from Azure)
+
+```bash
+npm run dev:cloud     # http://localhost:5174/#blob=…&sas=…  (viewer link)
+npm run build:cloud   # → dist-cloud, what Vercel / Render serve
+node --test test/azureTransport.test.mjs
+```
+
+The same app, with `src/lib/azureTransport.js` as the socket: it replays what
+`gui_mirror_node` on the boat writes to Azure, and refuses every command.
+Setup, hosting and access: [`cloud/azure/README.md`](../cloud/azure/README.md),
+"The cockpit in the cloud".
+
 ### Which backend `npm run dev` talks to
 
 The dev server proxies `/ws`, `/api` and `/tiles` to `BACKEND_URL`, default

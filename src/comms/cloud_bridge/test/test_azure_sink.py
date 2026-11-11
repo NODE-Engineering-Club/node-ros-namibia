@@ -198,3 +198,24 @@ def test_latest_names_newest_snapshot_even_without_one(tmp_path):
     latest = json.loads(cc.store["T/latest.json"])
     assert latest["seq"] == 1 and "image_blob" not in latest
     assert latest["last_image_blob"] == f"T/images/{HP}/{int(TS * 1000)}.jpg"
+
+
+def test_latest_extra_only_in_latest(tmp_path):
+    cc = FakeContainer()
+    s = AzureBlobSink(cc, str(tmp_path), "T")
+    s.submit(_pkt(0, TS), latest_extra={"hello": {"big": True}})
+    s.upload_once()
+    assert json.loads(cc.store["T/latest.json"])["hello"] == {"big": True}
+    assert "hello" not in _lines(cc, f"T/telemetry/{HP}.jsonl")[0]
+
+
+def test_latest_only_pass_leaves_history_for_later(tmp_path):
+    cc = FakeContainer()
+    s = AzureBlobSink(cc, str(tmp_path), "T")
+    s.submit(_pkt(0, TS), jpeg=b"\xff\xd8")
+    assert s.upload_once(history=False)
+    latest = json.loads(cc.store["T/latest.json"])
+    assert latest["last_image_blob"] in cc.store  # never names a missing image
+    assert f"T/telemetry/{HP}.jsonl" not in cc.store
+    assert s.upload_once(history=True)
+    assert f"T/telemetry/{HP}.jsonl" in cc.store

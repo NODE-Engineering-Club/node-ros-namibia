@@ -129,6 +129,8 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
           mockTileUrl: sources.mock ? 'mocktiles://{z}/{x}/{y}' : '',
           basemapAttribution: attributionFor(info, 'basemap'),
           seamarkAttribution: attributionFor(info, 'seamark'),
+          // Set only by the cloud build's connection; the boat uses its proxy.
+          tileUrls: connection.tileUrls,
         })
       : blankStyle();
 

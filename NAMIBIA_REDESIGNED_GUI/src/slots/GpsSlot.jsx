@@ -2,6 +2,8 @@ import { useState } from 'react';
 
 import { MissionMap } from '@asket/panels/MissionMap.jsx';
 
+import { MapBoundary, MapUnavailable, hasWebGL } from '../components/MapGuard.jsx';
+
 import '../theme/legacy-map.css';
 
 /**
@@ -14,13 +16,19 @@ export function GpsSlot({ v, connection }) {
   const [follow, setFollow] = useState(true);
   return (
     <div className="slot gps-slot">
-      <MissionMap
-        state={v.state}
-        connection={connection}
-        follow={follow}
-        onFollowChange={setFollow}
-        showRawLidar={false}
-      />
+      {hasWebGL() ? (
+        <MapBoundary>
+          <MissionMap
+            state={v.state}
+            connection={connection}
+            follow={follow}
+            onFollowChange={setFollow}
+            showRawLidar={false}
+          />
+        </MapBoundary>
+      ) : (
+        <MapUnavailable />
+      )}
     </div>
   );
 }

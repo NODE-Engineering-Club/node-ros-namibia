@@ -10,7 +10,10 @@
     "build": "vite build",
     "build:mock": "vite build --mode mock --outDir dist-mock --emptyOutDir",
     "preview": "vite preview",
-    "preview:mock": "vite preview --outDir dist-mock"
+    "preview:mock": "vite preview --outDir dist-mock",
+    "dev:cloud": "vite --mode cloud",
+    "build:cloud": "vite build --mode cloud --outDir dist-cloud --emptyOutDir",
+    "preview:cloud": "vite preview --outDir dist-cloud"
   },
   "dependencies": {
     "maplibre-gl": "^5.9.0",

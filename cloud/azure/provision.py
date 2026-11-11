@@ -10,8 +10,10 @@ What it does, in order:
 2. Adds one CORS rule to the Blob service (GET/HEAD/OPTIONS from any origin)
    so the dashboard in a browser can read blobs. Existing rules are kept.
    CORS only lets a browser *ask*; every read still needs the SAS token.
-3. Turns on the account's static website and uploads ``web/index.html`` to
-   the ``$web`` container.
+3. Turns on the account's static website and publishes the cockpit
+   (NAMIBIA_REDESIGNED_GUI's cloud build, ``npm run build:cloud``) to the
+   ``$web`` container. ``--simple-dashboard`` publishes ``web/index.html``
+   (the one-page dashboard) instead.
 4. Creates a read + list SAS token for the ``telemetry`` container only,
    valid for ``--sas-days``. It cannot write, delete, or see other containers.
 5. Prints the viewer link. The token is in the link's ``#fragment``, which
@@ -96,20 +98,44 @@ def ensure_cors(svc: BlobServiceClient) -> None:
     print("[2] added CORS rule: GET/HEAD/OPTIONS from any origin (reads still need the SAS)")
 
 
-def ensure_website(svc: BlobServiceClient, marker: str) -> bool:
+COCKPIT_DIST = HERE.parent.parent / "NAMIBIA_REDESIGNED_GUI" / "dist-cloud"
+
+
+def _site_files(simple: bool) -> tuple[str, list[tuple[str, Path]]]:
+    if not simple:
+        if not (COCKPIT_DIST / "index.html").is_file():
+            sys.exit(f"[3] no cockpit build at {COCKPIT_DIST}. Run: cd NAMIBIA_REDESIGNED_GUI && "
+                     "npm ci && npm run build:cloud   (or pass --simple-dashboard)")
+        files = [(p.relative_to(COCKPIT_DIST).as_posix(), p) for p in sorted(COCKPIT_DIST.rglob("*")) if p.is_file()]
+        return "cockpit (NAMIBIA_REDESIGNED_GUI cloud build)", files
+    return "simple dashboard", [("index.html", HERE / "web" / "index.html")]
+
+
+def ensure_website(svc: BlobServiceClient, marker: str, simple: bool = False) -> bool:
+    import mimetypes
+    label, files = _site_files(simple)
     try:
         svc.set_service_properties(static_website=StaticWebsite(enabled=True, index_document="index.html"))
     except HttpResponseError as exc:
         print(f"[3] could not enable the static website ({exc.reason}); skipping the upload")
         return False
     web = svc.get_container_client("$web")
-    html = (HERE / "web" / "index.html").read_bytes()
-    web.upload_blob("index.html", html, overwrite=True,
-                    content_settings=ContentSettings(content_type="text/html; charset=utf-8",
-                                                     cache_control="no-cache"))
+    keep = {name for name, _ in files} | {".asket-marker"}
+    for name, path in files:
+        ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
+            ctype += "; charset=utf-8"
+        # Vite puts a content hash in every asset name, so those can be cached
+        # for good; index.html must always be re-checked to pick up a new build.
+        cache = "public, max-age=31536000, immutable" if name.startswith("assets/") else "no-cache"
+        web.upload_blob(name, path.read_bytes(), overwrite=True,
+                        content_settings=ContentSettings(content_type=ctype, cache_control=cache))
+    stale = [b.name for b in web.list_blobs() if b.name not in keep]
+    for name in stale:  # old build's assets
+        web.delete_blob(name)
     web.upload_blob(".asket-marker", marker.encode(), overwrite=True,
                     content_settings=ContentSettings(content_type="text/plain", cache_control="no-cache"))
-    print("[3] static website on; dashboard uploaded to $web/index.html")
+    print(f"[3] static website on; {label} published ({len(files)} files, {len(stale)} old removed)")
     return True
 
 
@@ -147,6 +173,10 @@ def main() -> None:
     ap.add_argument("--asv-id", default="ASKET_02")
     ap.add_argument("--sas-days", type=int, default=180)
     ap.add_argument("--skip-website", action="store_true", help="only container, CORS and token")
+    ap.add_argument("--simple-dashboard", action="store_true",
+                    help="publish the one-page dashboard (web/index.html) instead of the cockpit")
+    ap.add_argument("--cockpit-url", default="",
+                    help="where NAMIBIA_REDESIGNED_GUI's cloud build is hosted (e.g. https://asket.vercel.app)")
     ap.add_argument("--print-sas-only", action="store_true",
                     help="issue a fresh token and print the link, change nothing else")
     args = ap.parse_args()
@@ -163,7 +193,7 @@ def main() -> None:
         ensure_cors(svc)
         if not args.skip_website:
             marker = secrets.token_hex(8)
-            if ensure_website(svc, marker):
+            if ensure_website(svc, marker, simple=args.simple_dashboard):
                 web_url = find_web_endpoint(account, marker)
                 if not web_url:
                     print("    could not find the website address automatically; it is in the portal "
@@ -178,6 +208,10 @@ def main() -> None:
     print("Viewer link (share only with the team; anyone with it can read the telemetry until it expires):")
     print(f"  {(web_url or '<static website endpoint>')}/{frag}")
     print()
+    if args.cockpit_url:
+        print("Cockpit (NAMIBIA_REDESIGNED_GUI cloud build), same token:")
+        print(f"  {args.cockpit_url.rstrip('/')}/{frag}")
+        print()
     print("Same page from a local copy (no website needed):")
     print(f"  file://{HERE / 'web' / 'index.html'}{frag}")
 

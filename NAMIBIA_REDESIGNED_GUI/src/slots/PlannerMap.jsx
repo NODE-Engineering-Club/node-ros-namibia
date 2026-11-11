@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { buildStyle, graticule } from '@asket/lib/mapStyle.js';
 import { registerMockTileProtocol } from '@asket/lib/mock/tiles.js';
+import { MapUnavailable, hasWebGL } from '../components/MapGuard.jsx';
 
 /**
  * Mission Design basemap.
@@ -24,7 +25,7 @@ function darkStyle() {
   };
 }
 
-function styleFor(info, isMock) {
+function styleFor(info, isMock, tileUrls = null) {
   if (isMock) {
     if (!info?.mbtiles?.available) return { style: darkStyle(), tiles: false };
     registerMockTileProtocol(maplibregl);
@@ -33,7 +34,7 @@ function styleFor(info, isMock) {
   const mbtiles = Boolean(info?.mbtiles?.available);
   const basemap = Boolean(info?.online) && (info?.upstream?.reachable !== false || (info?.cache?.entries || 0) > 0);
   if (!mbtiles && !basemap) return { style: darkStyle(), tiles: false };
-  return { style: buildStyle({ origin: window.location.origin, basemap, mbtiles }), tiles: true };
+  return { style: buildStyle({ origin: window.location.origin, basemap, mbtiles, tileUrls }), tiles: true };
 }
 
 export function PlannerMap({
@@ -45,6 +46,7 @@ export function PlannerMap({
   const handlers = useRef({});
   const [ready, setReady] = useState(false);
   const [tiles, setTiles] = useState(null);
+  const [noMap, setNoMap] = useState(null);
   handlers.current = { onAdd, onMove, onSelect, addMode };
 
   // -- create ----------------------------------------------------------
@@ -54,9 +56,16 @@ export function PlannerMap({
       let info = null;
       try { info = await connection.fetchTileInfo(); } catch { info = null; }
       if (cancelled || !container.current) return;
-      const { style, tiles: hasTiles } = styleFor(info, connection.isMock);
+      const { style, tiles: hasTiles } = styleFor(info, connection.isMock, connection.tileUrls);
       setTiles(hasTiles);
-      const m = new maplibregl.Map({ container: container.current, style, center: WALVIS, zoom: 13, attributionControl: { compact: true } });
+      if (!hasWebGL()) { setNoMap('The map needs WebGL, which this browser does not provide.'); return; }
+      let m;
+      try {
+        m = new maplibregl.Map({ container: container.current, style, center: WALVIS, zoom: 13, attributionControl: { compact: true } });
+      } catch (err) {
+        setNoMap(`The map failed to start (${String(err?.message || err).slice(0, 120)}).`);
+        return;
+      }
       m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
       m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       m.on('load', () => {
@@ -132,6 +141,7 @@ export function PlannerMap({
   return (
     <>
       <div ref={container} className="map" />
+      {noMap && <MapUnavailable reason={noMap} />}
       {tiles === false && (
         <span className="pill neutral" style={{ position: 'absolute', left: 10, top: 10, zIndex: 2 }}>
           No map tiles · coordinate grid only

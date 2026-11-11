@@ -172,6 +172,11 @@ def generate_launch_description():
                               description="Outbound-only cloud telemetry relay (src/comms/cloud_bridge). "
                                           "Off by default — needs cloud_ws_url configured for a real "
                                           "deployment, see config/cloud_bridge_params.yaml."),
+        DeclareLaunchArgument("enable_gui_cloud_mirror", default_value="false",
+                              description="Mirror gui_backend's streams to Azure Blob Storage "
+                                          "for the cloud-hosted cockpit (read-only client; "
+                                          "needs enable_gui and the connection string, see "
+                                          "cloud/azure/README.md)."),
         DeclareLaunchArgument("enable_sonar_bridge",  default_value="false",
                               description="SonarLink -> /sonar/decimated bridge (src/comms/cloud_bridge). "
                                           "Independent of enable_cloud_bridge so it can be bench-tested "
@@ -671,6 +676,21 @@ def generate_launch_description():
             ],
             respawn=True,
             respawn_delay=2.0,
+            output="screen",
+        ),
+        # gui_backend -> Azure, for NAMIBIA_REDESIGNED_GUI hosted in the
+        # cloud. A read-only client of the backend: it subscribes and answers
+        # pings, never sends a command.
+        Node(
+            package="cloud_bridge",
+            executable="gui_mirror_node",
+            name="gui_cloud_mirror",
+            condition=IfCondition(LaunchConfiguration("enable_gui_cloud_mirror")),
+            parameters=[
+                get_package_share_directory("cloud_bridge") + "/config/cloud_bridge_params.yaml",
+            ],
+            respawn=True,
+            respawn_delay=5.0,
             output="screen",
         ),
         # SonarLink -> /sonar/decimated. Independently enabled: useful to

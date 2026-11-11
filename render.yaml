@@ -1,0 +1,32 @@
+# Render Blueprint: the read-only cloud cockpit (NAMIBIA_REDESIGNED_GUI, cloud build).
+# The build reaches ../src/asket_gui, so it runs from the repository root.
+# See cloud/azure/README.md, "Hosting the cockpit".
+services:
+  - type: web
+    name: asket-cockpit
+    runtime: static
+    branch: Namibia_mission
+    buildCommand: cd NAMIBIA_REDESIGNED_GUI && npm ci && npm run build:cloud
+    staticPublishPath: NAMIBIA_REDESIGNED_GUI/dist-cloud
+    routes:
+      - type: rewrite
+        source: /tiles/source/basemap/*
+        destination: https://tiles.openfreemap.org/planet/latest/*
+      - type: rewrite
+        source: /tiles/fonts/*
+        destination: https://tiles.openfreemap.org/fonts/*
+      - type: rewrite
+        source: /tiles/source/seamark/*
+        destination: https://tiles.openseamap.org/seamark/*
+    headers:
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+    envVars:
+      - key: VITE_AZURE_BLOB
+        sync: false
+      - key: VITE_AZURE_SAS
+        sync: false

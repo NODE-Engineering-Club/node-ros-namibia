@@ -88,11 +88,17 @@ class AzureBlobSink:
         upload_interval_s: float = 2.0,
         keep_local_images: bool = False,
         log: Optional[Callable[[str], None]] = None,
+        latest_interval_s: Optional[float] = None,
     ):
         self._cc = container_client
         self._spool = Path(spool_dir)
         self._asv = asv_id.strip("/")
         self._interval = upload_interval_s
+        # latest.json is what a live viewer waits on; history is not. They
+        # can run on different clocks so "live" costs one write a second
+        # without paying for history appends at the same rate.
+        self._latest_interval = latest_interval_s or upload_interval_s
+        self._last_history = 0.0
         self._keep_images = keep_local_images
         self._log = log or (lambda _m: None)
 
@@ -115,11 +121,15 @@ class AzureBlobSink:
 
     # -- producer side (ROS timer thread) ---------------------------------
 
-    def submit(self, packet: dict, jpeg: Optional[bytes] = None) -> None:
+    def submit(self, packet: dict, jpeg: Optional[bytes] = None,
+               latest_extra: Optional[dict] = None) -> None:
         """Write one packet (and optionally its snapshot) to the local spool.
 
         Never touches the network. ``packet`` is not modified; a copy carries
         the ``image_blob`` reference when a snapshot is given.
+        ``latest_extra`` is merged into latest.json only, not the history:
+        for state that is large and rarely changes (a full track, the
+        server's hello) and is only needed to draw "now".
         """
         ts = float(packet.get("timestamp") or time.time())
         hp = hour_path(ts)
@@ -147,8 +157,9 @@ class AzureBlobSink:
                 self._last_image_blob = rec["image_blob"]
             # latest.json also names the newest snapshot, so the live view
             # has an image even when this packet did not carry one.
-            self._latest = json.dumps({**rec, "last_image_blob": self._last_image_blob},
-                                      separators=(",", ":")).encode()
+            self._latest = json.dumps(
+                {**rec, **(latest_extra or {}), "last_image_blob": self._last_image_blob},
+                separators=(",", ":")).encode()
             self._latest_dirty = True
             self.status.packets_spooled += 1
 
@@ -166,19 +177,28 @@ class AzureBlobSink:
             self.upload_once()
 
     def _run(self) -> None:
-        backoff = self._interval
+        period = min(self._interval, self._latest_interval)
+        backoff = period
         while not self._stop.wait(backoff):
-            ok = self.upload_once()
-            backoff = self._interval if ok else min(max(backoff * 2, 5.0), 60.0)
+            history_due = time.monotonic() - self._last_history >= self._interval - 1e-3
+            ok = self.upload_once(history=history_due)
+            if ok and history_due:
+                self._last_history = time.monotonic()
+            backoff = period if ok else min(max(backoff * 2, 5.0), 60.0)
 
     # -- uploader ---------------------------------------------------------
 
-    def upload_once(self) -> bool:
-        """One pass: telemetry appends, images, latest.json. True if clean."""
+    def upload_once(self, history: bool = True) -> bool:
+        """One pass: images, latest.json, then (if ``history``) the appends.
+
+        Images go before latest.json on every pass, because latest.json names
+        the newest snapshot and must never point at a blob not uploaded yet.
+        """
         try:
-            self._upload_telemetry()
             self._upload_images()
             self._upload_latest()
+            if history:
+                self._upload_telemetry()
         except Exception as exc:  # noqa: BLE001 — network, auth, throttling: retry later
             self.status.connected = False
             self.status.last_error = f"{type(exc).__name__}: {exc}"[:300]

@@ -36,10 +36,27 @@ export default defineConfig(({ mode }) => ({
     proxy:
       mode === 'mock'
         ? undefined
-        : {
+        : mode === 'cloud'
+          // Same rewrites as vercel.json / render.yaml: the map's /tiles/...
+          // URLs go to the public tile servers gui_backend proxies on the boat.
+          ? {
+              '/tiles/source/basemap': {
+                target: 'https://tiles.openfreemap.org', changeOrigin: true,
+                rewrite: (p) => p.replace(/^\/tiles\/source\/basemap/, '/planet/latest'),
+              },
+              '/tiles/fonts': {
+                target: 'https://tiles.openfreemap.org', changeOrigin: true,
+                rewrite: (p) => p.replace(/^\/tiles\/fonts/, '/fonts'),
+              },
+              '/tiles/source/seamark': {
+                target: 'https://tiles.openseamap.org', changeOrigin: true,
+                rewrite: (p) => p.replace(/^\/tiles\/source\/seamark/, '/seamark'),
+              },
+            }
+          : {
             '/ws': { target: BACKEND_WS, ws: true },
             '/api': BACKEND_URL,
             '/tiles': BACKEND_URL,
-          },
+            },
   },
 }));
