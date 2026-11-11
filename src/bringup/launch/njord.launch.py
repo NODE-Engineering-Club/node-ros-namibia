@@ -5,16 +5,26 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import (EnvironmentVariable, LaunchConfiguration,
+                                  PathJoinSubstitution, PythonExpression)
 from launch_ros.actions import Node, SetParameter
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
 
 
 def generate_launch_description():
     cfg = get_package_share_directory("bringup") + "/config"
+    # nav2_profile picks the Nav2 parameter file. An unknown profile is a
+    # KeyError at launch rather than a silent fallback.
     nav2_params = ParameterFile(
-        RewrittenYaml(source_file=cfg + "/nav2_params.yaml", param_rewrites={}, convert_types=True),
+        RewrittenYaml(
+            source_file=PythonExpression([
+                "{'survey': '", cfg, "/nav2_params_survey.yaml', 'full': '", cfg,
+                "/nav2_params.yaml'}['", LaunchConfiguration("nav2_profile"), "']",
+            ]),
+            param_rewrites={}, convert_types=True,
+        ),
         allow_substs=True,
     )
     desc_share = get_package_share_directory("description")
@@ -39,10 +49,20 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument("world",                default_value="basicWorld.sdf",
                               description="World file name under description/worlds/ to load in Gazebo "
-                                          "(e.g. dockingWorld.sdf for the U-shaped Task 3.1 berth)"),
+                                          "(e.g. collisionAvoidanceWorld.sdf for buoy + moving-vessel obstacles)"),
         DeclareLaunchArgument("enable_mavros",       default_value="true"),
         DeclareLaunchArgument("enable_localization",  default_value="true"),
         DeclareLaunchArgument("enable_nav2",          default_value="true"),
+        # Phase B (f). survey: no obstacle layer (nothing aboard detects
+        # obstacles), a geofence keep-out and a speed limit
+        # (config/nav2_params_survey.yaml). full: config/nav2_params.yaml, for
+        # the SAM2/fusion obstacle pipeline, which needs sensors not fitted.
+        DeclareLaunchArgument("nav2_profile",         default_value="survey",
+                              description="Nav2 parameters: 'survey' (geofence + speed limit, no "
+                                          "obstacle layer) or 'full' (SAM2/fusion obstacles)."),
+        DeclareLaunchArgument("geofence_file",        default_value="/data/setup/geofence.yaml",
+                              description="Survey-area polygon (lat/lon) for the survey profile. "
+                                          "Example: config/geofence.example.yaml."),
         DeclareLaunchArgument("enable_sensors",       default_value="true"),
         DeclareLaunchArgument("enable_perception",    default_value="true"),
         DeclareLaunchArgument("enable_geo_fusion",    default_value="true"),
@@ -58,56 +78,28 @@ def generate_launch_description():
                               description="Path to the planned-route .yaml/.yml/.json file "
                                           "(see mission/waypoint_route_loader.py's module "
                                           "docstring for the expected format)."),
-        DeclareLaunchArgument("enable_maneuvering_pathfinding_mission", default_value="false",
-                              description="Run the Task 9.1 (Maneuvering + Path Finding) mission "
-                                          "sequencer — off by default so bringing up the stack "
-                                          "doesn't immediately start the competition run."),
-        DeclareLaunchArgument("enable_docking_mission", default_value="false",
-                              description="Run the Task 3.1 (Normal Docking) mission sequencer "
-                                          "— off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission."),
-        DeclareLaunchArgument("enable_docking_parallel_mission", default_value="false",
-                              description="Run the Task 3.2 (Parallel Docking) mission "
-                                          "sequencer — off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission. Its "
-                                          "close-range manoeuvre (ExecuteDockingParallel) "
-                                          "and wall_detector_node are both real now but "
-                                          "UNVERIFIED — never run against a real wall, on "
-                                          "the bench or in the water — see "
-                                          "DockingParallelTask in simple_boat.xml. Do a "
-                                          "bench check before enabling for a real attempt."),
-        DeclareLaunchArgument("enable_collision_avoidance_mission", default_value="false",
-                              description="Run the Task 9.2 (Collision Avoidance) mission "
-                                          "sequencer — off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission. Its "
-                                          "gate-crossing + COLREG give-way handling "
-                                          "(collision_nodes.cpp's updateGateState/"
-                                          "updateMarkerVesselState) is real now but "
-                                          "UNVERIFIED — never run against real gates or a "
-                                          "real vessel, on the bench or in the water — see "
-                                          "CollisionAvoidanceTask in simple_boat.xml. Do a "
-                                          "bench check before enabling for a real attempt."),
-        DeclareLaunchArgument("enable_surprise_mission", default_value="false",
-                              description="Run the Task 9.4 (Surprise) mission sequencer "
-                                          "— off by default, same reasoning as "
-                                          "enable_maneuvering_pathfinding_mission. TEAM "
-                                          "WORKING DRAFT (the official 9.4 spec is still "
-                                          "unreleased) that chains normal docking -> "
-                                          "open-water transit -> parallel docking into one "
-                                          "run — see mission_surprise/surprise_mission.py's "
-                                          "docstring and TODOS.md. UNVERIFIED end to end — "
-                                          "never run, on the bench or in the water. Do NOT "
-                                          "enable alongside enable_docking_mission/"
-                                          "enable_docking_parallel_mission/"
-                                          "enable_collision_avoidance_mission — they would "
-                                          "race for the same competition_manager task "
-                                          "selection."),
-        DeclareLaunchArgument("enable_competition",   default_value="true"),
         DeclareLaunchArgument("enable_boat_bt",       default_value="true"),
         DeclareLaunchArgument("enable_vision",        default_value="true"),
         DeclareLaunchArgument("vision_confidence",    default_value="0.5"),
         DeclareLaunchArgument("camera_device",        default_value="/dev/video0"),
         DeclareLaunchArgument("lidar_device",         default_value="/dev/ttyUSB0"),
+        # Off by default: no lidar (RPLidar/Livox) is aboard and the USB camera
+        # was replaced by the OAK-D-LR, which has no driver here yet
+        # (docs/HARDWARE_DECISIONS.md). Starting a driver for a device that is
+        # not there only produces a crash-looping node and an empty panel.
+        DeclareLaunchArgument("enable_lidar",         default_value="false",
+                              description="Start the RPLIDAR driver (sllidar_node) on lidar_device. "
+                                          "No lidar is fitted on the current boat."),
+        DeclareLaunchArgument("enable_usb_camera",    default_value="false",
+                              description="Start camera_driver on camera_device (USB/V4L2). "
+                                          "The boat now carries an OAK-D-LR (PoE), not a USB camera."),
+        # The OAK-D-LR (PoE, 10.10.20.21) through Luxonis' depthai_ros_driver.
+        # Off by default: the driver is NOT in the image yet
+        # (ros-jazzy-depthai-ros-driver, plus ros-jazzy-compressed-image-
+        # transport for the GUI's JPEG topic). See docs/CAMERA_OAK.md.
+        DeclareLaunchArgument("enable_oak",           default_value="false",
+                              description="Start depthai_ros_driver for the OAK-D-LR (config/oak.yaml). "
+                                          "The package must be installed; it is not in the image yet."),
         DeclareLaunchArgument("use_sim",         default_value="false"),
         DeclareLaunchArgument(
             "headless",
@@ -118,12 +110,64 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument("enable_foxglove",      default_value="true"),
-        DeclareLaunchArgument("fcu_url",              default_value="tcp://localhost:5777"),
-        DeclareLaunchArgument("gcs_url",              default_value="udp://@localhost:14556"),
-        DeclareLaunchArgument("use_pico_bridge",      default_value="false"),
-        DeclareLaunchArgument("pico_port",            default_value="/dev/ttyACM0"),
-        DeclareLaunchArgument("enable_bms",           default_value="false"),
-        DeclareLaunchArgument("bms_port",             default_value="/dev/ttyACM3"),
+        # Phase B (d): MAVROS straight to the Pixhawk over USB, no BlueOS.
+        # /dev/pixhawk is the udev link (deploy/udev/99-asket.rules); the
+        # baud rate is ignored on a USB CDC port but MAVROS's URL needs one.
+        DeclareLaunchArgument("fcu_url",              default_value="/dev/pixhawk:115200",
+                              description="MAVROS link to the flight controller. Ignored with "
+                                          "use_blueos:=true."),
+        DeclareLaunchArgument("use_blueos",           default_value="false",
+                              description="Go through BlueOS's MAVLink router (tcp://localhost:5777) "
+                                          "instead of fcu_url, as before Phase B (d)."),
+        # PX4 or ArduPilot: not yet known for this Pixhawk 4. Selects
+        # config/mavros_<autopilot>.yaml and whether MAVROS asks for stream
+        # rates; the pre-flight's autopilot.match check fails if the Pixhawk
+        # turns out to run the other one. ArduPilot by default: the
+        # set_stream_rate workaround below was confirmed against this
+        # Pixhawk, and REQUEST_DATA_STREAM is an ArduPilot-only request.
+        DeclareLaunchArgument("autopilot",            default_value="ardupilot",
+                              description="Firmware on the Pixhawk: 'ardupilot' or 'px4'."),
+        # MAVLink relay to QGroundControl on the shore laptop, to set the
+        # Pixhawk up without unplugging it from the Jetson. Off by default.
+        # udp-b://@14550 broadcasts on the boat/shore network to UDP 14550,
+        # where QGroundControl listens by default; a fixed laptop is
+        # udp://@<laptop-ip>:14550.
+        DeclareLaunchArgument("enable_gcs_relay",     default_value="false",
+                              description="Relay MAVLink to QGroundControl on gcs_url."),
+        DeclareLaunchArgument("gcs_url",              default_value="udp-b://@14550",
+                              description="Where the QGroundControl relay sends (enable_gcs_relay)."),
+        # Phase B (a): the ESCs are wired to the Pico, so the Pico is the motor
+        # path by default. false selects actuator_driver (MAVROS RC override
+        # through the Pixhawk) instead; the two never run together
+        # (system_test/test/test_motor_path_exclusive.py).
+        DeclareLaunchArgument("use_pico_bridge",      default_value="true",
+                              description="Drive the thrusters through the Pico (pico_bridge). "
+                                          "false = actuator_driver via MAVROS/Pixhawk."),
+        # /dev/pico is the udev link (deploy/udev/). /dev/ttyACM0 was the old
+        # default: behind the hub that number belongs to whichever device woke
+        # first, which can be a BMS bridge.
+        DeclareLaunchArgument("pico_port",            default_value="/dev/pico"),
+        # pico_bridge drives REAL thrusters. With use_sim:=true it used to start
+        # anyway (bench rig: simulated mission, real Pico). Now that the bridge
+        # is on by default, a plain simulation must not reach real hardware, so
+        # that rig needs this argument on purpose. Boat on a stand, props off.
+        DeclareLaunchArgument("pico_bridge_in_sim",   default_value="false",
+                              description="Also start pico_bridge when use_sim:=true (bench only: "
+                                          "real thrusters follow the simulated mission)."),
+        DeclareLaunchArgument("enable_bms",           default_value="false",
+                              description="BMS readers (one per pack) + battery_aggregator -> /battery/state"),
+        # Stable names from deploy/udev/99-asket.rules (the BMS boards sit
+        # behind a USB hub, so ttyACMn numbers are not stable).
+        DeclareLaunchArgument("bms_port",             default_value="/dev/bms_pack1",
+                              description="Serial port of the pack 1 BMS (MCP2221)"),
+        # false while only one BMS is wired (team decision, Phase B). With one
+        # reader the aggregator combines one pack; set true once the second
+        # BMS is fitted and /dev/bms_pack2 exists.
+        DeclareLaunchArgument("enable_bms2",          default_value="false",
+                              description="Second BMS (pack 2). Only read when enable_bms:=true. "
+                                          "false while only one BMS is wired."),
+        DeclareLaunchArgument("bms2_port",            default_value="/dev/bms_pack2",
+                              description="Serial port of the pack 2 BMS (MCP2221)"),
         DeclareLaunchArgument("enable_cloud_bridge",  default_value="false",
                               description="Outbound-only cloud telemetry relay (src/comms/cloud_bridge). "
                                           "Off by default — needs cloud_ws_url configured for a real "
@@ -135,6 +179,32 @@ def generate_launch_description():
         DeclareLaunchArgument("lidar_camera_extrinsic", default_value="",
                               description="Path to lidar_camera_extrinsic.yaml; "
                                           "empty = use URDF nominal TF for lidar→front_camera"),
+        # Mission GUI (ported from node-ros-2026 1606eb7). OFF by default:
+        # launching without options behaves exactly as before. See
+        # src/gui_backend/launch/gui.launch.py and docs/gui/PORTING_NOTES.md.
+        DeclareLaunchArgument("enable_gui",           default_value="false",
+                              description="Start the mission GUI backend on http://<host>:<gui_port> "
+                                          "(also starts system_test and mission_recorder)"),
+        DeclareLaunchArgument("gui_port",             default_value="8090",
+                              description="Mission GUI HTTP/WebSocket port. Clear of foxglove_bridge (8765)."),
+        # The Omniscan's health bridge, and the address it looks for the sonar
+        # at. Both are passed straight through to gui.launch.py.
+        #
+        # The address is an argument because the sonar's address is not settled.
+        # Measured on 2026-10-28 it answers on 192.168.2.21, which is the
+        # default here; the boat LAN plan (10.10.20.31,
+        # docs/HARDWARE_DECISIONS.md §2) is where it would go if anybody
+        # re-addressed it, and nobody has. ASKET_SONAR_HOST overrides the
+        # default without editing this file.
+        DeclareLaunchArgument("enable_sonar",         default_value="false",
+                              description="Start omniscan_bridge (sonar health only; SonarView owns the "
+                                          "sonar). Requires enable_gui:=true."),
+        DeclareLaunchArgument("sonar_host",
+                              default_value=EnvironmentVariable(
+                                  "ASKET_SONAR_HOST", default_value="192.168.2.21"),
+                              description="Omniscan address. Default 192.168.2.21, measured on the "
+                                          "hardware; ASKET_SONAR_HOST overrides it. The plan "
+                                          "says 10.10.20.31, which the sonar is not on."),
     ]
     # fmt: on
 
@@ -182,8 +252,16 @@ def generate_launch_description():
             ])),
             arguments=[
                 "--ros-args",
-                "-p", ["fcu_url:=", LaunchConfiguration("fcu_url")],
-                "-p", ["gcs_url:=", LaunchConfiguration("gcs_url")],
+                "-p", ["fcu_url:=", PythonExpression([
+                    "'tcp://localhost:5777' if '", LaunchConfiguration("use_blueos"),
+                    "' == 'true' else '", LaunchConfiguration("fcu_url"), "'",
+                ])],
+                # Off: the YAML empty string ''. A bare "gcs_url:=" is not a
+                # valid parameter override and mavros_node aborts on it.
+                "-p", ["gcs_url:=", PythonExpression([
+                    "'", LaunchConfiguration("gcs_url"), "' if '",
+                    LaunchConfiguration("enable_gcs_relay"), "' == 'true' else \"''\"",
+                ])],
                 "-p", "tgt_system:=1",
                 "-p", "tgt_component:=1",
                 "-p", "local_position.frame_id:=odom",
@@ -196,8 +274,12 @@ def generate_launch_description():
             # use_sim, and adding it back (even as a single-key dict) forces
             # launch_ros to emit a second --params-file, which alone is enough
             # to reproduce the race described above.
+            # One file, chosen by autopilot (see config/mavros_ardupilot.yaml).
             parameters=[
-                cfg + "/mavros_denylist.yaml",
+                PythonExpression([
+                    "'", cfg, "/mavros_' + {'px4': 'px4', 'ardupilot': 'ardupilot'}['",
+                    LaunchConfiguration("autopilot"), "'] + '.yaml'",
+                ]),
             ],
         ),
         # This particular FCU/link doesn't auto-stream position or extended-
@@ -211,11 +293,16 @@ def generate_launch_description():
         # plugin loading and have an FCU connection), fixes it for the rest of
         # the session. This is a workaround for FCU/link stream-rate config,
         # not a bug in this repo's code.
+        #
+        # ArduPilot only: REQUEST_DATA_STREAM (what set_stream_rate sends) is
+        # an ArduPilot message, which PX4 ignores — PX4's rates come from its
+        # own MAVLink instance settings (docs/HARDWARE_DECISIONS.md §4c).
         TimerAction(
             period=10.0,
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
-                LaunchConfiguration("use_sim"), "' != 'true'"
+                LaunchConfiguration("use_sim"), "' != 'true' and '",
+                LaunchConfiguration("autopilot"), "' == 'ardupilot'"
             ])),
             actions=[
                 ExecuteProcess(
@@ -227,6 +314,17 @@ def generate_launch_description():
                     output="log",
                 ),
             ],
+        ),
+        # Which autopilot actually answers (HEARTBEAT off MAVROS's raw
+        # stream) → /autopilot/detected, for the pre-flight's autopilot.match.
+        Node(
+            package="sensors",
+            executable="autopilot_probe",
+            name="autopilot_probe",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
         ),
         # Localization — EKF + NavSat transform
         Node(
@@ -252,6 +350,18 @@ def generate_launch_description():
             executable="datum_sync",
             name="datum_sync",
             condition=IfCondition(LaunchConfiguration("enable_localization")),
+        ),
+        # The geofence keep-out mask for the survey profile, in the map frame
+        # anchored by datum_sync (same home position).
+        Node(
+            package="sensors",
+            executable="geofence_mask_node",
+            name="geofence_mask_node",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
+                LaunchConfiguration("nav2_profile"), "' == 'survey'"
+            ])),
+            parameters=[{"geofence_file": LaunchConfiguration("geofence_file")}, sim_time],
         ),
         # Nav2 — individual nodes so we can omit opennav_docking (unsupported on USV)
         GroupAction(
@@ -302,6 +412,7 @@ def generate_launch_description():
             name="camera_driver",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_sensors"), "' == 'true' and '",
+                LaunchConfiguration("enable_usb_camera"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
             parameters=[{
@@ -310,6 +421,25 @@ def generate_launch_description():
                 "topic":           "/front_camera_driver/image_raw",
                 "camera_info_url": "package://bringup/config/front_camera.yaml",
             }, sim_time],
+        ),
+        # OAK-D-LR. FindPackageShare is resolved only when the include runs,
+        # so with enable_oak:=false a missing depthai_ros_driver costs nothing.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("depthai_ros_driver"), "launch", "camera.launch.py"]
+                )
+            ),
+            launch_arguments={
+                "name": "oak",
+                "params_file": PathJoinSubstitution(
+                    [FindPackageShare("bringup"), "config", "oak.yaml"]
+                ),
+            }.items(),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_oak"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
         ),
         # RPLIDAR S2M1-R2L via Slamtec's official driver (vendored as the
         # src/sllidar_ros2 submodule). The A-series custom driver that used to
@@ -321,6 +451,7 @@ def generate_launch_description():
             name="lidar_driver",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_sensors"), "' == 'true' and '",
+                LaunchConfiguration("enable_lidar"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
             remappings=[("scan", "/lidar_driver/scan_raw")],
@@ -380,26 +511,6 @@ def generate_launch_description():
                 ]),
             }, sim_time],
         ),
-        # U-shaped docking-berth detector (Task 3.1) — DBSCAN + RANSAC over
-        # /obstacles/lidar, publishes /perception/dock_target.
-        Node(
-            package="perception",
-            executable="dock_detector_node",
-            name="dock_detector_node",
-            condition=IfCondition(LaunchConfiguration("enable_perception")),
-            parameters=[sim_time],
-        ),
-        # Straight pier-wall detector (Task 3.2) — DBSCAN + RANSAC over
-        # /obstacles/lidar, publishes /perception/wall_target. Same
-        # LIDAR-only reasoning as dock_detector_node above; UNVERIFIED
-        # against a real berth wall, see wall_detector_node's docstring.
-        Node(
-            package="perception",
-            executable="wall_detector_node",
-            name="wall_detector_node",
-            condition=IfCondition(LaunchConfiguration("enable_perception")),
-            parameters=[sim_time],
-        ),
         # Geo-referenced fusion — labelled obstacles in the global GPS frame on
         # /obstacles/global (runs alongside fusion_node for comparison).
         Node(
@@ -445,12 +556,11 @@ def generate_launch_description():
             parameters=[sim_time],
         ),
         # Arbitrates between Nav2's own /cmd_vel output (via collision_monitor,
-        # remapped to nav2/cmd_vel) and boat_bt's direct docking commands
-        # (boat_bt/cmd_vel) — both used to independently publish straight onto
-        # the shared /cmd_vel that nav_to_pid/ros_gz_bridge consume, racing
-        # each other whenever Nav2's pipeline stayed alive (e.g. its
-        # collision_monitor safety-stop heartbeat) during a BT-direct task
-        # like docking. See bringup/config/twist_mux.yaml for priorities.
+        # remapped to nav2/cmd_vel) and boat_bt's direct commands
+        # (boat_bt/cmd_vel). Without it the two race on the shared /cmd_vel that
+        # nav_to_pid/ros_gz_bridge consume, because Nav2's pipeline keeps
+        # publishing (e.g. collision_monitor's safety-stop heartbeat) even with
+        # no active goal. See bringup/config/twist_mux.yaml for priorities.
         Node(
             package="twist_mux",
             executable="twist_mux",
@@ -466,9 +576,10 @@ def generate_launch_description():
         # to a Raspberry Pi Pico, bypassing MAVROS/the Pixhawk for motor control.
         # mavros is still used for GPS/IMU sensing in this mode.
         #
-        # Deliberately allowed to run even when use_sim:=true (unlike
-        # actuator_driver above, which stays sim-excluded since it targets
-        # mavros/the Pixhawk): this lets a bench test drive REAL motors via
+        # Allowed to run with use_sim:=true only when pico_bridge_in_sim:=true
+        # is also given (unlike actuator_driver above, which stays
+        # sim-excluded since it targets mavros/the Pixhawk): this lets a bench
+        # test drive REAL motors via
         # the real Pico off of Gazebo-simulated perception/mission logic —
         # the boat physically can't move (elevated/on a stand), but the
         # thrusters WILL spin in response to real /control/effort commands.
@@ -479,27 +590,69 @@ def generate_launch_description():
             name="pico_bridge",
             condition=IfCondition(PythonExpression([
                 "'", LaunchConfiguration("enable_control"), "' == 'true' and '",
-                LaunchConfiguration("use_pico_bridge"), "' == 'true'"
+                LaunchConfiguration("use_pico_bridge"), "' == 'true' and ('",
+                LaunchConfiguration("use_sim"), "' != 'true' or '",
+                LaunchConfiguration("pico_bridge_in_sim"), "' == 'true')"
             ])),
             parameters=[{"port": LaunchConfiguration("pico_port")}, sim_time],
         ),
-        # BMS reader — sole owner of the serial link to the battery management
-        # system (MCP2221 USB-UART bridge). Publishes sensor_msgs/BatteryState
-        # on /battery/state (renders in Foxglove's built-in Battery panel) and
-        # the full raw report (per-cell voltages, FET states) on
-        # /battery/status_raw.
+        # BMS readers — each the sole owner of the serial link to one battery
+        # management system (MCP2221 USB-UART bridge). Each publishes
+        # sensor_msgs/BatteryState with an estimated state of charge and the
+        # full raw report (per-cell voltages, FET states) on its own topics.
         #
         # Deliberately allowed to run even when use_sim:=true, same reasoning
         # as pico_bridge above: real battery telemetry has nothing to do with
         # whether the boat's motion is simulated, so a hybrid bench test (real
         # hardware, Gazebo-simulated perception/mission) should still surface
         # the real pack's voltage/cell balance.
+        #
+        # Two packs in parallel, one BMS each (docs/HARDWARE_DECISIONS.md): one
+        # reader per BMS on its own topic, and battery_aggregator combining
+        # them into the single /battery/state everything else reads. Only one
+        # BMS is wired today, so enable_bms2 defaults to false; the aggregator
+        # also leaves out (and names in /diagnostics) a pack that stops
+        # reporting.
         Node(
             package="sensors",
             executable="bms_reader",
-            name="bms_reader",
+            name="bms_reader_pack1",
             condition=IfCondition(LaunchConfiguration("enable_bms")),
-            parameters=[{"port": LaunchConfiguration("bms_port")}, sim_time],
+            parameters=[{
+                "port": LaunchConfiguration("bms_port"),
+                "pack_name": "pack1",
+                "state_topic": "/battery/pack1",
+                "raw_topic": "/battery/pack1/status_raw",
+            }, sim_time],
+        ),
+        Node(
+            package="sensors",
+            executable="bms_reader",
+            name="bms_reader_pack2",
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_bms"), "' == 'true' and '",
+                LaunchConfiguration("enable_bms2"), "' == 'true'"
+            ])),
+            parameters=[{
+                "port": LaunchConfiguration("bms2_port"),
+                "pack_name": "pack2",
+                "state_topic": "/battery/pack2",
+                "raw_topic": "/battery/pack2/status_raw",
+            }, sim_time],
+        ),
+        Node(
+            package="sensors",
+            executable="battery_aggregator",
+            name="battery_aggregator",
+            condition=IfCondition(LaunchConfiguration("enable_bms")),
+            parameters=[{
+                "pack_topics": PythonExpression([
+                    "['/battery/pack1', '/battery/pack2'] if '",
+                    LaunchConfiguration("enable_bms2"),
+                    "' == 'true' else ['/battery/pack1']",
+                ]),
+                "output_topic": "/battery/state",
+            }, sim_time],
         ),
         # Cloud telemetry relay — outbound-only, never touches MAVROS/
         # ArduPilot control (see src/comms/cloud_bridge's module docstring
@@ -571,37 +724,11 @@ def generate_launch_description():
             output="screen",
         ),
 
-        # Competition lifecycle coordination.
+        # Safety Behavior Tree (GlobalSafety obstacle bypass + MissionMonitor).
         #
-        # respawn=True: a crash here loses the selected task/lifecycle state
-        # (also in-memory only) — the operator (or the mission sequencer, if
-        # it is still alive) must re-issue /competition/set_task +
-        # /competition/start after a respawn.
-        TimerAction(
-            period=2.0,
-            actions=[
-                Node(
-                    package="competition_manager",
-                    executable="competition_manager",
-                    name="competition_manager",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_competition")
-                    ),
-                    parameters=[sim_time],
-                    respawn=True,
-                    respawn_delay=2.0,
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Competition Behavior Tree.
-        #
-        # respawn=True: a crash mid-docking resets the docking state machine
-        # to WAITING_FOR_TARGET on respawn (docking_state_ is in-memory only)
-        # — acceptable because dock_detector_node will republish a fresh
-        # target and the approach just restarts, rather than the whole
-        # process staying dead.
+        # respawn=True: boat_bt holds only transient per-tick state (latest
+        # obstacle snapshot, last bypass request), so a respawn simply resumes
+        # the reflex on the next /obstacles/global message.
         TimerAction(
             period=3.0,
             actions=[
@@ -616,119 +743,16 @@ def generate_launch_description():
                     respawn_delay=2.0,
                     parameters=[
                         sim_time,
-                        # YOLO class ids for yolo26n-seg-navier.onnx, read from
-                        # the model's own embedded metadata (names dict):
-                        # {0: 'green', 1: 'red', 2: 'north', 3: 'east',
-                        #  4: 'south', 5: 'west'}.
+                        # Buoy class ids for the currently loaded model
+                        # (yolo26n-seg-navier.onnx, embedded names dict:
+                        # {0: 'green', 1: 'red', ...}). Update these when the
+                        # model is retrained for Kelp farm demarcation buoys.
                         {
-                            "cardinal_north_class_id": "2",
-                            "cardinal_east_class_id": "3",
-                            "cardinal_south_class_id": "4",
-                            "cardinal_west_class_id": "5",
                             "buoy_green_class_id": "0",
                             "buoy_red_class_id": "1",
                             "buoy_min_standoff_m": 1.0,
                         },
                     ],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 9.1 mission sequencer — starts after competition_manager/boat_bt
-        # so /competition/set_task and /competition/start are already up.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_maneuvering_pathfinding",
-                    executable="maneuvering_pathfinding_mission",
-                    name="maneuvering_pathfinding_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_maneuvering_pathfinding_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 9.2 (Collision Avoidance) mission sequencer — same startup
-        # timing as the Task 9.1 sequencer above.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_collision_avoidance",
-                    executable="collision_avoidance_mission",
-                    name="collision_avoidance_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_collision_avoidance_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 3.1 (Normal Docking) mission sequencer — same startup timing
-        # as the Task 9.1 sequencer above; the two are mutually exclusive in
-        # practice (both default off) but there's no harm in sharing the
-        # delay since only one is normally enabled at a time.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_docking",
-                    executable="docking_mission",
-                    name="docking_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_docking_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 3.2 (Parallel Docking) mission sequencer — same startup
-        # timing as the other sequencers above. Its close-range manoeuvre
-        # (DockingParallelTask -> ExecuteDockingParallel in simple_boat.xml)
-        # is real now but UNVERIFIED against a real wall; the transit-leg
-        # orchestration is real and follows the same pattern as
-        # mission_docking's.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_docking_parallel",
-                    executable="docking_parallel_mission",
-                    name="docking_parallel_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_docking_parallel_mission")
-                    ),
-                    parameters=[sim_time],
-                    output="screen",
-                ),
-            ],
-        ),
-
-        # Task 9.4 (Surprise) mission sequencer — same startup timing as the
-        # other sequencers above. Chains TASK_DOCKING -> open-water transit
-        # (TASK_SURPRISE) -> TASK_DOCKING_PARALLEL into one run; see
-        # mission_surprise/surprise_mission.py's docstring. TEAM WORKING
-        # DRAFT, UNVERIFIED end to end — see enable_surprise_mission above.
-        TimerAction(
-            period=4.0,
-            actions=[
-                Node(
-                    package="mission_surprise",
-                    executable="surprise_mission",
-                    name="surprise_mission",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_surprise_mission")
-                    ),
-                    parameters=[sim_time],
                     output="screen",
                 ),
             ],
@@ -870,6 +894,47 @@ def generate_launch_description():
                 ),
             ],
             condition=IfCondition(LaunchConfiguration("use_sim")),
+        ),
+        # Mission GUI — its own launch file, included rather than inlined, so it
+        # stays runnable on its own (ros2 launch gui_backend gui.launch.py).
+        # It is a separate process from pico_bridge: nothing in the GUI can
+        # block or starve the Pico's serial heartbeat. Only included when
+        # enable_gui:=true. The sonar bridge it can start (omniscan_bridge) is
+        # off unless enable_sonar:=true is also given.
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                PathJoinSubstitution(
+                    [FindPackageShare("gui_backend"), "launch", "gui.launch.py"]
+                )
+            ),
+            launch_arguments={
+                "gui_port": LaunchConfiguration("gui_port"),
+                "use_sim": LaunchConfiguration("use_sim"),
+                # The GUI shows the lidar and camera panels as "not fitted"
+                # rather than empty when their driver is not started.
+                "lidar_fitted": LaunchConfiguration("enable_lidar"),
+                # The panel's picture is the OAK's compressed RGB topic
+                # (topics.yaml camera_image); the USB driver publishes raw
+                # images only, so it fills the panel only once a compressed
+                # republisher is added.
+                "camera_fitted": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_oak"), "' == 'true' or '",
+                    LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
+                ]),
+                "geofence_file": LaunchConfiguration("geofence_file"),
+                "autopilot": LaunchConfiguration("autopilot"),
+                "mavros_expected": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_mavros"), "' == 'true' and '",
+                    LaunchConfiguration("use_sim"), "' != 'true' else 'false'",
+                ]),
+                "geofence_expected": PythonExpression([
+                    "'true' if '", LaunchConfiguration("enable_nav2"), "' == 'true' and '",
+                    LaunchConfiguration("nav2_profile"), "' == 'survey' else 'false'",
+                ]),
+                "enable_sonar": LaunchConfiguration("enable_sonar"),
+                "sonar_host": LaunchConfiguration("sonar_host"),
+            }.items(),
+            condition=IfCondition(LaunchConfiguration("enable_gui")),
         ),
     ]
 

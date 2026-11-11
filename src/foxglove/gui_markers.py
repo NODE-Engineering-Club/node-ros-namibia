@@ -13,8 +13,8 @@ reads for jury-visible marker detection:
       fixed color per topic, so it can't recolor per-message.
 
   /gui/markers/marker_0..11  sensor_msgs/NavSatFix
-      Fixed-slot redundancy for the 2D Map panel (mirrors the existing
-      /competition/waypoints/wp_N pattern), single neutral color.
+      Fixed-slot redundancy for the 2D Map panel (mirrors the old
+      planned-waypoint pattern), single neutral color.
 
 Class legend (NOT documented anywhere else in the repo -- pulled straight
 from the model's embedded Ultralytics metadata:

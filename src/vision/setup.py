@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="YOLO vision inference node for the Njord 2026 USV",
+    description="YOLO vision inference node for the ASKET ASV",
     license="MIT",
     entry_points={
         "console_scripts": [

@@ -3,7 +3,7 @@
 <package format="3">
   <name>description</name>
   <version>0.1.0</version>
-  <description>URDF description for Asket — Njord 2026 USV</description>
+  <description>URDF description for the ASKET ASV</description>
   <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
   <license>MIT</license>
 

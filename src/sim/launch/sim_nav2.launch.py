@@ -1,8 +1,7 @@
 """
 Launch the 2D Python simulation together with Nav2.
 
-The project-specific navigation launch excludes the docking server until
-the docking competition task is implemented and configured.
+Nav2 is launched without opennav_docking (unsupported on a USV).
 """
 
 import xacro
@@ -36,10 +35,6 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "enable_mission",
-            default_value="true",
-        ),
-        DeclareLaunchArgument(
-            "enable_competition",
             default_value="true",
         ),
         DeclareLaunchArgument(
@@ -157,21 +152,6 @@ def generate_launch_description():
                     output="screen",
                     condition=IfCondition(
                         LaunchConfiguration("enable_mission")
-                    ),
-                    parameters=[sim_time],
-                ),
-            ],
-        ),
-        TimerAction(
-            period=6.0,
-            actions=[
-                Node(
-                    package="competition_manager",
-                    executable="competition_manager",
-                    name="competition_manager",
-                    output="screen",
-                    condition=IfCondition(
-                        LaunchConfiguration("enable_competition")
                     ),
                     parameters=[sim_time],
                 ),

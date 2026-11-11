@@ -3,7 +3,7 @@
 <package format="3">
   <name>control</name>
   <version>0.1.0</version>
-  <description>Control nodes for the Njord 2026 USV</description>
+  <description>Control nodes for the ASKET ASV</description>
   <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
   <license>MIT</license>
 
@@ -14,6 +14,9 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
+  <!-- pico_bridge: the firmware version gate (asket_common.pico_link), the serial port -->
+  <exec_depend>asket_common</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

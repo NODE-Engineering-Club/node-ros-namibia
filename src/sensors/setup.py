@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="Sensor drivers for the Njord 2026 USV",
+    description="Sensor drivers for the ASKET ASV",
     license="MIT",
     entry_points={
         "console_scripts": [
@@ -22,6 +22,9 @@ setup(
             "imu_gps_driver = sensors.imu_gps_driver:main",
             "datum_sync = sensors.datum_sync:main",
             "bms_reader = sensors.bms_reader:main",
+            "battery_aggregator = sensors.battery_aggregator:main",
+            "geofence_mask_node = sensors.geofence_mask_node:main",
+            "autopilot_probe = sensors.autopilot_probe:main",
             "sensors_all = sensors.launch_all:main",
         ],
     },

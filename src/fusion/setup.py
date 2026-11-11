@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer="Njord",
     maintainer_email="njord@stud.ntnu.no",
-    description="Geo-referenced sensor fusion (vision + lidar + GPS) for the Njord 2026 USV",
+    description="Geo-referenced sensor fusion (vision + lidar + GPS) for the ASKET ASV",
     license="MIT",
     entry_points={
         "console_scripts": [

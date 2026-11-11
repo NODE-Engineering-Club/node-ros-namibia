@@ -38,12 +38,11 @@ class MissionManager(Node):
         # *exact same* waypoint list, the mission resumes at the last
         # incomplete waypoint instead of restarting from 0. A mismatched
         # waypoint list is always treated as a different mission and starts
-        # fresh — this file does not track which competition task a
-        # checkpoint belongs to, so two tasks that happen to share an
-        # identical waypoint list would be indistinguishable. (Today
-        # maneuvering.yaml and path_finding.yaml both hold the same
-        # placeholder point for exactly this reason — this is safe only
-        # because they still need real, distinct course data before use.)
+        # fresh — this file does not track which mission a checkpoint
+        # belongs to, so two missions that happen to share an identical
+        # waypoint list would be indistinguishable (e.g. re-flying the same
+        # survey lanes on a repeat pass resumes the earlier pass's progress
+        # unless the checkpoint is cleared first).
         # checkpoint_path must live somewhere that actually survives however
         # this node gets restarted (container restart vs. process respawn) —
         # verify this default is appropriate for the real deployment.
@@ -55,7 +54,6 @@ class MissionManager(Node):
             self.get_parameter("checkpoint_path").value
         )
 
-        # Spec 9.1: "ASV must stop and remain stationary at GPS-point 4".
         # After the last waypoint in any waypoint list is reached, hold here
         # (send no further Nav2 goals) for this long before reporting
         # SUCCEEDED, instead of reporting success the instant the goal
@@ -104,7 +102,7 @@ class MissionManager(Node):
 
         # GUI support: a human-readable trail of what the mission is doing
         # (distinct from /mission/status, which is the terse machine-state
-        # used by competition_manager) — point a Foxglove Log/Raw Messages
+        # used by boat_bt's MissionMonitor) — point a Foxglove Log/Raw Messages
         # panel at this. And the per-step path preview described above.
         self._log_pub = self.create_publisher(
             String,
@@ -338,7 +336,7 @@ class MissionManager(Node):
         self._send_next()
 
     def _tick_final_hold(self):
-        """Spec 9.1: "ASV must stop and remain stationary at GPS-point 4".
+        """Hold stationary at the final waypoint before reporting success.
 
         Reached once every waypoint in the current list is complete. Sends
         no further Nav2 goals (which, combined with pid_controller's

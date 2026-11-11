@@ -4,8 +4,10 @@
         <spherical_coordinates>
             <surface_model>EARTH_WGS84</surface_model>
             <world_frame_orientation>ENU</world_frame_orientation>
-            <latitude_deg>63.4305</latitude_deg>
-            <longitude_deg>10.3951</longitude_deg>
+            <!-- GPS datum: Luderitz, Namibia (approximate). Replace with the
+                 surveyed F9P base / lighthouse point once it is known. -->
+            <latitude_deg>-26.6480</latitude_deg>
+            <longitude_deg>15.1540</longitude_deg>
             <elevation>0</elevation>
             <heading_deg>0</heading_deg>
         </spherical_coordinates>
@@ -80,25 +82,27 @@
         </model>
 
         <!--
-            Task 9.2 "collision avoidance" test world. Boat spawns at world
-            origin facing +x (same convention as dockingWorld.sdf).
+            Obstacle test world (originally the Njord Task 9.2 course): two
+            buoy gates + a moving vessel, useful for exercising GlobalSafety
+            against demarcation buoys and service vessels. Boat spawns at world
+            origin facing +x.
 
             IMPORTANT KNOWN LIMITATION, read before trusting a "gate not
             detected" result: asket.urdf.xacro's gpu_lidar + its +90deg
             lidar_mount_joint yaw together mean the sensor's raw +/-90deg
             FOV maps to base_link bearings 0deg (dead ahead) through +90deg
-            (PORT/left) to 180deg (dead astern) -- the entire STARBOARD
+            (PORT/left) to 180deg (dead astern) - the entire STARBOARD
             (world -y from the boat's forward heading) half-plane is a
             total blind spot, confirmed against real hardware behavior
             during Task 3.1/3.2 testing (see repo memory/TODOS.md). This
             was a deliberate decision NOT to fix for this world (2026-08-12)
-            -- fixing it changes what the mount angle represents and needs
+            - fixing it changes what the mount angle represents and needs
             confirming against the real physical LiDAR mount first.
 
             Consequence for this world's layout: gate_1's buoys are BOTH
             placed on the PORT (+y) side (not straddling the boat's y=0
             approach line like a real gate would) purely so real LiDAR can
-            see both of them -- the boat crossing x=15 still triggers
+            see both of them - the boat crossing x=15 still triggers
             boat_bt's line-crossing detection (it tests the boat's position
             against the buoys' line extended to infinity, not a bounded
             segment), but this is NOT a realistic "sail between the
@@ -111,7 +115,7 @@
             Gate buoy classification also depends on vision/node.py's real
             trained YOLO model (yolo26n-seg-navier.onnx) correctly
             recognizing these as buoy_green_class_id="0" /
-            buoy_red_class_id="1" -- unverified against simple colored
+            buoy_red_class_id="1" - unverified against simple colored
             primitives before this file was written; check
             /obstacles/global's class_id field live rather than assuming.
 
@@ -169,19 +173,18 @@
         </model>
 
         <!--
-            "otter" -- marker vessel stand-in. Reuses Asket's own hull mesh
-            (same reuse pattern as dockingWorldOccupied.sdf's decoy_boat),
-            but UNLIKE decoy_boat this one is dynamic (not static) and
+            "otter" - marker vessel stand-in. Reuses Asket's own hull mesh,
+            is dynamic (not static) and
             carries the same gz-sim-velocity-control-system plugin
             asket.urdf.xacro itself uses, scoped to this model's own name
             so it never collides with the real boat's /model/asket/cmd_vel
-            -- drive it via a ROS bridge on /model/otter/cmd_vel (bridged
+            - drive it via a ROS bridge on /model/otter/cmd_vel (bridged
             ad hoc at test time, not a permanent gz_bridge.yaml entry,
             since this is a test-only world).
 
             Starts ~45m ahead of the boat's spawn, slightly off dead-centre
             (y=0.3) to avoid an exact-zero-bearing edge case, facing back
-            toward the boat (yaw ~180deg) -- a constant-velocity straight
+            toward the boat (yaw ~180deg) - a constant-velocity straight
             line aimed at the boat's start position is a literal
             constant-bearing-decreasing-range collision course, matching
             spec 9.2 part 1's "approaches directly on a collision course".

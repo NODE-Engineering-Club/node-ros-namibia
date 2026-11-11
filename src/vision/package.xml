@@ -3,7 +3,7 @@
 <package format="3">
   <name>vision</name>
   <version>0.1.0</version>
-  <description>YOLO vision inference node for the Njord 2026 USV</description>
+  <description>YOLO vision inference node for the ASKET ASV</description>
   <maintainer email="njord@stud.ntnu.no">Njord</maintainer>
   <license>MIT</license>
 

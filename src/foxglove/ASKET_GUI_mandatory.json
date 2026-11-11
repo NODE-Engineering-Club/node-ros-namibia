@@ -99,22 +99,6 @@
       "followTopic": "/gps_driver/gps_raw",
       "topicColors": {
         "/gps_driver/gps_raw": "#2f6fed",
-        "/competition/waypoints/wp_0": "#e0a400",
-        "/competition/waypoints/wp_1": "#e0a400",
-        "/competition/waypoints/wp_2": "#e0a400",
-        "/competition/waypoints/wp_3": "#e0a400",
-        "/competition/waypoints/wp_4": "#e0a400",
-        "/competition/waypoints/wp_5": "#e0a400",
-        "/competition/waypoints/wp_6": "#e0a400",
-        "/competition/waypoints/wp_7": "#e0a400",
-        "/competition/waypoints/wp_8": "#e0a400",
-        "/competition/waypoints/wp_9": "#e0a400",
-        "/docking_mission/points/point_7_start": "#e0a400",
-        "/docking_mission/points/point_8_staging": "#e0a400",
-        "/docking_mission/points/point_9_finish": "#e0a400",
-        "/docking_parallel_mission/points/point_10_start": "#e0a400",
-        "/docking_parallel_mission/points/point_11_staging": "#e0a400",
-        "/docking_parallel_mission/points/point_12_finish": "#e0a400",
         "/gui/markers/marker_0": "#ffffff",
         "/gui/markers/marker_1": "#ffffff",
         "/gui/markers/marker_2": "#ffffff",
@@ -198,22 +182,6 @@
       "numericPrecision": 3,
       "foxglovePanelTitle": "BMS (BQ76920)"
     },
-    "Indicator!mission_task": {
-      "path": "/competition/status.task",
-      "style": "background",
-      "fallbackColor": "#8b949e",
-      "fallbackLabel": "UNKNOWN",
-      "rules": [
-        { "operator": "=", "rawValue": "0", "color": "#8b949e", "label": "TASK_NONE" },
-        { "operator": "=", "rawValue": "1", "color": "#2f6fed", "label": "MANEUVERING" },
-        { "operator": "=", "rawValue": "2", "color": "#2f6fed", "label": "PATH_FINDING" },
-        { "operator": "=", "rawValue": "3", "color": "#2f6fed", "label": "COLLISION_AVOIDANCE" },
-        { "operator": "=", "rawValue": "4", "color": "#e0a400", "label": "DOCKING" },
-        { "operator": "=", "rawValue": "5", "color": "#e0a400", "label": "SURPRISE" },
-        { "operator": "=", "rawValue": "6", "color": "#e0a400", "label": "DOCKING_PARALLEL" }
-      ],
-      "foxglovePanelTitle": "Mission"
-    },
     "Indicator!mission_state": {
       "path": "/mission/status.state",
       "style": "background",
@@ -281,15 +249,10 @@
           "splitPercentage": 72
         },
         "second": {
-          "first": "Indicator!mission_task",
-          "second": {
-            "first": "Indicator!mission_state",
-            "second": "RawMessages!mission_progress",
-            "direction": "row",
-            "splitPercentage": 50
-          },
+          "first": "Indicator!mission_state",
+          "second": "RawMessages!mission_progress",
           "direction": "row",
-          "splitPercentage": 33
+          "splitPercentage": 50
         },
         "direction": "column",
         "splitPercentage": 65

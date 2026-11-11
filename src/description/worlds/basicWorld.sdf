@@ -4,8 +4,10 @@
         <spherical_coordinates>
             <surface_model>EARTH_WGS84</surface_model>
             <world_frame_orientation>ENU</world_frame_orientation>
-            <latitude_deg>63.4305</latitude_deg>
-            <longitude_deg>10.3951</longitude_deg>
+            <!-- GPS datum: Luderitz, Namibia (approximate). Replace with the
+                 surveyed F9P base / lighthouse point once it is known. -->
+            <latitude_deg>-26.6480</latitude_deg>
+            <longitude_deg>15.1540</longitude_deg>
             <elevation>0</elevation>
             <heading_deg>0</heading_deg>
         </spherical_coordinates>
