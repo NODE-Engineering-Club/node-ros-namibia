@@ -91,6 +91,30 @@ against: scratchpad/verify_cloud_math.py, 19/19 passed):
     reference line on the dashboard for manual piloting. See that node's
     own docstring; this is strictly a display feature, nothing here or in
     it ever calls `/mission/start`.
+
+2026-11-11 additions (Azure + the boat as actually fitted):
+
+  * **Azure Blob Storage sink** (`azure_sink.py`). Every packet is also
+    spooled to disk and appended to `<asv_id>/telemetry/YYYY/MM/DD/HH.jsonl`
+    in Blob Storage, with camera snapshots as separate JPEG blobs and
+    `<asv_id>/latest.json` for the live view. This is what makes history
+    retrievable: the WebSocket relay above is live-only. Enabled when a
+    connection string is found (env `AZURE_STORAGE_CONNECTION_STRING` or the
+    file in `azure_connection_string_file`); recorded at `azure_record_rate_hz`
+    whether or not there is a GPS fix, so a bench run still logs sonar and
+    health.
+  * **WebSocket is optional.** Empty `cloud_ws_url` (or no `websockets`
+    package) disables it instead of refusing to start.
+  * **Omniscan 3D**: `sonar3d` from `omniscan_bridge`'s `/sonar/status` and
+    `/sonar/points` (strongest returns of the latest ping). The old
+    `/sonar/decimated` (Omniscan 450 waterfall) is still forwarded as `sonar`
+    when something publishes it.
+  * **OAK-D camera**: snapshots also from `camera_compressed_topic`
+    (default `/oak/rgb/image_raw/compressed`, the GUI's source); the raw
+    `/camera/front/image_raw` path is unchanged.
+  * **Signal**: `nav.sats` / `nav.eph_m` from GPSRAW, `link` with the Jetson's
+    own Wi-Fi RSSI, upload backlog and WebSocket state, and
+    `health.jetson_temp_c` from the thermal zones.
 """
 import asyncio
 import base64
@@ -108,11 +132,20 @@ from njord_msgs.msg import PlannedRoute
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import BatteryState, Image, NavSatFix
+from sensor_msgs.msg import BatteryState, CompressedImage, Image, NavSatFix, PointCloud2
+from sensor_msgs_py import point_cloud2
 from std_msgs.msg import String
 from vision_msgs.msg import Detection3DArray
 
 from cloud_bridge.geo_utils import CLASS_MAP, enu_offset_to_latlon, map_rtk_mode, parse_class_and_id
+from cloud_bridge.onboard_health import read_max_temp_c, read_wifi, summarize_sonar_points
+from cloud_bridge import azure_sink
+
+try:
+    from asket_interfaces.msg import SonarStatus
+    _HAS_SONAR_STATUS = True
+except ImportError:  # workspace built without asket_interfaces
+    _HAS_SONAR_STATUS = False
 
 try:
     import websockets
@@ -127,20 +160,25 @@ class CloudTelemetryBridgeNode(Node):
         super().__init__("cloud_telemetry_bridge_node")
         self.bridge = CvBridge()
 
-        if not _HAS_WEBSOCKETS:
-            raise RuntimeError(
-                f"cloud_telemetry_bridge_node requires the 'websockets' pip "
-                f"package, which failed to import ({_WS_IMPORT_ERROR}). "
-                "Add it to the Containerfile's pip install list."
-            )
 
-        self.declare_parameter(
-            "cloud_ws_url",
-            "wss://telemetry.asket-namibia.internal/api/v1/telemetry/stream?role=asv",
-        )
+        # Empty = live relay off (see cloud_bridge_params.yaml for why).
+        self.declare_parameter("cloud_ws_url", "")
         self.declare_parameter("asv_id", "ASKET_02")
         self.declare_parameter("stream_rate_hz", 5.0)
         self.declare_parameter("map_frame", "map")
+        self.declare_parameter("camera_compressed_topic", "/oak/rgb/image_raw/compressed")
+        self.declare_parameter("wifi_interface", "wlan0")
+        self.declare_parameter("sonar_cloud_points", 60)  # strongest returns kept per ping
+        # Azure Blob Storage (see azure_sink.py). Disabled when no
+        # connection string is found.
+        self.declare_parameter("azure_enabled", True)
+        self.declare_parameter("azure_connection_string_file", "/data/secrets/azure_storage_connection_string")
+        self.declare_parameter("azure_container", "telemetry")
+        self.declare_parameter("azure_spool_dir", "/data/cloud_spool")
+        self.declare_parameter("azure_record_rate_hz", 1.0)
+        self.declare_parameter("azure_image_interval_s", 5.0)
+        self.declare_parameter("azure_upload_interval_s", 2.0)
+        self.declare_parameter("azure_keep_local_images", False)
 
         self.ws_url = self.get_parameter("cloud_ws_url").get_parameter_value().string_value
         self.asv_id = self.get_parameter("asv_id").get_parameter_value().string_value
@@ -163,6 +201,12 @@ class CloudTelemetryBridgeNode(Node):
         self.latest_jpeg_b64 = None
         self.frame_counter = 0
         self.latest_planned_route = None  # {"name": ..., "waypoints": [[lat,lon], ...]}, or None
+        self.latest_sonar3d = None  # omniscan_bridge status + latest ping summary
+        self._sonar3d_points = None
+        self._latest_jpeg_bytes = None  # newest snapshot, for the Azure sink
+        self._last_image_record = 0.0
+        self._last_record = 0.0
+        self._ws_connected = False
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1,
@@ -175,6 +219,13 @@ class CloudTelemetryBridgeNode(Node):
         self.create_subscription(Detection3DArray, "/obstacles/fused_tracked", self._lidar_cb, 10)
         self.create_subscription(Image, "/perception/sam2_masks", self._sam2_cb, sensor_qos)
         self.create_subscription(Image, "/camera/front/image_raw", self._image_raw_cb, sensor_qos)
+        cam_topic = self.get_parameter("camera_compressed_topic").value
+        if cam_topic:
+            self.create_subscription(CompressedImage, cam_topic, self._image_compressed_cb, sensor_qos)
+        # Omniscan 3D via omniscan_bridge.
+        self.create_subscription(PointCloud2, "/sonar/points", self._sonar_points_cb, sensor_qos)
+        if _HAS_SONAR_STATUS:
+            self.create_subscription(SonarStatus, "/sonar/status", self._sonar_status_cb, 10)
         self.create_subscription(BatteryState, "/battery/state", self._battery_cb, 10)
         # sonar_bridge_node's own decimated output (see that file) — a
         # single pre-serialized JSON string, so this node doesn't need to
@@ -204,15 +255,68 @@ class CloudTelemetryBridgeNode(Node):
         self.pub_status = self.create_publisher(String, "/cloud_bridge/status", status_qos)
         self._publish_status(connected=False, detail="starting")
 
+        # ── Azure Blob Storage sink ─────────────────────────────────────────
+        self.sink = self._make_azure_sink()
+
         # ── Async WebSocket loop in a separate thread ───────────────────────
-        self.ws_queue = asyncio.Queue(maxsize=1)  # drop-tail: size=1, oldest discarded
-        self.loop = asyncio.new_event_loop()
-        self.ws_thread = threading.Thread(target=self._run_async_loop, daemon=True)
-        self.ws_thread.start()
+        self.ws_enabled = bool(self.ws_url) and _HAS_WEBSOCKETS
+        if self.ws_url and not _HAS_WEBSOCKETS:
+            self.get_logger().warn(
+                f"'websockets' failed to import ({_WS_IMPORT_ERROR}); live WebSocket relay disabled"
+            )
+        if self.ws_enabled:
+            self.ws_queue = asyncio.Queue(maxsize=1)  # drop-tail: size=1, oldest discarded
+            self.loop = asyncio.new_event_loop()
+            self.ws_thread = threading.Thread(target=self._run_async_loop, daemon=True)
+            self.ws_thread.start()
 
         rate_hz = self.get_parameter("stream_rate_hz").get_parameter_value().double_value
         self.timer = self.create_timer(1.0 / rate_hz, self.dispatch_packet)
-        self.get_logger().info(f"Cloud telemetry bridge operational at {rate_hz} Hz -> {self.ws_url}")
+        self.create_timer(5.0, self._refresh_onboard_health)
+        self._refresh_onboard_health()
+        self.get_logger().info(
+            f"Cloud telemetry bridge operational at {rate_hz} Hz -> "
+            f"ws: {self.ws_url if self.ws_enabled else 'off'}, "
+            f"azure: {'on' if self.sink else 'off'}"
+        )
+
+    def _make_azure_sink(self):
+        if not self.get_parameter("azure_enabled").value:
+            return None
+        path = self.get_parameter("azure_connection_string_file").value
+        conn = azure_sink.load_connection_string(path)
+        if not conn:
+            self.get_logger().warn(
+                f"Azure sink off: no AZURE_STORAGE_CONNECTION_STRING and no file at {path}"
+            )
+            return None
+        try:
+            sink = azure_sink.make_sink(
+                conn,
+                self.get_parameter("azure_container").value,
+                spool_dir=self.get_parameter("azure_spool_dir").value,
+                asv_id=self.asv_id,
+                upload_interval_s=float(self.get_parameter("azure_upload_interval_s").value),
+                keep_local_images=bool(self.get_parameter("azure_keep_local_images").value),
+                log=lambda m: self.get_logger().warn(m, throttle_duration_sec=30.0),
+            )
+        except Exception as exc:  # noqa: BLE001 — offline at start-up is normal on a boat
+            self.get_logger().error(f"Azure sink could not start ({exc}); retrying is not automatic, restart the node")
+            return None
+        sink.start()
+        self.get_logger().info(
+            f"Azure sink on: container '{self.get_parameter('azure_container').value}', "
+            f"prefix '{self.asv_id}/', spool {self.get_parameter('azure_spool_dir').value}"
+        )
+        return sink
+
+    def _refresh_onboard_health(self):
+        self.latest_health["jetson_temp_c"] = read_max_temp_c()
+        wifi = read_wifi(self.get_parameter("wifi_interface").value)
+        self.latest_health["wifi_rssi_dbm"] = wifi["rssi_dbm"] if wifi else None
+        self._wifi = wifi
+        if self.sink is not None or self.ws_enabled:
+            self._publish_status(connected=self._ws_connected, detail="periodic")
 
     # ── ROS callbacks ───────────────────────────────────────────────────────
 
@@ -247,6 +351,31 @@ class CloudTelemetryBridgeNode(Node):
 
     def _gpsraw_cb(self, msg: GPSRAW):
         self.latest_nav["rtk_mode"] = map_rtk_mode(msg.fix_type)
+        self.latest_nav["sats"] = int(msg.satellites_visible) if msg.satellites_visible != 255 else None
+        # eph is HDOP*100 in MAVLink GPS_RAW_INT; 65535 = unknown.
+        self.latest_nav["hdop"] = round(msg.eph / 100.0, 2) if msg.eph != 65535 else None
+
+    def _sonar_status_cb(self, msg):
+        self.latest_sonar3d = {
+            "connected": bool(msg.connected),
+            "ping_rate_hz": round(float(msg.actual_ping_rate_hz), 2),
+            "points_per_ping": int(msg.points_per_ping),
+            "range_setting_m": round(float(msg.range_setting_m), 1),
+            "gain": int(msg.gain_setting),
+            "packet_loss": round(float(msg.packet_loss_ratio), 3),
+            "pitch_deg": round(float(msg.pitch_deg), 1),
+            "roll_deg": round(float(msg.roll_deg), 1),
+            "clock_offset_s": round(msg.clock_offset_ms / 1000.0, 1),
+        }
+
+    def _sonar_points_cb(self, msg: PointCloud2):
+        pts = point_cloud2.read_points_list(msg, field_names=("x", "y", "z", "intensity"), skip_nans=True)
+        # read_points_list yields numpy float32, which json cannot encode.
+        self._sonar3d_points = summarize_sonar_points(
+            [tuple(float(v) for v in p) for p in pts],
+            max_points=int(self.get_parameter("sonar_cloud_points").value),
+        )
+        self._sonar3d_points["rx_utc"] = round(self.get_clock().now().nanoseconds / 1e9, 3)
 
     def _battery_cb(self, msg: BatteryState):
         voltage = None if (msg.voltage != msg.voltage) else round(float(msg.voltage), 2)  # NaN check
@@ -338,12 +467,34 @@ class CloudTelemetryBridgeNode(Node):
         resized = cv2.resize(cv_img, (640, 400), interpolation=cv2.INTER_AREA)
         _, buf = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
         self.latest_jpeg_b64 = base64.b64encode(buf).decode("utf-8")
+        self._latest_jpeg_bytes = buf.tobytes()
+
+    def _image_compressed_cb(self, msg: CompressedImage):
+        self.frame_counter += 1
+        if self.frame_counter % 5 != 0:
+            return
+        arr = np.frombuffer(bytes(msg.data), dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            self.get_logger().warn(f"Undecodable CompressedImage ({msg.format})", throttle_duration_sec=10.0)
+            return
+        h, w = img.shape[:2]
+        scale = 640.0 / max(w, 1)
+        if scale < 1.0:
+            img = cv2.resize(img, (640, int(h * scale)), interpolation=cv2.INTER_AREA)
+        _, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 65])
+        self.latest_jpeg_b64 = base64.b64encode(buf).decode("utf-8")
+        self._latest_jpeg_bytes = buf.tobytes()
 
     # ── Packet assembly + dispatch ───────────────────────────────────────────
 
     def dispatch_packet(self):
-        if self.latest_nav["lat"] is None:
-            return  # no GPS fix yet — nothing meaningful to send
+        has_fix = self.latest_nav["lat"] is not None
+        now = self.get_clock().now().nanoseconds / 1e9
+        record_period = 1.0 / max(float(self.get_parameter("azure_record_rate_hz").value), 1e-3)
+        want_record = self.sink is not None and (now - self._last_record) >= record_period
+        if not has_fix and not want_record:
+            return  # no GPS fix yet — nothing meaningful to stream live
         self.seq += 1
 
         packet = {
@@ -357,12 +508,38 @@ class CloudTelemetryBridgeNode(Node):
         }
         if self.latest_sonar is not None:
             packet["sonar"] = self.latest_sonar
+        if self.latest_sonar3d is not None or self._sonar3d_points is not None:
+            # Points only while they are fresh: once the sonar stops, the last
+            # ping must not keep being sent as if it were current.
+            pts = self._sonar3d_points
+            fresh = pts is not None and now - pts.get("rx_utc", 0.0) <= 3.0
+            packet["sonar3d"] = {**(self.latest_sonar3d or {}), **(pts if fresh else {})}
+        packet["link"] = {
+            "wifi": getattr(self, "_wifi", None),
+            "ws_connected": self._ws_connected,
+            "azure": self.sink.status.as_dict() if self.sink else None,
+        }
         if self.latest_planned_route is not None:
             # NOT in the original design note's schema (§5.1) — a later
             # addition for the manual-piloting reference-line feature, see
             # mission/waypoint_route_loader.py. Sent on every packet once
             # loaded (small payload, no reason to decimate it further).
             packet["planned_route"] = self.latest_planned_route
+        if want_record:
+            self._last_record = now
+            jpeg = None
+            img_period = float(self.get_parameter("azure_image_interval_s").value)
+            if self._latest_jpeg_bytes and img_period > 0 and now - self._last_image_record >= img_period:
+                jpeg = self._latest_jpeg_bytes
+                self._latest_jpeg_bytes = None
+                self._last_image_record = now
+            try:
+                self.sink.submit(packet, jpeg)
+            except Exception as exc:  # noqa: BLE001 — a full disk must not stop the live stream
+                self.get_logger().error(f"Azure spool write failed: {exc}", throttle_duration_sec=10.0)
+
+        if not (has_fix and self.ws_enabled):
+            return
         if self.latest_jpeg_b64 is not None:
             packet["image_jpeg_b64"] = self.latest_jpeg_b64
             self.latest_jpeg_b64 = None
@@ -381,11 +558,13 @@ class CloudTelemetryBridgeNode(Node):
         # thread (it only serializes and hands off), unlike subscription
         # callbacks — this is called directly from the asyncio worker
         # thread below, not bounced back onto the main executor.
+        self._ws_connected = connected
         self.pub_status.publish(String(data=json.dumps({
             "connected": connected,
             "detail": detail,
             "ws_url": self.ws_url,
             "seq": self.seq,
+            "azure": self.sink.status.as_dict() if getattr(self, "sink", None) else None,
         })))
 
     def _run_async_loop(self):
@@ -420,6 +599,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if node.sink is not None:
+            node.sink.stop(flush=True)  # push the last seconds before exiting
         node.destroy_node()
         rclpy.shutdown()
 

@@ -4,10 +4,29 @@ cloud_telemetry_bridge_node:
     # routing — omitting it makes the Worker treat the boat as a browser
     # listener and the pipeline relays nothing. See this node's own
     # docstring for the full explanation.
-    cloud_ws_url: "wss://telemetry.asket-namibia.internal/api/v1/telemetry/stream?role=asv"
+    # Empty = live WebSocket relay off. The Cloudflare Worker was never
+    # deployed and telemetry.asket-namibia.internal does not resolve, so the
+    # old default only produced reconnect warnings. Set it to a real relay,
+    # e.g. "wss://<host>/api/v1/telemetry/stream?role=asv", to turn it on.
+    cloud_ws_url: ""
     asv_id: "ASKET_02"
     stream_rate_hz: 5.0
     map_frame: map
+    camera_compressed_topic: "/oak/rgb/image_raw/compressed"
+    wifi_interface: "wlan0"
+    sonar_cloud_points: 60          # strongest sonar returns per ping sent to the cloud
+
+    # Azure Blob Storage history (cloud_bridge/azure_sink.py, cloud/azure/README.md).
+    # The connection string is a secret: keep it in this file on the Jetson
+    # (chmod 600), never in git. AZURE_STORAGE_CONNECTION_STRING overrides it.
+    azure_enabled: true
+    azure_connection_string_file: "/data/secrets/azure_storage_connection_string"
+    azure_container: "telemetry"
+    azure_spool_dir: "/data/cloud_spool"
+    azure_record_rate_hz: 1.0       # packets per second written to the cloud
+    azure_image_interval_s: 5.0     # one camera snapshot every N s (0 = none)
+    azure_upload_interval_s: 2.0
+    azure_keep_local_images: false
 
 sonar_bridge_node:
   ros__parameters:

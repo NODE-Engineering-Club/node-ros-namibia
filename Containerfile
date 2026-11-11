@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-tf2-geometry-msgs \
     # Sensors
     v4l-utils \
+    iw \
     # pyserial: bms_reader and pico_bridge both `import serial`, and nothing
     # installed it, so both exited at import in this image.
     python3-serial \
@@ -107,6 +108,7 @@ RUN pip install --break-system-packages --no-cache-dir \
      transforms3d \
      simple-pid \
      websockets \
+     azure-storage-blob==12.23.1 \
      fastapi \
      "uvicorn[standard]"
 

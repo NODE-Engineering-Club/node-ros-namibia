@@ -27,7 +27,9 @@ from mavros_msgs.msg import GPSRAW
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import BatteryState, Image, NavSatFix
+from sensor_msgs.msg import BatteryState, Image, NavSatFix, PointCloud2
+from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Header
 from std_msgs.msg import String
 from vision_msgs.msg import Detection3D, Detection3DArray, ObjectHypothesisWithPose
 
@@ -61,6 +63,14 @@ class FakeSensorsNode(Node):
         self.pub_cam = self.create_publisher(Image, "/camera/front/image_raw", sensor_qos)
         self.pub_batt = self.create_publisher(BatteryState, "/battery/state", 10)
         self.pub_sonar = self.create_publisher(String, "/sonar/decimated", sensor_qos)
+        # Omniscan 3D, as omniscan_bridge publishes it.
+        self.pub_sonar_pts = self.create_publisher(PointCloud2, "/sonar/points", sensor_qos)
+        try:
+            from asket_interfaces.msg import SonarStatus
+            self._SonarStatus = SonarStatus
+            self.pub_sonar_status = self.create_publisher(SonarStatus, "/sonar/status", 10)
+        except ImportError:
+            self.pub_sonar_status = None
 
         # Publish nav fast (this gates cloud_telemetry_node.dispatch_packet
         # entirely — nothing is sent at all until /gps_driver/gps_raw and
@@ -123,6 +133,7 @@ class FakeSensorsNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.fix_type = 6  # RTK_FIXED — see geo_utils.map_rtk_mode()
         msg.satellites_visible = 14
+        msg.eph = 62  # HDOP 0.62, as the UM982 read outdoors on 2026-11-10
         self.pub_gpsraw.publish(msg)
 
     def _publish_lidar(self):
@@ -194,6 +205,35 @@ class FakeSensorsNode(Node):
             "port_intensity_u8": bins, "stbd_intensity_u8": bins[::-1],
         }
         self.pub_sonar.publish(String(data=json.dumps(payload)))
+        self._publish_sonar3d(t)
+
+    def _publish_sonar3d(self, t):
+        # One fan: a flat seabed ~6 m below the transducer, 130 deg wide,
+        # with a slow swell so the dashboard visibly changes.
+        depth = 6.0 + 0.8 * math.sin(t * 0.3)
+        pts = []
+        for i in range(150):
+            a = math.radians(-65.0 + 130.0 * i / 149)
+            r = depth / max(math.cos(a), 0.2)
+            pts.append((0.0, r * math.sin(a), r * math.cos(a), float(1e9 * (1.5 - abs(a)))))
+        hdr = Header(frame_id="base_link")
+        hdr.stamp = self.get_clock().now().to_msg()
+        fields = [point_cloud2.PointField(name=n, offset=4 * k, datatype=7, count=1)
+                  for k, n in enumerate(("x", "y", "z", "intensity"))]
+        self.pub_sonar_pts.publish(point_cloud2.create_cloud(hdr, fields, pts))
+        if self.pub_sonar_status is not None:
+            st = self._SonarStatus()
+            st.header = hdr
+            st.connected = True
+            st.actual_ping_rate_hz = 5.0
+            st.commanded_ping_rate_hz = 5.0
+            st.points_per_ping = len(pts)
+            st.speed_of_sound = 1500.0
+            st.range_setting_m = 30.0
+            st.gain_setting = -1
+            st.pitch_deg = -2.0
+            st.roll_deg = 1.0
+            self.pub_sonar_status.publish(st)
 
 
 def main(args=None):
