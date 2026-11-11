@@ -2,6 +2,35 @@
 
 ROS 2 Jazzy autonomous surface vessel (ASV) stack for the [NODE Engineering Club](https://github.com/NODE-Engineering-Club) boat **ASKET**, adapted from the Njord 2026 competition stack for the **Kelp Blue** kelp-farm missions in Lüderitz (Shearwater Bay), Namibia, with a **Cerulean Omniscan 450 SS** side-scan sonar.
 
+## START HERE
+
+Pick the one that describes you. Each is written for somebody who has not seen
+this project before, and each labels every fact VERIFIED / TESTED IN SOFTWARE
+ONLY / NOT VERIFIED / UNKNOWN, with a date, rather than saying "should work".
+
+| You are | Read |
+|---|---|
+| **Taking over the mission GUI** — and you may want to redesign it | [`docs/GUI_DEVELOPER_GUIDE.md`](docs/GUI_DEVELOPER_GUIDE.md). The frontend/backend contract, what you may change freely, and what must not change without a hardware review. |
+| **Testing the hardware** against the nodes and the GUI, before the boat goes in the water | [`docs/COMMISSIONING_ROADMAP.md`](docs/COMMISSIONING_ROADMAP.md). Project status, safety rules, the basics (SSH, containers, ROS, git) explained from scratch, and ten test phases with exact commands and PASS/FAIL criteria. |
+| **Operating the boat on the day** | [`docs/OPERATOR_CHECKLIST.md`](docs/OPERATOR_CHECKLIST.md) — one page, for the beach. |
+| **Looking for what is actually on the boat** and what is verified | [`docs/HARDWARE_DECISIONS.md`](docs/HARDWARE_DECISIONS.md) — the reference. When it and any other document disagree, it wins. |
+| **Working on the sonar** | [`docs/SONAR_BRINGUP.md`](docs/SONAR_BRINGUP.md) — the only part of the boat verified in water (2026-11-06). |
+
+**Which branch:** `integration-pre-sea-trial` contains everything — the
+hardware alignment work, the sonar work verified in water, and the GUI. The
+older `hw-alignment` and `GUI_AUXI` are both missing the sonar fixes, and
+`hw-alignment` additionally crashes about a second after starting against an
+idle sonar.
+
+Two safety facts that catch people, in full in the documents above:
+
+* **The hardware killswitch and RC channel 8 cut propulsion with no software
+  involved.** They are sovereign; nothing here may interfere with them.
+* **The sonar keeps pinging when you close the software**, and pinging in air
+  can damage it. Stop it with
+  `ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger`
+  *before* it leaves the water.
+
 The mission design lives in [`Mission controls and documents/`](Mission%20controls%20and%20documents/):
 
 - [`KELP_MISSIONS.md`](Mission%20controls%20and%20documents/KELP_MISSIONS.md) — the M0–M8 mission set, autonomy/decision log, telemetry and cloud design, sonar pipeline, network, phased plan.

@@ -1,0 +1,134 @@
+/* ----------------------------------------------------------------- navigate */
+.navigate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr);
+  gap: 12px;
+  height: 100%;
+  min-height: 860px;
+}
+.navigate .col { display: grid; gap: 12px; min-height: 0; }
+.navigate .col.left { grid-template-rows: minmax(260px, 1fr) minmax(220px, 0.8fr) auto; }
+.navigate .row-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: start; }
+.navigate .col.right { grid-template-rows: auto auto auto minmax(0, 1fr); }
+
+.status-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 12px 14px; }
+.status-tile .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 6px; }
+.status-tile .sub { font-size: 10px; color: var(--text-2); margin-top: 5px; }
+.alerts-strip {
+  display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 36px;
+  background: var(--warn-tint); border-top: 1px solid rgba(210, 153, 34, 0.3);
+  font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.alerts-strip.clear { background: var(--ok-tint); border-top-color: rgba(63, 185, 80, 0.3); }
+.alerts-strip.alarm { background: var(--alarm-tint); border-top-color: rgba(248, 81, 73, 0.35); }
+.alerts-strip strong { letter-spacing: 0.08em; font-size: 10px; }
+
+.telemetry { display: grid; grid-template-columns: 1.1fr 1fr 150px; gap: 16px; padding: 14px; }
+.telemetry .big { font-size: 26px; font-weight: 300; }
+.telemetry .big small { font-size: 12px; color: var(--text-2); margin-left: 4px; }
+.telemetry .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); margin: 10px 0 3px; }
+.telemetry .label:first-child { margin-top: 0; }
+.compass { width: 150px; height: 150px; }
+/* A heading that has stopped updating must not look like a live needle. */
+.compass.stale { opacity: 0.6; }
+.compass.very-stale { opacity: 0.35; filter: grayscale(1); outline: 2px dashed var(--alarm); outline-offset: -4px; border-radius: 50%; }
+.status-tile.very-stale .pill { border-style: dashed; }
+.sonar-foot {
+  display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; padding: 8px 14px;
+  border-top: 1px solid var(--border-soft); background: var(--glass-raised); font-size: 11px;
+}
+.sonar-foot a { color: var(--info); font-weight: 600; }
+.sonar-foot .hint { flex-basis: 100%; }
+/* Health view: the glass header already carries the title and the three-word
+   verdict, so the reused panel's own heading is not repeated. The full panel
+   keeps its heading: it holds the fold toggle and the forced-open reason. */
+.sonar-embed.health .panel > h2 { display: none; }
+.alerts-strip svg { width: 16px; height: 16px; flex: none; }
+
+.mission-meta { display: flex; align-items: flex-end; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--divider); }
+.mission-meta .name { font-size: 18px; font-weight: 500; }
+.mission-footer { display: grid; grid-template-columns: auto 1fr; gap: 14px; padding: 12px 14px; border-top: 1px solid var(--divider); align-items: center; }
+.mission-stats { display: flex; gap: 20px; justify-content: flex-end; }
+.mission-stats .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+.mission-stats .stat { font-size: 15px; font-family: var(--mono); }
+
+/* ------------------------------------------------------------------- slots */
+/* The GPS and camera windows are slots: the live components render inside the
+   glass frame. Nothing in Figma beyond the frame is reproduced here. */
+.slot { position: absolute; inset: 0; }
+.camera-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.camera-slot img.stale { filter: grayscale(0.8) brightness(0.6); }
+.camera-slot .blank { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; background: var(--glass-well); }
+.camera-slot .blank strong { font-size: 14px; }
+.camera-slot .age { position: absolute; top: 10px; right: 10px; }
+.camera-controls { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; border-top: 1px solid var(--border-soft); background: var(--glass-raised); font-size: 10px; }
+.feed-legend { margin-left: auto; display: flex; gap: 10px; color: var(--text-3); }
+.feed-legend .on { color: var(--text); font-weight: 700; }
+
+/* ---------------------------------------------------------------- preflight */
+.preflight-card { max-width: 1120px; margin: 24px auto; padding: 28px 30px; display: flex; flex-direction: column; gap: 16px; }
+.preflight-title { display: flex; align-items: center; gap: 18px; }
+.preflight-title .emblem { width: 64px; color: #fff; }
+.preflight-title h2 { margin: 0; font-size: 26px; font-weight: 600; }
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.check-group .group-title { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); padding: 10px 12px; border-bottom: 1px solid var(--border-soft); }
+.check-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: start; padding: 9px 12px; border-bottom: 1px solid var(--border-soft); }
+.check-row:last-child { border-bottom: 0; }
+.check-row .name { font-weight: 600; }
+.check-row .msg { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+.check-row .remedy { font-size: 11px; color: var(--warn); margin-top: 3px; }
+.check-row svg { width: 16px; height: 16px; margin-top: 1px; }
+.counts { display: flex; gap: 6px; margin-left: auto; }
+.storage-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.next-steps { display: flex; align-items: center; gap: 12px; }
+
+/* ------------------------------------------------------------ mission design */
+.design { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 12px; }
+.design-top { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 16px; }
+.design-top .summary { margin-left: auto; text-align: right; }
+.design-top .summary .big { font: 15px var(--mono); }
+.source-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.source-card { display: flex; align-items: center; gap: 14px; padding: 14px; }
+.source-card .text { flex: 1; min-width: 0; }
+.source-card > svg { width: 22px; height: 22px; flex: none; color: var(--info); }
+.source-card .ok-line { color: var(--ok); font-size: 11px; margin-top: 4px; }
+.source-card .err-line { color: var(--alarm); font-size: 11px; margin-top: 4px; }
+.planner { height: 440px; }
+.design .config-panel { grid-row: span 2; }
+.source-card.selected { border-color: var(--info); }
+.planner .map { position: absolute; inset: 0; }
+.planner-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--text-2); }
+.wp-num { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(89, 149, 170, 0.3); border: 1px solid var(--info); font: 600 11px var(--font); }
+.wp-marker { width: 24px; height: 24px; border-radius: 50%; background: rgba(13, 17, 23, 0.85); border: 2px solid var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 11px var(--font); cursor: grab; }
+.wp-marker.selected { background: var(--primary); border-color: #fff; }
+.wp-marker.start { border-color: var(--ok); }
+.wp-marker.end { border-color: var(--warn); }
+.config-section { margin-bottom: 14px; }
+.config-section > .upper { color: var(--text-3); margin-bottom: 8px; display: block; }
+.config-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-soft); font-size: 12px; align-items: center; }
+.policy { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.policy label { padding: 10px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.policy label.selected { border-color: var(--info); background: var(--info-tint); }
+.policy label.disabled { opacity: 0.45; cursor: not-allowed; }
+.design-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+.design-actions .msg { flex: 1; }
+
+/* -------------------------------------------------------------------- alerts */
+.summary-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+.summary-tile { padding: 14px; }
+.summary-tile .n { font-size: 28px; font-weight: 300; }
+.summary-tile .t { font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); margin-top: 4px; }
+.summary-tile .s { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+.filters { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+.filters .input { flex: 1; }
+.alerts-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.alert-card { padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.alert-card.selected { border-color: var(--info); background: rgba(89, 149, 170, 0.14); }
+.alert-card .title { font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.alert-card .title .pill:first-of-type { margin-left: auto; }
+
+/* ---------------------------------------------------------------------- repo */
+.repo-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.repo-head .input { width: 320px; }
+.course { width: 92px; height: 56px; }
+.repo-name { font-weight: 600; }
