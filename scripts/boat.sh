@@ -20,7 +20,8 @@ ROS_CTR="namibia-gps-check"
 
 gpu_up() {
   sudo -n podman rm -f asket-gpu >/dev/null 2>&1 || true
-  sudo -n podman run -d --name asket-gpu --runtime nvidia --network host \
+  # Full path: podman has no "nvidia" runtime registered on this host.
+  sudo -n podman run -d --name asket-gpu --runtime /usr/bin/nvidia-container-runtime --network host \
     --restart unless-stopped \
     -v "$REPO:/ws" -e REMOTE_ORT_TRT="${REMOTE_ORT_TRT:-0}" \
     "$GPU_IMAGE" python3 /ws/src/perception/sam2_vision/sam2_vision/remote_ort.py serve --port 7090 >/dev/null
