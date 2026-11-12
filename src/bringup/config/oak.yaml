@@ -1,0 +1,23 @@
+# OAK-D-LR through depthai_ros_driver (njord.launch.py enable_oak:=true).
+#
+# TO VERIFY ON THE BOAT — none of this has run against the real camera:
+#   * the driver version installed (v2 `depthai_ros_driver`, or the v3
+#     package, whose parameter names differ);
+#   * which socket the "RGB" pipeline uses on the LR (three colour sensors);
+#   * the topic names: `ros2 topic list | grep oak`. The GUI reads
+#     sources.camera_image in gui_backend/config/topics.yaml
+#     (/oak/rgb/image_raw/compressed by default).
+# See docs/CAMERA_OAK.md.
+/oak:
+  ros__parameters:
+    camera:
+      # PoE: connect to this camera only (IP plan: docs/HARDWARE_DECISIONS.md).
+      i_ip: "10.10.20.21"
+      # Colour only for now: no depth, no neural network on the device.
+      i_pipeline_type: RGB
+      i_nn_type: none
+    rgb:
+      i_publish_topic: true
+      # 10 fps is plenty for the GUI (5 fps on the full link) and keeps the
+      # PoE link and the Jetson's CPU light.
+      i_fps: 10.0

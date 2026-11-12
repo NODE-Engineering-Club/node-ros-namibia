@@ -1,0 +1,15 @@
+{
+  "format": "asket-mission",
+  "version": 1,
+  "name": "WALVIS_SURVEY_01",
+  "crs": "WGS84",
+  "cruise_speed_ms": 1.5,
+  "obstacle_policy": "stop",
+  "sensors": { "sonar": false, "lidar": true, "camera": false },
+  "waypoints": [
+    { "lat": -22.944, "lon": 14.482 },
+    { "lat": -22.940, "lon": 14.482 },
+    { "lat": -22.940, "lon": 14.486 },
+    { "lat": -22.944, "lon": 14.486 }
+  ]
+}

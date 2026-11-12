@@ -1,0 +1,326 @@
+# Where the backend finds real data.
+#
+# Nothing in gui_backend hard-codes a topic name or a message type. Pointing a
+# stream at a different topic is a change to this file plus, at most, one adapter
+# function in core/adapters.py.
+#
+# This file now names the **real** Njord interface (open question Q7, answered).
+# The competition packages are not modified to suit the GUI: the GUI reads what
+# they already publish.
+#
+# `adapter` names a function in gui_backend.core.adapters.
+#
+# node-ros-namibia (ported from node-ros-2026 1606eb7): every topic below was
+# checked against namibia's sources and already has the same name and type
+# here, so no entry was renamed. Two namibia-specific notes:
+#
+#   * /pico/status and /pico/mode_request exist only while pico_bridge runs
+#     (use_pico_bridge, default true since hw-alignment Phase B). With
+#     use_pico_bridge:=false (actuator_driver, the Pixhawk path) the vessel
+#     panel reads "not sent".
+#   * The battery is /battery/state, produced by sensors/battery_aggregator
+#     from the two BMS readers (launched with enable_bms:=true). Its
+#     `percentage` is estimated from cell voltages (asket_common/battery.py)
+#     and is NaN — "not sent" in the GUI — when unknown, never 0.
+
+sources:
+  gnss_fix:
+    topic: /gps_driver/gps_raw
+    type: sensor_msgs/msg/NavSatFix
+  # The same fix in the map frame, from navsat_transform_node. Not used for the
+  # map — the GUI draws geographically and takes the geographic fix directly,
+  # so it does not depend on the datum being established. Kept because the
+  # coverage overlay works in metres and this is already metres.
+  odom_map:
+    topic: /odometry/gps
+    type: nav_msgs/msg/Odometry
+    optional: true
+  # Heading, speed and attitude, all from the EKF. One message, one timestamp:
+  # the three cannot drift apart the way four MAVROS topics could.
+  odom_filtered:
+    topic: /odometry/filtered
+    type: nav_msgs/msg/Odometry
+  # Satellites, HDOP and the RTK state (fix_type 5 float, 6 fixed). Only
+  # MAVROS's GPSRAW carries them; it exists once the Pixhawk link is up
+  # (Phase B d). Until then the GUI says "not provided" rather than guessing.
+  gps_raw:
+    topic: /mavros/gpsstatus/gps1/raw
+    type: mavros_msgs/msg/GPSRAW
+    optional: true
+  # The Camera panel: a compressed (JPEG) image, sent to the browser as it
+  # comes on the full link profile and scaled down on the reduced one. For the
+  # OAK-D-LR through depthai_ros_driver (njord.launch.py enable_oak:=true)
+  # this is the RGB stream's image_transport "compressed" topic; check the
+  # name with `ros2 topic list` on the boat. Read only when camera_fitted.
+  camera_image:
+    topic: /oak/rgb/image_raw/compressed
+    type: sensor_msgs/msg/CompressedImage
+    optional: true
+  # Which firmware the flight controller's heartbeat says it runs
+  # ("ardupilot" / "px4" / "" for none), from sensors/autopilot_probe.
+  autopilot_detected:
+    topic: /autopilot/detected
+    type: std_msgs/msg/String
+    optional: true
+  imu:
+    topic: /imu_driver/imu_raw
+    type: sensor_msgs/msg/Imu
+    optional: true          # attitude falls back to the EKF pose
+  # The Obstacles panel's raw/filtered toggle, backed by the real pair.
+  lidar_scan:
+    topic: /lidar_driver/scan_raw
+    type: sensor_msgs/msg/LaserScan
+    adapter: lidar_from_ros
+  obstacles_lidar:
+    topic: /obstacles/lidar
+    type: sensor_msgs/msg/PointCloud2
+    adapter: obstacles_from_pointcloud
+  obstacles_fused:
+    topic: /obstacles/fused
+    type: sensor_msgs/msg/PointCloud2
+    adapter: obstacles_from_pointcloud
+    optional: true          # needs vision; absent when enable_vision:=false
+  commanded_effort:
+    topic: /control/effort
+    type: geometry_msgs/msg/Twist
+    optional: true
+  pico_status:
+    # std_msgs/String carrying raw firmware "STATE key=value" lines,
+    # republished verbatim and unparsed by pico_bridge. The parser is in
+    # core/pico_state.py.
+    #
+    # The format is transcribed field by field from
+    # firmware/pico-node_v5/pico-node_v5.ino, and the parser reads THAT VERSION
+    # ONLY. Every line carries ver= first; anything else fails the pre-flight
+    # rather than being half-read. Accepting several formats was considered and
+    # rejected — a parser branch nobody exercises is a parser branch nobody
+    # notices breaking, which is how the previous mismatch survived months.
+    #
+    # Still PROVISIONAL in one narrower sense: no line has been captured off
+    # real hardware, and the pre-flight says so on every run.
+    topic: /pico/status
+    type: std_msgs/msg/String
+    adapter: pico_from_ros
+  sonar_status:
+    # The Omniscan bridge is part of the GUI overlay, so this one is known.
+    topic: /sonar/status
+    type: asket_interfaces/msg/SonarStatus
+    adapter: sonar_from_ros
+  mission_state:
+    topic: /mission/state
+    type: asket_interfaces/msg/MissionState
+    optional: true
+  # Two 4S packs in parallel, combined by sensors/battery_aggregator. Optional:
+  # absent unless the stack runs with enable_bms:=true.
+  battery:
+    topic: /battery/state
+    type: sensor_msgs/msg/BatteryState
+    optional: true
+  # The pre-flight report, as system_test_node publishes it.
+  #
+  # This used to point at /diagnostics (diagnostic_msgs/DiagnosticArray), which
+  # is a different thing entirely: that topic is the ROS-wide node-health bus,
+  # and system_test_node *subscribes* to it to check which nodes are present.
+  # It carries no GO/NO-GO verdict, no remedies and no check ids, so the Pre-
+  # flight panel could never have been populated from it. Nothing consumed the
+  # entry either way, so nothing complained.
+  preflight_report:
+    topic: /system_test/report
+    type: asket_interfaces/msg/SystemTestReport
+  # The ROS-wide node-health bus, read for one thing only: the mounting
+  # geometry the sonar bridge says it is running on, and its digest.
+  #
+  # The setup page predicts that digest from the numbers it sent and waits for
+  # the bridge to report it. Without this subscription there is nothing to
+  # wait for, and `apply_setup` can only ever report that the vessel is not
+  # saying — which is honest and useless.
+  #
+  # Optional, because a vessel without omniscan_bridge running is a vessel
+  # where this is correctly absent rather than broken.
+  diagnostics:
+    topic: /diagnostics
+    type: diagnostic_msgs/msg/DiagnosticArray
+    optional: true
+
+# Which optional sensors this boat carries. A sensor that is not fitted is
+# shown as "not fitted" and never subscribed to, rather than as an empty plot
+# ("nothing in range" with no lidar is a lie) or a blank camera.
+#
+# No lidar is aboard, and the OAK-D-LR that replaced the USB camera has no
+# driver in this stack yet (docs/HARDWARE_DECISIONS.md). gui.launch.py
+# overrides both from its lidar_fitted / camera_fitted arguments.
+fitted:
+  lidar: false
+  camera: false
+
+# The day's survey-area geofence: the same lat/lon polygon file the Nav2
+# keep-out mask is built from (bringup/config/geofence.example.yaml). Drawn on
+# the map when it exists; re-read when the file changes. gui.launch.py
+# overrides the path from its geofence_file argument.
+geofence:
+  file: /data/setup/geofence.yaml
+
+# How the Sonar panel behaves. `health`: SonarView operates and records the
+# Omniscan on its own screen, so the panel shows only whether the sonar is
+# alive (from omniscan_bridge, when started with enable_sonar:=true) and offers
+# no controls that would fight SonarView. `full`: the panel with range, gain
+# and ping-rate controls, for when this stack drives the sonar itself.
+sonar_panel: health
+
+# Where mission_recorder writes (its missions_root). The GUI lists the stored
+# missions from this directory; it runs in the same container.
+missions:
+  root: /data/missions
+
+# Where commands go. Mode requests reach the Pico through pico_bridge, which
+# this repository does not modify, so the interface is named here.
+commands:
+  mode_request:
+    topic: /pico/mode_request
+    type: std_msgs/msg/String
+    # pico_bridge accepts ONLY these two words. Anything else it logs as a
+    # warning and drops, so the GUI must never send anything else.
+    accepts: ["AUTO", "MANUAL"]
+  set_ping_parameters:
+    service: /omniscan_bridge/set_ping_parameters
+    type: asket_interfaces/srv/SetPingParameters
+  start_mission:
+    service: /mission_recorder/start_mission
+    type: asket_interfaces/srv/StartMission
+  stop_mission:
+    service: /mission_recorder/stop_mission
+    type: asket_interfaces/srv/StopMission
+  export_mission:
+    service: /mission_recorder/export_mission
+    type: asket_interfaces/srv/ExportMission
+  delete_mission:
+    service: /mission_recorder/delete_mission
+    type: asket_interfaces/srv/DeleteMission
+  run_system_test:
+    service: /system_test/run
+    type: asket_interfaces/srv/RunSystemTest
+  # The other half of the setup page. Saving writes the file; this makes the
+  # sonar bridge re-read it, and the bridge answers with the geometry digest it
+  # is now running on — which is what the page waits for before it says a
+  # change took effect. std_srvs/Trigger because there is nothing to send: the
+  # file is the message.
+  apply_setup:
+    service: /omniscan_bridge/reload_mounting
+    type: std_srvs/srv/Trigger
+
+# What "Cut propulsion" actually does.
+#
+# There is no software ESTOP *path* in this stack: pico_bridge accepts AUTO and
+# MANUAL and nothing else. The firmware does have MODE_ESTOP — disarm, relay
+# open, red light — but only the transmitter can reach it, which is deliberate
+# (docs/safety.md). So the button cannot cut propulsion, and it must not
+# pretend to.
+#
+# The safest thing available is to drop the Pico out of AUTONOMOUS. Per
+# pico_bridge's own docstring the Pico applies motor commands only when armed
+# AND in AUTONOMOUS, so requesting MANUAL removes software authority over the
+# thrusters and hands the boat back to the RC pilot. It does NOT stop the boat.
+#
+# The GUI labels the button with what this actually does. Changing it to a real
+# ESTOP needs a firmware change and a pico_bridge change, and that decision is
+# not this repository's to make (see README, "Two things that are not settled").
+estop:
+  mode: mode_request_manual
+  # Shown on the button and in its confirmation prompt. If the firmware ever
+  # gains a real ESTOP, this is what changes alongside `mode`.
+  label: "Drop to MANUAL"
+  effect: >-
+    Hands control back to the RC pilot. The Pico only drives the thrusters when
+    armed and in AUTONOMOUS, so this removes software authority — it does not
+    stop the boat. The hardware killswitch and RC channel 8 are the only things
+    that cut propulsion.
+
+# Where the shore station stands, and which way it faces.
+#
+# PROVISIONAL, and deliberately **not configured** by default. The tripod moves
+# between missions and can be turned by hand mid-mission, so there is no
+# surveyed position to fall back on — and a default one would have the panel
+# draw a confident bearing to a station that is somewhere else. While
+# `configured: false` the geometry fields go out as null and the panel says the
+# station has not been entered, which is true and is actionable.
+#
+# Fill this in and the link panel gains range, bearing from the sector's
+# boresight, and a signal *predicted* from the link budget (labelled as
+# predicted — nothing reads the radio yet). The same module and the same
+# arithmetic the simulator uses: asket_common/link_budget.py.
+#
+# The Setup page overrides this block: once the station's latitude, longitude
+# and bearing are entered there, gui_backend uses them (and the tripod height,
+# sea state, channel width and boat antenna height whenever they are entered),
+# re-read live from the setup file. This block is the fallback.
+shore_station:
+  configured: false
+  lat: 0.0
+  lon: 0.0
+  # Phase centre above the water: the 2.9 m tripod, plus a little.
+  height_m: 2.9
+  # Compass bearing the sector faces.
+  boresight_deg: 0.0
+  antenna:
+    # MikroTik mANTBox ax 15s — CONFIRMED as the shore sector
+    # (docs/HARDWARE_DECISIONS.md): 15 dBi, 120 deg azimuth (checked against
+    # MikroTik's own product pages). The elevation figure is a guess — they
+    # publish the pattern as a plot and state no number — and it only matters
+    # very close in, under the tripod.
+    gain_dbi: 15.0
+    azimuth_beamwidth_deg: 120.0
+    elevation_beamwidth_deg: 10.0
+  vessel_radio:
+    # MikroTik NetMetal 5 ax on the boat. It is a connectorised radio and its
+    # antenna is not chosen yet, so the link budget keeps the 6.7 dBi omni it
+    # assumes for the vessel end (asket_common/link_budget.py). PROVISIONAL.
+    # Omnidirectional on the boat: the gain lives ashore where the tripod does
+    # not move during a line. Height is a guess and it is the term that
+    # dominates useful range — the two-ray null structure goes as the product
+    # of the two antenna heights.
+    height_m: 1.0
+  freq_mhz: 5500.0
+  # Every doubling of channel width costs 3 dB of range and buys twice the
+  # throughput. This link's job is a camera and telemetry, and even 20 MHz at a
+  # middling modulation carries more than the video needs.
+  channel_width_mhz: 40.0
+  # Significant wave height. Decides whether the close-in multipath nulls
+  # exist: the Atlantic off Walvis Bay rarely does, a calm morning inshore
+  # does, and that is when somebody is testing at the ramp.
+  wave_height_m: 0.5
+
+# The boat LAN, 10.10.20.0/24 (docs/HARDWARE_DECISIONS.md, IP plan). For
+# reference here, beside the link budget it belongs with: nothing in the GUI
+# connects to these. The sonar address the bridge uses is in
+# omniscan_bridge/config/omniscan.yaml and gui.launch.py (sonar_host).
+network:
+  subnet: 10.10.20.0/24
+  switch: 10.10.20.2          # MikroTik CSS610
+  vessel_radio: 10.10.20.3    # NetMetal 5 ax (boat)
+  shore_radio: 10.10.20.4     # mANTBox ax 15s (tripod)
+  jetson: 10.10.20.10         # this GUI: http://10.10.20.10:8090
+  camera: 10.10.20.21         # OAK-D-LR (PoE) -- see the sonar note below
+  lidar_reserved: 10.10.20.22 # Livox, not fitted
+  # The PLAN, not where the sonar is. Measured 2026-10-28, the Omniscan answers
+  # on 192.168.2.21 and has never been moved onto this subnet; omniscan.yaml
+  # carries the real address. Two things to settle before this line is true:
+  # the sonar is on .21 of 192.168.2.0/24 (with SonarView talking to the host
+  # on .1 of it), and .21 of this plan is already the OAK-D-LR.
+  sonar: 10.10.20.31          # Omniscan 3D 450 SS -- PLANNED, not measured
+  sonar_reserved: 10.10.20.32
+  laptops_dhcp: 10.10.20.100-10.10.20.199
+
+# Battery capacity, needed to turn a percentage into an endurance estimate.
+# PROVISIONAL (Q5).
+vessel:
+  # 2x Gens ace LiPo 4S 8000 mAh in parallel: 2 x 14.8 V x 8 Ah = 236.8 Wh
+  # (docs/HARDWARE_DECISIONS.md). Nominal; usable energy is lower.
+  battery_capacity_wh: 237.0
+  hotel_load_w: 85.0
+
+# The GUI's own server. 8090 stays clear of foxglove_bridge (8765) and of the
+# rosbridge (9090) and web_video_server (8080) entries in njord.launch.py.
+# 0.0.0.0 because the whole point is reaching it from a laptop on the beach.
+server:
+  host: 0.0.0.0
+  port: 8090

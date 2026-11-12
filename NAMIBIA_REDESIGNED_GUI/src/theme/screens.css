@@ -1,0 +1,368 @@
+/* ----------------------------------------------------------------- navigate */
+.navigate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr);
+  gap: 12px;
+  height: 100%;
+  min-height: 860px;
+}
+.navigate .col { display: grid; gap: 12px; min-height: 0; }
+.navigate .col.left { grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr); }
+.navigate .row-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: start; }
+.navigate .col.right { grid-template-rows: auto auto minmax(0, 1fr); }
+
+.status-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 12px 14px; }
+.status-tile .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); margin-bottom: 6px; }
+.status-tile .sub { font-size: 10px; color: var(--text-2); margin-top: 5px; }
+.alerts-strip {
+  display: flex; align-items: center; gap: 10px; padding: 0 14px; height: 36px;
+  background: var(--warn-tint); border-top: 1px solid rgba(210, 153, 34, 0.3);
+  font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.alerts-strip.clear { background: var(--ok-tint); border-top-color: rgba(63, 185, 80, 0.3); }
+.alerts-strip.alarm { background: var(--alarm-tint); border-top-color: rgba(248, 81, 73, 0.35); }
+.alerts-strip strong { letter-spacing: 0.08em; font-size: 10px; }
+
+.telemetry { display: grid; grid-template-columns: 1.1fr 0.9fr 1.3fr 150px; gap: 16px; padding: 14px; }
+.telemetry .big { font-size: 26px; font-weight: 300; }
+.telemetry .big small { font-size: 12px; color: var(--text-2); margin-left: 4px; }
+.telemetry .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); margin: 10px 0 3px; }
+.telemetry .coords { font-size: 17px; font-weight: 300; line-height: 1.35; }
+.telemetry .big.heading { color: var(--info); }
+.telemetry .label:first-child { margin-top: 0; }
+/* Shore link, folded into the telemetry box as a 2×2 block beside the compass:
+   link · latency / signal · range. */
+.telemetry-link {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; align-content: start;
+  padding-left: 14px; border-left: 1px solid var(--divider); font-size: 13px;
+}
+.alerts-strip .spacer { flex: 1; }
+
+/* Mode commands folded into Status as one slim row:
+   [Manual][Autonomous] [Cut propulsion], with the reused component's
+   warning / result / effect lines below it in small type. */
+.mode-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--divider);
+}
+.mode-bar-label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.mode-slim { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.mode-slim > .button-row { flex: 2 1 220px; gap: 6px; margin-top: 0 !important; min-width: 0; flex-wrap: nowrap; }
+/* Fixed widths: arming a button ("Confirm: …") must not resize the row. */
+.mode-slim > .button-row > button { flex: 1 1 0; }
+.mode-slim > .button-row:nth-of-type(2) { flex: 1 1 130px; }
+.mode-slim button {
+  height: 28px; padding: 0 10px; font-size: 12px; min-width: 0;
+  /* The armed state reads "Confirm: <prompt>"; one line, full prompt on hover. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mode-slim > p, .mode-slim > .nogo-force { flex-basis: 100%; margin: 0 !important; }
+.mode-slim > p { font-size: 11px !important; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The arming-block paragraph is shown in the Arming tile instead. */
+.mode-slim > p.warnline { display: none; }
+
+/* GPS window: Shearwater Bay grid over the basemap (slots/AreaMap.jsx). */
+.area-map { background: #0f1d27; }
+.area-map-canvas { position: absolute; inset: 0; }
+:is(.area-map, .planner) .map-tools { position: absolute; top: 8px; left: 8px; z-index: 2; display: flex; gap: 6px; }
+:is(.area-map, .planner) .map-tools .btn { background: rgba(13, 17, 23, 0.72); }
+:is(.area-map, .planner) .map-tools .btn.primary { background: rgba(89, 149, 170, 0.9); }
+:is(.area-map, .planner) .map-notes { position: absolute; left: 8px; bottom: 34px; z-index: 2; display: grid; gap: 4px; max-width: 70%; }
+:is(.area-map, .planner) .map-note {
+  padding: 4px 8px; border-radius: var(--radius-sm); font-size: 11px;
+  background: rgba(13, 17, 23, 0.78); border: 1px solid var(--border-soft); color: var(--text-2);
+}
+:is(.area-map, .planner) .map-note.warn { color: var(--warn); border-color: rgba(210, 153, 34, 0.6); }
+:is(.area-map, .planner) .map-note.alarm { color: #fff; background: rgba(198, 42, 34, 0.85); border-color: var(--alarm); }
+:is(.area-map, .planner) .maplibregl-ctrl-attrib { background: rgba(13, 17, 23, 0.7) !important; color: var(--text-2); font-size: 10px; }
+:is(.area-map, .planner) .maplibregl-ctrl-attrib a { color: var(--text-2); }
+:is(.area-map, .planner) .maplibregl-ctrl-scale { background: rgba(13, 17, 23, 0.6); color: var(--text); border-color: var(--text-2); }
+.area-vessel { position: relative; width: 26px; height: 26px; }
+.area-vessel svg { position: absolute; inset: 0; width: 26px; height: 26px; fill: #fff; stroke: #0d1117; stroke-width: 1.5; }
+.area-vessel .ring { position: absolute; inset: -6px; border-radius: 50%; background: rgba(121, 185, 205, 0.25); border: 1px solid rgba(121, 185, 205, 0.7); }
+/* Heading not trustworthy: a dot, not an arrow that points somewhere. */
+.area-vessel.no-heading svg { display: none; }
+.area-vessel.no-heading::after { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: #fff; }
+.area-vessel.stale { opacity: 0.6; }
+.area-vessel.very-stale { opacity: 0.35; filter: grayscale(1); }
+.area-vessel.very-stale .ring { border-style: dashed; border-color: var(--alarm); }
+
+/* Navigate on desktop: one fixed window, no page scroll. Every box is sized
+   to the viewport; only the Mission waypoint table scrolls, inside its box.
+   Tablet and phone (responsive.css) stack the boxes and scroll instead. */
+@media (min-width: 1101px) {
+  .workspace-body.navigate-body { overflow: hidden; padding: 12px 16px; }
+  .navigate { height: 100%; min-height: 0; gap: 10px; }
+  .navigate .col { gap: 10px; }
+  .navigate .col.left { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  /* Maps and camera stay fixed; the right column scrolls when its boxes
+     need more height than the window has. */
+  .navigate .col.right {
+    display: flex; flex-direction: column;
+    overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  }
+  /* Status and telemetry keep their natural height; Mission takes the rest,
+     never less than 400 px (below that the column scrolls). */
+  .navigate .col.right > * { flex: none; }
+  .navigate .col.right > .mission-glass { flex: 1 0 400px; }
+  .navigate .panel-header { height: 30px; }
+
+  .navigate .status-grid .label { margin-bottom: 4px; }
+  .navigate .status-grid .sub { margin-top: 3px; }
+  .navigate .flush-body { padding: 10px 12px; }
+  .navigate .alerts-strip { height: 30px; }
+
+  .navigate .mode-embed .panel > h2 { margin-bottom: 4px; }
+  .navigate .col.right .panel-body { padding: 10px 12px; }
+
+  .navigate .telemetry { grid-template-columns: 1.1fr 0.8fr 1.3fr 96px; gap: 12px; align-items: center; }
+  .navigate .telemetry .big { font-size: 20px; }
+  .navigate .telemetry .label { margin: 6px 0 2px; }
+  .navigate .telemetry .compass { width: 96px; height: 96px; }
+  .navigate .telemetry-link { font-size: 12px; padding-left: 12px; }
+
+  .navigate .mission-meta { padding: 8px 12px; }
+  .navigate .mission-meta .name { font-size: 15px; }
+  .navigate .mission-footer { padding: 8px 12px; gap: 10px; }
+  .navigate .mission-footer .btn { height: 28px; padding: 0 8px; gap: 5px; font-size: 11px; white-space: nowrap; }
+  .navigate .mission-footer .btn svg { width: 14px; height: 14px; }
+  .navigate .mission-stats { gap: 12px; min-width: 0; }
+  .navigate .mission-stats .label { white-space: nowrap; }
+  .navigate .mission-stats .stat { font-size: 13px; white-space: nowrap; }
+  .navigate .mission-glass .panel-body { padding: 0; }
+  .navigate .mission-glass .mission-meta { padding: 6px 12px; }
+}
+
+/* Short desktop screens (e.g. 1366×768): tighten further so the Mission box
+   still shows its name and table. */
+@media (min-width: 1101px) and (max-height: 860px) {
+  .workspace-body.navigate-body { padding: 10px 14px; }
+  .navigate, .navigate .col { gap: 8px; }
+  .navigate .panel-header { height: 28px; }
+  .navigate .flush-body, .navigate .col.right .panel-body { padding: 8px 12px; }
+  .navigate .mission-glass .panel-body { padding: 0; }
+  .navigate .alerts-strip { height: 26px; }
+  .navigate .status-grid .sub { margin-top: 2px; }
+  .navigate .telemetry .big { font-size: 18px; }
+  .navigate .telemetry .label { margin: 4px 0 1px; }
+  .navigate .telemetry .compass { width: 84px; height: 84px; }
+  .navigate .telemetry { grid-template-columns: 1.1fr 0.8fr 1.3fr 84px; }
+  .navigate .mission-footer { padding: 6px 12px; }
+  .navigate .mission-stats .label { font-size: 8px; }
+  .navigate .mission-stats .stat { font-size: 12px; }
+}
+.compass { width: 150px; height: 150px; }
+/* A heading that has stopped updating must not look like a live needle. */
+.compass.stale { opacity: 0.6; }
+.compass.very-stale { opacity: 0.35; filter: grayscale(1); outline: 2px dashed var(--alarm); outline-offset: -4px; border-radius: 50%; }
+.status-tile.very-stale .pill { border-style: dashed; }
+.sonar-foot {
+  display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; padding: 8px 14px;
+  border-top: 1px solid var(--border-soft); background: var(--glass-raised); font-size: 11px;
+}
+.sonar-foot a { color: var(--info); font-weight: 600; }
+.sonar-foot .hint { flex-basis: 100%; }
+/* Health view: the glass header already carries the title and the three-word
+   verdict, so the reused panel's own heading is not repeated. The full panel
+   keeps its heading: it holds the fold toggle and the forced-open reason. */
+.sonar-embed.health .panel > h2 { display: none; }
+.alerts-strip svg { width: 16px; height: 16px; flex: none; }
+
+.mission-meta { display: flex; align-items: flex-end; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--divider); }
+.mission-meta .name { font-size: 18px; font-weight: 400; letter-spacing: 0.02em; }
+/* Buttons left, stats right; when both don't fit on one line the stats wrap
+   to the next line instead of sliding under the buttons. */
+.mission-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 14px; padding: 12px 14px; border-top: 1px solid var(--divider); align-items: center; }
+.mission-footer .btn-row { flex-wrap: nowrap; gap: 6px; }
+.mission-footer .confirm-result { max-width: 180px; white-space: normal; }
+.mission-stats { display: flex; gap: 20px; justify-content: flex-end; margin-left: auto; }
+.mission-stats .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); }
+/* Figma: the mission actions are large outlined capitals. */
+.mission-footer .btn { text-transform: uppercase; letter-spacing: 0.02em; font-size: 12px; }
+.mission-footer .btn.danger { color: #ff7b72; }
+/* Navigation panel titles are tracked wider than elsewhere in the Figma. */
+.navigate .panel-header { letter-spacing: 0.12em; }
+.mission-stats .stat { font-size: 15px; font-family: var(--mono); }
+
+/* ------------------------------------------------------------------- slots */
+/* The GPS and camera windows are slots: the live components render inside the
+   glass frame. Nothing in Figma beyond the frame is reproduced here. */
+.slot { position: absolute; inset: 0; }
+.camera-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.camera-slot img.stale { filter: grayscale(0.8) brightness(0.6); }
+.camera-slot .blank { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; background: var(--glass-well); }
+.camera-slot .blank strong { font-size: 14px; }
+.camera-slot .age { position: absolute; top: 10px; right: 10px; }
+.camera-controls { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 38px; border-top: 1px solid var(--border-soft); background: var(--glass-raised); font-size: 10px; }
+.feed-legend { margin-left: auto; display: flex; gap: 10px; color: var(--text-3); }
+.feed-legend .on { color: var(--text); font-weight: 700; }
+
+/* ---------------------------------------------------------------- preflight */
+.preflight-card { max-width: 1200px; margin: 48px auto 24px; padding: 22px 24px 24px; display: flex; flex-direction: column; gap: 14px; }
+.preflight-title { display: flex; align-items: center; gap: 20px; margin-bottom: 8px; }
+.preflight-title .emblem { width: 76px; color: #fff; }
+.preflight-title h2 { margin: 0 0 4px; font-size: 26px; font-weight: 600; }
+.preflight-title .muted { font-size: 12px; }
+.pf-banner .banner { padding: 14px 14px 14px 16px; }
+.pf-banner .banner > svg { width: 24px; height: 24px; }
+.pf-banner .banner strong { font-size: 15px; }
+.pf-banner .banner .detail { font-size: 11.5px; }
+/* The command's server verdict stays visible (safety rule 4), small, under the button. */
+.pf-banner .confirm { align-items: flex-end; }
+.pf-banner .confirm-result { max-width: 300px; font-size: 10px; }
+.pf-step { font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.check-group .group-title { font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); padding: 10px 12px; border-bottom: 1px solid var(--border-soft); }
+.check-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--border-soft); }
+.check-row:last-child { border-bottom: 0; }
+.check-row .name { font-weight: 500; font-size: 12px; }
+.check-row .msg { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+.check-row .remedy { font-size: 10px; color: var(--warn); margin-top: 3px; }
+.check-row svg { width: 16px; height: 16px; display: block; }
+.check-row .pill { height: 18px; font-size: 8.5px; }
+.counts { display: flex; gap: 6px; margin-left: auto; }
+.storage-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+.storage-row .mono { font-size: 12px; }
+.pf-summaries { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.pf-summary p { margin: 0 0 8px; font-size: 10.5px; line-height: 1.55; color: var(--text-2); }
+.pf-summary p:last-child { color: var(--text); }
+.pf-summary p.warn-strong { color: var(--warn); font-weight: 600; }
+.pf-summary-title { font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; margin-bottom: 6px; color: var(--text); }
+.pf-summary-title.ok { color: var(--ok); }
+.next-steps { display: flex; align-items: center; gap: 12px; }
+
+/* ------------------------------------------------------------ mission design */
+.design { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 12px; align-items: start; }
+.design-top { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 14px; margin-bottom: 2px; }
+.design-top .summary { margin-left: auto; text-align: right; }
+.design-top .summary .big { font: 13px var(--mono); letter-spacing: 0.02em; }
+.design-top .summary .hint { font-size: 9.5px; margin-top: 4px; }
+.design-top > .pill { margin-bottom: 6px; }
+/* Mission name: Figma shows it as a title with a pencil, not a boxed field. */
+.name-label { font-size: 9px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-3); margin-bottom: 4px; }
+.name-edit { display: inline-flex; align-items: center; gap: 8px; }
+.name-edit svg { width: 16px; height: 16px; color: var(--text-2); }
+.name-input {
+  background: transparent; border: 0; border-bottom: 1px solid transparent; padding: 0; color: var(--text);
+  font: 600 18px var(--font); letter-spacing: 0.02em; min-width: 140px;
+}
+.name-input:hover { border-bottom-color: var(--border); }
+.name-input:focus { outline: none; border-bottom-color: var(--info); }
+.name-input.invalid { border-bottom-color: var(--alarm); }
+.source-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.source-card { display: flex; align-items: center; gap: 14px; padding: 14px 14px 14px 10px; min-height: 88px; }
+.source-card .text { flex: 1; min-width: 0; }
+.source-card .text strong { font-size: 12px; font-weight: 600; }
+.source-card .text .hint { font-size: 10px; margin-top: 4px; }
+.source-card > svg { width: 26px; height: 26px; flex: none; color: var(--info); }
+.source-card .ok-line { color: var(--ok); font-size: 9.5px; margin-top: 4px; }
+.source-card .err-line { color: var(--alarm); font-size: 10px; margin-top: 4px; }
+.source-card.selected, .source-card:nth-child(2) { border-color: rgba(121, 185, 205, 0.55); background: rgba(121, 185, 205, 0.06); }
+.planner { height: 286px; }
+.design-left, .design-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.planner .map { position: absolute; inset: 0; }
+.planner-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border-soft); font-size: 10px; color: var(--text-2); }
+.planner-bar .place-hint { display: inline-flex; align-items: center; gap: 8px; color: var(--info); }
+.planner-bar .place-hint svg { width: 16px; height: 16px; }
+.planner-bar .mid { margin: 0 auto; }
+.wp-num { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: rgba(89, 149, 170, 0.3); border: 1px solid var(--info); font: 600 11px var(--font); }
+.wp-marker { width: 24px; height: 24px; border-radius: 50%; background: rgba(13, 17, 23, 0.85); border: 2px solid var(--info); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 11px var(--font); cursor: grab; }
+.wp-marker.selected { background: var(--primary); border-color: #fff; }
+.wp-marker.start { border-color: var(--ok); }
+.wp-marker.end { border-color: var(--warn); }
+.config-section { margin-bottom: 14px; }
+.config-section > .upper, .config-heads .upper { color: var(--text-3); margin-bottom: 8px; display: block; font-size: 9px; font-weight: 500; letter-spacing: 0.02em; }
+.config-heads { display: flex; gap: 46px; }
+.config-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 7px 0; font-size: 11px; align-items: center; }
+.config-row .check input[disabled] { opacity: 1; }
+.status-text { font-size: 9.5px; text-align: right; }
+.status-text.ok { color: var(--ok); }
+.status-text.warn { color: var(--warn); }
+.status-text.alarm { color: var(--alarm); }
+.status-text.neutral { color: var(--text-3); }
+.speed-row { display: flex; align-items: center; gap: 10px; font-size: 11px; font-weight: 500; }
+.speed-row > span:first-child { margin-right: auto; }
+.policy { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.policy label { padding: 0 12px; height: 36px; display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 11px; }
+.policy label.selected { border-color: rgba(121, 185, 205, 0.7); background: var(--info-tint); color: var(--info); }
+.policy label.disabled { opacity: 0.45; cursor: not-allowed; }
+.config-section .hint { font-size: 10px; }
+.readiness.ok { border-color: rgba(63, 185, 80, 0.55); background: rgba(63, 185, 80, 0.07); }
+.readiness .panel-body { font-size: 11px; }
+.readiness .ok-line { color: var(--ok); font-size: 10px; margin-bottom: 8px; }
+.readiness p { margin: 0 0 6px; }
+.readiness .warn-text { color: var(--warn); }
+.design-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 14px; }
+.design-actions .msg { flex: 1; }
+.design-actions .msg strong { font-size: 12px; }
+.ok-text { color: var(--ok); }
+
+/* -------------------------------------------------------------------- alerts */
+/* Figma tiles: big number on the left, label and note beside it. */
+.summary-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.summary-tile { height: 64px; padding: 0 16px; display: flex; align-items: center; gap: 14px; min-width: 0; }
+.summary-tile > div:last-child { min-width: 0; }
+.summary-tile .n { font-size: 24px; font-weight: 500; flex: none; }
+.summary-tile .t { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); }
+.summary-tile .s { font-size: 9.5px; color: var(--text-3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.filters { display: flex; gap: 12px; margin-bottom: 12px; align-items: center; }
+.filters .search.grow { width: 400px; max-width: 40%; }
+.alerts-layout { display: grid; grid-template-columns: minmax(0, 1.57fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; align-items: stretch; }
+.flush-list { padding: 0; }
+.alert-row {
+  position: relative; padding: 14px 16px 16px; cursor: pointer; display: flex; flex-direction: column; gap: 8px;
+  border-bottom: 1px solid var(--border-soft); border-left: 1px solid transparent; border-right: 1px solid transparent;
+}
+.alert-row:hover { background: rgba(255, 255, 255, 0.03); }
+.alert-row.selected { background: rgba(121, 185, 205, 0.08); border: 1px solid rgba(121, 185, 205, 0.6); }
+.alert-row .title { display: flex; gap: 8px; align-items: center; }
+.alert-row .title .text { font-size: 14px; font-weight: 600; margin-right: auto; }
+.sev-icon svg { width: 18px; height: 18px; display: block; }
+.sev-icon.warn { color: var(--warn); }
+.sev-icon.alarm { color: var(--alarm); }
+.alert-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.alert-facts .k, .detail-facts .k { font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); margin-bottom: 4px; }
+.alert-facts .val { font-size: 12px; }
+.row-link { align-self: flex-end; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--info); }
+.row-link svg { width: 12px; height: 12px; }
+.alert-row.selected .row-link { text-transform: uppercase; letter-spacing: 0.04em; }
+.panel-foot { padding: 12px 16px; border-top: 1px solid var(--border-soft); font-size: 10px; line-height: 1.7; }
+.detail-title { margin: 4px 0 10px; font-size: 18px; font-weight: 600; }
+.detail-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; margin-bottom: 18px; font-size: 12px; }
+.detail-heading { font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; margin: 0 0 8px; }
+.detail-copy { margin: 0 0 18px; font-size: 11px; line-height: 1.6; color: var(--text-2); }
+.detail-note { display: flex; gap: 8px; align-items: flex-start; font-size: 10px; color: var(--text-3); padding-top: 12px; border-top: 1px solid var(--border-soft); }
+.detail-note svg { width: 14px; height: 14px; flex: none; }
+/* Figma: the screen's two exits sit in their own glass box, bottom right. */
+.action-dock { display: flex; justify-content: flex-end; margin-top: 12px; }
+.action-box { display: flex; gap: 12px; padding: 14px; }
+
+/* ---------------------------------------------------------------------- repo */
+.repo-title { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.repo-title .section-title { margin: 0 auto 0 0; }
+.filters .repo-search { width: 438px; max-width: 40%; }
+.course { width: 150px; height: 56px; }
+.course.well { background:
+  linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px) 0 0 / 100% 14px,
+  linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px) 0 0 / 18px 100%,
+  var(--glass-well); border-color: rgba(121, 185, 205, 0.35); }
+.repo-name { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 10px; }
+.selected-tag { font-size: 8.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--info); }
+.repo-library .empty { padding: 36px; }
+/* Figma table: full-width rows split by rules, the selected row outlined. */
+.table.lines { border-collapse: collapse; border-spacing: 0; }
+.table.lines th { height: 32px; padding: 0 12px; border-bottom: 1px solid var(--border-soft); font-size: 9px; letter-spacing: 0.04em; color: var(--text-2); font-weight: 500; }
+.table.lines td { padding: 10px 12px; background: transparent; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0 !important; }
+.table.lines tbody tr { cursor: pointer; }
+.table.lines tbody tr:hover td { background: rgba(255, 255, 255, 0.03); }
+.table.lines tr.selected td { background: rgba(121, 185, 205, 0.08); border-top: 1px solid rgba(121, 185, 205, 0.6); border-bottom: 1px solid rgba(121, 185, 205, 0.6); }
+.table.lines tr.selected .repo-name { color: var(--info); }
+.table.lines .ready-col { text-align: center; width: 180px; }
+.table.lines th.ready-col.ok { color: var(--ok); }
+.table.lines th.ready-col.warn { color: var(--warn); }
+.launch-note { font-size: 9px; color: var(--warn); margin-top: 4px; }
+.repo-dock { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 14px 14px 14px 16px; font-size: 12px; }
+/* Inputs inside table rows (Mission Design waypoints) stay row-sized. */
+.table .input { height: 28px; }
+.design .table td { padding: 3px 10px; }

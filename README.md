@@ -2,6 +2,35 @@
 
 ROS 2 Jazzy autonomous surface vessel (ASV) stack for the [NODE Engineering Club](https://github.com/NODE-Engineering-Club) boat **ASKET**, adapted from the Njord 2026 competition stack for the **Kelp Blue** kelp-farm missions in Lüderitz (Shearwater Bay), Namibia, with a **Cerulean Omniscan 450 SS** side-scan sonar.
 
+## START HERE
+
+Pick the one that describes you. Each is written for somebody who has not seen
+this project before, and each labels every fact VERIFIED / TESTED IN SOFTWARE
+ONLY / NOT VERIFIED / UNKNOWN, with a date, rather than saying "should work".
+
+| You are | Read |
+|---|---|
+| **Taking over the mission GUI** — and you may want to redesign it | [`docs/GUI_DEVELOPER_GUIDE.md`](docs/GUI_DEVELOPER_GUIDE.md). The frontend/backend contract, what you may change freely, and what must not change without a hardware review. |
+| **Testing the hardware** against the nodes and the GUI, before the boat goes in the water | [`docs/COMMISSIONING_ROADMAP.md`](docs/COMMISSIONING_ROADMAP.md). Project status, safety rules, the basics (SSH, containers, ROS, git) explained from scratch, and ten test phases with exact commands and PASS/FAIL criteria. |
+| **Operating the boat on the day** | [`docs/OPERATOR_CHECKLIST.md`](docs/OPERATOR_CHECKLIST.md) — one page, for the beach. |
+| **Looking for what is actually on the boat** and what is verified | [`docs/HARDWARE_DECISIONS.md`](docs/HARDWARE_DECISIONS.md) — the reference. When it and any other document disagree, it wins. |
+| **Working on the sonar** | [`docs/SONAR_BRINGUP.md`](docs/SONAR_BRINGUP.md) — the only part of the boat verified in water (2026-11-06). |
+
+**Which branch:** `integration-pre-sea-trial` contains everything — the
+hardware alignment work, the sonar work verified in water, and the GUI. The
+older `hw-alignment` and `GUI_AUXI` are both missing the sonar fixes, and
+`hw-alignment` additionally crashes about a second after starting against an
+idle sonar.
+
+Two safety facts that catch people, in full in the documents above:
+
+* **The hardware killswitch and RC channel 8 cut propulsion with no software
+  involved.** They are sovereign; nothing here may interfere with them.
+* **The sonar keeps pinging when you close the software**, and pinging in air
+  can damage it. Stop it with
+  `ros2 service call /omniscan_bridge/stop_pinging std_srvs/srv/Trigger`
+  *before* it leaves the water.
+
 The mission design lives in [`Mission controls and documents/`](Mission%20controls%20and%20documents/):
 
 - [`KELP_MISSIONS.md`](Mission%20controls%20and%20documents/KELP_MISSIONS.md) — the M0–M8 mission set, autonomy/decision log, telemetry and cloud design, sonar pipeline, network, phased plan.
@@ -18,7 +47,7 @@ What the repo already provides for each mission in `KELP_MISSIONS.md`, and what 
 | **M0** | Harbour acceptance | Stand-test procedure (`TODOS.md`); Pico 2 e-stop/arm/mode firmware (`firmware/pico/`); BMS reader (`sensors/bms_reader`) | Go/no-go checklist wired to bench tests T01–T18; leak sensors; watchdog kill-upstream test (T15) |
 | **M1** | Manual transit + link baseline | RC control through the Pico or ArduPilot; Foxglove GUI (boat LAN only) | MikroTik RSSI/rate logging; MQTT telemetry bridge to the shore station |
 | **M2** | Autonomous transit + collision avoidance | `mission_manager` → Nav2 waypoint chains; `boat_bt` GlobalSafety obstacle bypass; LiDAR + camera fusion (`/obstacles/fused`, `/obstacles/global`); Nav2 `collision_monitor` (stop polygon **disabled**) | Farm-GeoJSON keep-out costmap filter + geofence check; enable/tune the stop polygon after measuring `d_stop`; Livox Mid-360S and OAK-D-LR adapters onto the existing topics; speed governor; entanglement detection |
-| **M3** | Sonar survey, lane following | Lanes can already be flown as a waypoint list through `/mission/start` | Lawnmower lane generator; SonarView (Docker or BlueOS extension); `nmea_udp_bridge`; `sonar_bridge`; auto-pause on RTK/heading/ping loss |
+| **M3** | Sonar survey, lane following | Lanes can already be flown as a waypoint list through `/mission/start`; `omniscan_bridge` decodes real sonar data onto `/sonar/points` (bucket test only, [`docs/SONAR_BRINGUP.md`](docs/SONAR_BRINGUP.md)) | Lawnmower lane generator; SonarView (Docker or BlueOS extension); `nmea_udp_bridge`; sonar QC metrics; auto-pause on RTK/heading/ping loss |
 | **M4** | Structure verification | — | Offset-pass planner around known targets; detection scoring table |
 | **M5** | Repeat-pass monitoring (post-MVP) | `mission_manager` checkpoint resume (note: identical waypoint lists resume the earlier pass) | Change detection between passes |
 | **M6** | Drift and deviation monitor | — | Cross-track / heading / speed-made-good monitor node and alerts |
@@ -120,13 +149,18 @@ source install/setup.bash
 | `enable_vision` | `true` | YOLO inference node |
 | `vision_confidence` | `0.5` | YOLO detection confidence threshold |
 | `enable_control` | `true` | nav_to_pid, PID, actuator driver |
-| `use_pico_bridge` | `false` | Drive thrusters through the Pico 2 (`pico_bridge`) instead of MAVROS RC override (`actuator_driver`) |
-| `pico_port` | `/dev/ttyACM0` | Pico serial port |
-| `enable_bms` | `false` | BMS reader (`sensors/bms_reader`) |
-| `bms_port` | `/dev/ttyACM3` | BMS serial port |
+| `use_pico_bridge` | `true` | Drive thrusters through the Pico 2 (`pico_bridge`); `false` = MAVROS RC override (`actuator_driver`) |
+| `pico_port` | `/dev/pico` | Pico serial port (udev link, `deploy/udev/`) |
+| `pico_bridge_in_sim` | `false` | Also start `pico_bridge` with `use_sim:=true` (bench only: real thrusters follow the simulation) |
+| `enable_bms` | `false` | BMS reader(s) (`sensors/bms_reader`) + `battery_aggregator` → `/battery/state` |
+| `bms_port` | `/dev/bms_pack1` | Pack 1 BMS serial port (udev link) |
+| `enable_bms2` | `false` | Second BMS (pack 2); false while only one BMS is wired |
+| `bms2_port` | `/dev/bms_pack2` | Pack 2 BMS serial port (udev link) |
 | `enable_mission` | `true` | GPS waypoint sequencer (`mission_manager`) |
 | `enable_boat_bt` | `true` | Safety Behavior Tree (`boat_bt_node`) |
 | `enable_foxglove` | `true` | Foxglove WebSocket bridge (port 8765, **no authentication — boat LAN only**) |
+| `enable_sonar` | `false` | `omniscan_bridge`, for sonar health. Requires `enable_gui:=true`. Never starts the sonar pinging. To view its data on a bench, use `ros2 launch omniscan_bridge sonar_rviz.launch.py` ([`docs/SONAR_BRINGUP.md`](docs/SONAR_BRINGUP.md)) |
+| `sonar_host` | `192.168.2.21` | Omniscan address; `ASKET_SONAR_HOST` overrides the default |
 
 ## Workspace Layout
 
@@ -145,6 +179,7 @@ src/
 ├── calibration/    # scan_to_cloud, collect_data, calibrate, extrinsic_tf_publisher
 ├── sim/            # 2D Python simulator + sim_nav2.launch.py
 ├── foxglove/       # Foxglove layout + GUI helper scripts
+├── omniscan_bridge/ # Omniscan 3D -> /sonar/points and health; sonar_rviz.launch.py to view it
 ├── fusion/
 │   └── asket_sensor_fusion/  # Kelp Blue, JETSON-ONLY: dynamic sea-surface LiDAR filter,
 │                              # SAM2-mask 3D obstacle extraction, RTK-georeferenced EKF
@@ -248,7 +283,7 @@ flowchart TD
     PB --> PICO[Pico 2 → ESCs]
 ```
 
-The Kelp additions in `KELP_MISSIONS.md` §3–§5 (decision log, health monitor, MQTT bridge, recorder, SonarView + `sonar_bridge` + `nmea_udp_bridge`) plug into this graph; none of them exist yet.
+The Kelp additions in `KELP_MISSIONS.md` §3–§5 (decision log, health monitor, MQTT bridge, recorder, SonarView + `sonar_bridge` + `nmea_udp_bridge`) plug into this graph. The recorder (`src/mission_recorder`) and two sonar bridges (`src/omniscan_bridge`, and `sonar_bridge_node` in `src/comms/cloud_bridge`) now exist. `nmea_udp_bridge` and the MQTT bridge do not.
 
 ## TF Frame Tree
 
@@ -354,7 +389,7 @@ Arbitrates `/boat_bt/cmd_vel` (priority 100) and `/nav2/cmd_vel` (Nav2's own out
 - **`nav_to_pid`** — Clamps `/cmd_vel` to safe speed (≤2 m/s) and yaw rate (≤1 rad/s), republishes as `/control/setpoint`.
 - **`pid_controller`** — Dual PID (speed + yaw) driven by `/control/setpoint`, speed feedback from `/mavros/local_position/velocity_body` and yaw-rate feedback from IMU. Holds a zero setpoint when `/control/setpoint` is older than 0.5 s. Publishes `/control/effort` at 20 Hz. **Known bug:** it subscribes to `/imu/data`, which nothing publishes (see `TODOS.md`).
 - **`actuator_driver`** — Maps `Twist` effort to MAVROS `OverrideRCIn` RC channels (ch1=steering, ch3=throttle, ±400 µs around 1500 µs centre).
-- **`pico_bridge`** — Alternative actuation path (`use_pico_bridge:=true`): sends `L,R` motor commands and `MODE AUTO/MANUAL` to the Pico 2 over USB serial, `PING` when commands go stale (>0.3 s). The Pico firmware is in `firmware/pico/`.
+- **`pico_bridge`** — Default actuation path (`use_pico_bridge:=true`): sends `L,R` motor commands and `MODE AUTO/MANUAL` to the Pico 2 over USB serial, `PING` when commands go stale (>0.3 s). Motion (motor commands, `MODE AUTO`) is forwarded only once the Pico has reported `ver=5`; `MODE MANUAL` always. Reopens the port if the Pico is re-plugged. Firmware: `firmware/pico-node_v5/`.
 
 ### `mission`
 - **`mission_manager`** — GPS waypoint queue: sequences whatever `(lat, lon)` list it's given (via `/mission/start`) through Nav2's `NavigateToPose` action, one at a time, converting each waypoint GPS → map frame via `robot_localization/FromLL` on demand. Accepts temporary detours from `boat_bt` on `/mission/set_bypass_target`. Holds at the final waypoint for `final_hold_duration_sec` (default 5 s) before reporting SUCCEEDED. Persists an on-disk checkpoint so a crash/respawn mid-mission resumes rather than restarting. This is the entry point for the Kelp transit (M2) and survey-lane (M3) missions.

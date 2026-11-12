@@ -1,0 +1,255 @@
+# Nav2 for survey lines on a boat with NO obstacle sensors (hw-alignment
+# Phase B f). Selected by njord.launch.py nav2_profile:=survey (the default).
+# nav2_profile:=full keeps nav2_params.yaml, the profile built for the
+# SAM2/fusion obstacle pipeline, which needs the Livox and the OAK-D-LR.
+#
+# What this profile knows about the world, and all it knows:
+#   * a GEOFENCE: the survey-area polygon for the day (sensors/
+#     geofence_mask_node, /data/setup/geofence.yaml). Outside it is lethal in
+#     both costmaps, so nothing is planned or followed out of it;
+#   * a SPEED LIMIT: 0.8 m/s forward, no reverse, 0.6 rad/s turning,
+#     enforced in velocity_smoother after the controller.
+# It does NOT know about anything in the water. No obstacle layer, and the
+# collision_monitor has no source to watch. Keep the boat in sight with the
+# transmitter in hand: Ch8 low (or a lost RC link) stops it in firmware.
+#
+# Documented, value by value, in docs/HARDWARE_DECISIONS.md ("Nav2 survey
+# profile").
+
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odometry/filtered
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    wait_for_service_timeout: 1000
+    action_server_result_timeout: 900.0
+
+    navigators:
+      - navigate_to_pose
+      - navigate_through_poses
+
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
+
+    error_code_names:
+      - compute_path_error_code
+      - follow_path_error_code
+
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 10.0
+    min_x_velocity_threshold: 0.01
+    min_theta_velocity_threshold: 0.01
+
+    progress_checker_plugins:
+      - progress_checker
+
+    goal_checker_plugins:
+      - goal_checker
+
+    controller_plugins:
+      - FollowPath
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.2
+      movement_time_allowance: 30.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.5
+      yaw_goal_tolerance: 3.14
+      stateful: true
+
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      # SPEED LIMIT (1/2): the cruise speed asked for. velocity_smoother caps
+      # it again below, so this alone is not the limit.
+      desired_linear_vel: 0.8
+      lookahead_dist: 2.0
+      min_lookahead_dist: 1.0
+      max_lookahead_dist: 5.0
+      lookahead_time: 1.5
+      rotate_to_heading_angular_vel: 0.5
+      use_rotate_to_heading: false
+      allow_reversing: false
+      use_velocity_scaled_lookahead_dist: true
+      # Slow down in tight turns, and near the fence (the only cost there is).
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 3.0
+      regulated_linear_scaling_min_speed: 0.25
+      use_cost_regulated_linear_velocity_scaling: true
+      inflation_cost_scaling_factor: 3.0
+
+
+planner_server:
+  ros__parameters:
+    planner_plugins:
+      - GridBased
+
+    GridBased:
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true
+
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      transform_tolerance: 2.0
+      update_frequency: 1.0
+      publish_frequency: 1.0
+
+      global_frame: map
+      robot_base_frame: base_link
+
+      robot_radius: 1.0
+      resolution: 0.5
+
+      rolling_window: true
+      width: 300
+      height: 300
+      track_unknown_space: true
+
+      # No obstacle layer: nothing aboard detects obstacles.
+      plugins:
+        - geofence_layer
+        - inflation_layer
+
+      # GEOFENCE: lethal outside the survey polygon (sensors/geofence_mask_node).
+      geofence_layer:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/geofence/filter_info"
+
+      # Keeps the planned path off the fence line.
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 5.0
+
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      transform_tolerance: 2.0
+      update_frequency: 5.0
+      publish_frequency: 2.0
+
+      global_frame: odom
+      robot_base_frame: base_link
+
+      rolling_window: true
+      width: 20
+      height: 20
+      resolution: 0.1
+
+      robot_radius: 1.0
+
+      plugins:
+        - geofence_layer
+        - inflation_layer
+
+      # The same fence, so the controller refuses to follow a path out of it.
+      # The mask is in map; the layer resolves map->odom through TF.
+      geofence_layer:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/geofence/filter_info"
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 2.0
+
+
+behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+
+    cycle_frequency: 10.0
+
+    behavior_plugins:
+      - wait
+      - spin
+      - backup
+
+    wait:
+      plugin: "nav2_behaviors::Wait"
+
+    spin:
+      plugin: "nav2_behaviors::Spin"
+
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+
+
+# SPEED LIMIT (2/2): the hard cap, after the controller and before the
+# collision monitor, twist_mux and the Pico. Forward only (the boat does not
+# survey in reverse), gentle acceleration.
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.8, 0.0, 0.6]
+    min_velocity: [0.0, 0.0, -0.6]
+    max_accel: [0.3, 0.0, 0.5]
+    max_decel: [-0.5, 0.0, -0.5]
+    odom_topic: /odometry/filtered
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+
+# Nothing to watch: no lidar and no point cloud aboard. The node stays in the
+# chain (cmd_vel_smoothed -> nav2/cmd_vel) so the topology does not change
+# between profiles, with every polygon and source disabled: it passes the
+# smoothed command through untouched. It is NOT a safety layer in this
+# profile.
+collision_monitor:
+  ros__parameters:
+    base_frame_id: base_link
+    odom_frame_id: odom
+
+    cmd_vel_in_topic: cmd_vel_smoothed
+    cmd_vel_out_topic: nav2/cmd_vel
+    state_topic: collision_monitor_state
+
+    transform_tolerance: 0.5
+    source_timeout: 5.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+
+    polygons:
+      - FootprintStop
+
+    FootprintStop:
+      type: "polygon"
+      # A string, not a YAML list: Jazzy reads polygon points as "[[x, y], ...]",
+      # and a nested list makes the whole params file unparseable (every Nav2 node died).
+      points: "[[0.75, 0.40], [0.75, -0.40], [-0.75, -0.40], [-0.75, 0.40]]"
+      action_type: "stop"
+      min_points: 3
+      visualize: false
+      enabled: false
+
+    observation_sources:
+      - lidar
+
+    lidar:
+      type: "scan"
+      topic: /lidar_driver/scan_raw
+      min_height: 0.0
+      max_height: 2.0
+      enabled: false

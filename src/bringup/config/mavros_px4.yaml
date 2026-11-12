@@ -1,0 +1,46 @@
+# MAVROS parameters for a PX4 Pixhawk — njord.launch.py autopilot:=px4. One file per autopilot, and only one file: a second
+# --params-file on mavros_node reproduces the plugin-remap race described in
+# njord.launch.py.
+#
+# What differs from mavros_ardupilot.yaml, and why (from MAVROS's own
+# apm_config.yaml / px4_config.yaml and *_pluginlists.yaml):
+#   * ArduPilot only streams position and status once asked with
+#     REQUEST_DATA_STREAM; njord.launch.py calls /mavros/set_stream_rate for
+#     ArduPilot only (PX4 ignores that request and uses its MAV_x settings).
+#   * the `rangefinder` plugin is ArduPilot's; PX4 denies it.
+#   * time_ref_source "fcu": /mavros/time_reference carries the FC's GPS
+#     time (SYSTEM_TIME), which the pre-flight's GPS clock check reads.
+/**:
+  ros__parameters:
+    plugin_denylist:
+      - actuator_control
+      - adsb
+      - cam_imu_sync
+      - camera
+      - cellular_status
+      - companion_process_status
+      - image_pub
+      - vibration
+      - wheel_odometry
+      - mount_control
+      - mag_calibration_status
+      - manual_control
+      - obstacle_distance
+      - obstacle_distance_3d
+      - onboard_computer_status
+      - geofence
+      - px4flow
+      - waypoint
+      - rallypoint
+      - debug_value
+      - tunnel
+      # ArduPilot-only
+      - rangefinder
+
+/**/sys:
+  ros__parameters:
+    heartbeat_mav_type: "ONBOARD_CONTROLLER"
+
+/**/time:
+  ros__parameters:
+    time_ref_source: "fcu"

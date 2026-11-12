@@ -1,0 +1,37 @@
+/*
+ * Dark-glass skin for the live map component reused from src/asket_gui
+ * (panels/MissionMap.jsx). That component keeps its own class names; these
+ * rules restyle them only inside the GPS slot, so the original cockpit is
+ * unaffected.
+ */
+.gps-slot .map-area { position: absolute; inset: 0; }
+.gps-slot .map { position: absolute; inset: 0; }
+.gps-slot .map-overlay { position: absolute; top: 8px; left: 8px; display: flex; gap: 5px; flex-wrap: wrap; z-index: 1; }
+.gps-slot .map-overlay button,
+.gps-slot .map-overlay label {
+  height: 24px; padding: 0 9px; border-radius: 5px; font: 600 10.5px var(--font);
+  color: var(--text); background: rgba(13, 17, 23, 0.72); border: 1px solid var(--border);
+  backdrop-filter: blur(8px); cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.gps-slot .map-legend {
+  position: absolute; right: 8px; bottom: 40px; z-index: 1;
+  display: grid; gap: 3px; padding: 6px 9px; font-size: 10.5px;
+  background: rgba(13, 17, 23, 0.72); border: 1px solid var(--border); border-radius: 6px;
+  backdrop-filter: blur(8px);
+}
+.gps-slot .map-legend div { display: flex; align-items: center; gap: 6px; }
+.gps-slot .map-legend .swatch { width: 16px; height: 3px; flex: none; }
+.gps-slot .map-legend .swatch.fill { height: 10px; }
+.gps-slot .map-note {
+  position: absolute; left: 8px; bottom: 34px; max-width: 380px; z-index: 2;
+  padding: 7px 9px; font-size: 11px; color: var(--text);
+  background: rgba(13, 17, 23, 0.8); border: 1px solid var(--border); border-radius: 6px;
+  backdrop-filter: blur(8px);
+}
+.gps-slot .map-note-top, .gps-slot .map-note-mock { bottom: auto; top: 40px; }
+.gps-slot .map-note-mock { border-left: 3px solid #a371f7; }
+.gps-slot .warnline { color: var(--warn); font-weight: 700; font-size: 11px; }
+.gps-slot .hint { color: var(--text-2); }
+.gps-slot .maplibregl-ctrl-attrib { background: rgba(13, 17, 23, 0.7) !important; color: var(--text-2); font-size: 10px; }
+.gps-slot .maplibregl-ctrl-attrib a { color: var(--text-2); }
+.gps-slot .maplibregl-ctrl-scale { background: rgba(13, 17, 23, 0.6); color: var(--text); border-color: var(--text-2); }
