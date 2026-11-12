@@ -280,7 +280,23 @@ class OakRgbdNode(Node):
             nn.input.setQueueSize(1)
             rgb.preview.link(nn.input)
             stereo.depth.link(nn.inputDepth)
-            nn.out.link(sync.inputs["det"])
+            nn.inputDepth.setBlocking(False)
+            nn.inputDepth.setQueueSize(1)
+            # Detections on their OWN stream, not in the Sync group: when the
+            # detector skipped a frame, Sync held colour + depth waiting for it
+            # and the camera pipeline choked, 9.8 -> 0 fps in ~40 s, no error
+            # (2026-11-12). The host pairs them by capture timestamp instead.
+            det_out = p.create(dai.node.XLinkOut)
+            det_out.setStreamName("det")
+            det_out.input.setBlocking(False)
+            det_out.input.setQueueSize(4)
+            nn.out.link(det_out.input)
+
+        # Depth feeds two consumers (Sync and the detector): non-blocking, so a
+        # consumer that falls behind drops frames instead of stalling StereoDepth.
+        for name in ("rgb", "depth"):
+            sync.inputs[name].setBlocking(False)
+            sync.inputs[name].setQueueSize(2)
         out = p.create(dai.node.XLinkOut)
         out.setStreamName("rgbd")
         sync.out.link(out.input)
@@ -341,9 +357,46 @@ class OakRgbdNode(Node):
                         f"fx={self._info.k[0]:.1f}"
                     )
                     q = device.getOutputQueue("rgbd", maxSize=2, blocking=False)
+                    qd = device.getOutputQueue("det", maxSize=8, blocking=False) if self._blob else None
+                    dets = {}      # capture timestamp (s) -> detections message
+                    pending = []   # (arrived monotonic, group) waiting for their detections
+                    last = time.monotonic()
                     while not self._stop.is_set():
-                        group = q.get()
-                        self._publish(group)
+                        got = False
+                        if qd is not None:
+                            for d in qd.tryGetAll():
+                                dets[d.getTimestamp().total_seconds()] = d
+                                got = True
+                        group = q.tryGet()
+                        now = time.monotonic()
+                        if group is not None:
+                            last = now
+                            got = True
+                            if qd is None:
+                                self._publish(group)
+                            else:
+                                pending.append((now, group))
+                        # Each frame goes out with the detections of ITS OWN
+                        # instant, or none after 250 ms, never a neighbour's.
+                        while pending:
+                            t_arr, g = pending[0]
+                            ts = g["rgb"].getTimestamp().total_seconds()
+                            match = next((dets.pop(k) for k in list(dets) if abs(k - ts) < 0.02), None)
+                            if match is None and now - t_arr < 0.25:
+                                break
+                            pending.pop(0)
+                            self._publish(g, match)
+                        if group is not None:
+                            newest = group["rgb"].getTimestamp().total_seconds()
+                            for k in [k for k in dets if k < newest - 1.0]:
+                                dets.pop(k, None)  # its frame is long gone
+                        if not got:
+                            # Watchdog: a pipeline that stalls raises nothing
+                            # and q.get() would wait forever, leaving the GUI
+                            # on a frozen camera. Reconnect instead.
+                            if now - last > 5.0:
+                                raise RuntimeError("no frames for 5 s (camera pipeline stalled)")
+                            time.sleep(0.003)
             except Exception as exc:  # noqa: BLE001 — unplugged, rebooted, XLink error
                 if self._stop.is_set():
                     return
@@ -356,7 +409,7 @@ class OakRgbdNode(Node):
         ns = self.get_clock().now().nanoseconds - int(age * 1e9)
         return Time(sec=ns // 1_000_000_000, nanosec=ns % 1_000_000_000)
 
-    def _publish(self, group) -> None:
+    def _publish(self, group, det_msg=None) -> None:
         rgb_msg = group["rgb"]
         depth_msg = group["depth"]
         stamp = self._stamp(rgb_msg.getTimestamp())
@@ -387,8 +440,8 @@ class OakRgbdNode(Node):
         if self._info is not None:
             self._info.header.stamp = stamp
             self._pub_info.publish(self._info)
-        if self._blob and "det" in group.getMessageNames():
-            self._publish_detections(group["det"], bgr, depth, stamp)
+        if self._blob:
+            self._publish_detections(det_msg, bgr, depth, stamp)
         self._frames += 1
 
     def _publish_detections(self, det_msg, bgr: np.ndarray, depth: np.ndarray, stamp: Time) -> None:
@@ -396,7 +449,7 @@ class OakRgbdNode(Node):
         fx = self._info.k[0] if self._info else None
         cx = self._info.k[2] if self._info else w / 2
         objects = []
-        for d in det_msg.detections:
+        for d in (det_msg.detections if det_msg is not None else []):
             box = (int(max(0.0, d.xmin) * w), int(max(0.0, d.ymin) * h),
                    int(min(1.0, d.xmax) * w), int(min(1.0, d.ymax) * h))
             z = float(d.spatialCoordinates.z)
