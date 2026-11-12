@@ -103,3 +103,23 @@ ONNX Runtime. `scripts/boat.sh` (run on the host) starts a second, rootful
 container from `dustynv/onnxruntime:r35.4.1` that serves the models on
 `127.0.0.1:7090` (`sam2_vision/remote_ort.py`). The segmenter uses it when it
 answers and its own CPU sessions when it does not (`gpu_server` parameter).
+
+### On-camera detection (default since 2026-11-12)
+
+`oak_rgbd` runs `models/yolov8n_coco_640x352.blob` (Luxonis' YOLOv8n, 80 COCO
+classes, compiled for the RVC2 chip) **on the camera**, with each object's 3D
+position from the camera's stereo depth. Measured: ~10 fps, about 0% Jetson
+CPU for the detector, load average ~2.8 for the whole stack. The Jetson only
+draws: the mask is the depth region at the centre of the box near the object's
+distance. Where depth is too sparse (dark, glossy, textureless surfaces) the
+box is drawn instead, never a doubtful outline.
+
+* `/oak/detections/image/compressed`: annotated frame, the GUI's
+  "Segmented + distance" view (topics.yaml `camera_segmented`).
+* `/oak/detections`: JSON list (label, confidence, distance, x/y/z, bearing, bbox).
+* Raw `/oak/rgb/image_raw` and `/oak/stereo/depth` are published only while
+  something subscribes (SAM 2). Unread, ~28 MB/s of best-effort UDP crowded out
+  the JPEGs.
+* SAM 2 on the Jetson is opt-in: `SAM2=1 scripts/boat_up.sh`.
+* gui_backend now has one newest-wins video slot per stream. A single shared
+  slot starved one of camera / camera_seg completely.

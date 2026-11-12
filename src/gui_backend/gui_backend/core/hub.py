@@ -99,6 +99,47 @@ class Subscription:
     cursor: int = 0
 
 
+class VideoSlots:
+    """One pending video frame per stream, newest wins; streams served in turn.
+
+    Queue-like (``get``, ``get_nowait``, ``empty``, ``qsize``, ``full``) so the
+    socket writer drains it as before.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[str, bytes] = {}
+        self._ready = asyncio.Event()
+
+    def put_latest(self, stream: str, frame: bytes) -> bool:
+        """Store ``frame`` as ``stream``'s next frame. True if one was replaced."""
+        replaced = stream in self._pending
+        self._pending.pop(stream, None)  # re-insert at the back: fair turns
+        self._pending[stream] = frame
+        self._ready.set()
+        return replaced
+
+    def get_nowait(self) -> bytes:
+        if not self._pending:
+            raise asyncio.QueueEmpty
+        stream = next(iter(self._pending))
+        return self._pending.pop(stream)
+
+    async def get(self) -> bytes:
+        while not self._pending:
+            self._ready.clear()
+            await self._ready.wait()
+        return self.get_nowait()
+
+    def empty(self) -> bool:
+        return not self._pending
+
+    def qsize(self) -> int:
+        return len(self._pending)
+
+    def full(self) -> bool:
+        return bool(self._pending)
+
+
 class ClientSession:
     """One browser."""
 
@@ -125,10 +166,13 @@ class ClientSession:
         #: the screen so that a picture can arrive, which is precisely
         #: backwards.
         #:
-        #: Depth one, newest wins, so at most a single frame is ever in flight
-        #: and a backlog cannot form. A slow link then costs dropped frames,
-        #: which is what a slow link should cost.
-        self.video_outbox: asyncio.Queue[bytes] = asyncio.Queue(maxsize=1)
+        #: Depth one PER STREAM, newest wins, so a backlog cannot form and a
+        #: slow link costs dropped frames, which is what a slow link should
+        #: cost. Per stream, not shared: with one shared slot, "camera" and
+        #: "camera_seg" fell due on the same tick and the second overwrote the
+        #: first every time, so one of them never reached the browser at all
+        #: (seen 2026-11-12).
+        self.video_outbox = VideoSlots()
         self.video_dropped = 0
         self.dropped = 0
         self.connected_at_s = time.monotonic()
@@ -154,7 +198,7 @@ class ClientSession:
                 pass
             self.dropped += 1
 
-    def send_video(self, frame: bytes) -> None:
+    def send_video(self, frame: bytes, stream: str = "camera") -> None:
         """Enqueue a frame, discarding any older one still waiting.
 
         The opposite policy to :meth:`send`. Telemetry keeps a short history
@@ -162,15 +206,7 @@ class ClientSession:
         picture from two seconds ago is worth less than the one behind it, and
         showing it would be the lie this panel exists to avoid.
         """
-        if self.video_outbox.full():
-            try:
-                self.video_outbox.get_nowait()
-                self.video_dropped += 1
-            except asyncio.QueueEmpty:
-                pass
-        try:
-            self.video_outbox.put_nowait(frame)
-        except asyncio.QueueFull:
+        if self.video_outbox.put_latest(stream, frame):
             self.video_dropped += 1
 
     def resubscribe(self, profile: str, now_s: float = 0.0) -> list[Resolution]:
@@ -904,7 +940,7 @@ class Hub:
                 frames_produced=payload.get("frames_produced", 0),
                 stream=name,
             )
-        session.send_video(video_frame.encode(header, image))
+        session.send_video(video_frame.encode(header, image), name)
 
     def _report_tick_failure(self) -> None:
         """Log the traceback and tell every client, without flooding either.

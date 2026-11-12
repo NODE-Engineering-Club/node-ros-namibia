@@ -496,7 +496,7 @@ function MissionPanel({ v, connection, active, onNavigate }) {
 }
 
 export function Navigate({ v, connection, active, onNavigate, sonarState = v.state }) {
-  // Live feed or the SAM 2 segmented view. The cloud cockpit has no
+  // Live feed or the segmented view (objects, masks, distances). The cloud cockpit has no
   // segmented stream (it mirrors snapshots only), so it stays on live.
   const [cameraView, setCameraView] = useState('live');
   const view = v.isCloud ? 'live' : cameraView;

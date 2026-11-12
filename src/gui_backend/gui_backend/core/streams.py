@@ -144,14 +144,15 @@ STREAMS: dict[str, StreamSpec] = {
             default_rate_hz=5.0, max_rate_hz=15.0, typical_bytes=45_000,
         ),
         StreamSpec(
-            # The frame SAM 2 last segmented, each object's mask and distance
-            # drawn on it (sam2_vision/sam2_depth_segmenter). Same binary
-            # format as "camera" and stamped with the camera frame's capture
-            # time, so its age is the picture's age. On the CPU a new one
-            # arrives every ~4 s; the ceiling allows for the GPU path. Full
-            # link only: it is absent from the reduced and minimal profiles.
-            "camera_seg", "Camera frames segmented by SAM 2, a distance on each object",
-            default_rate_hz=1.0, max_rate_hz=2.0, typical_bytes=70_000,
+            # Camera frames with each detected object's mask, label and
+            # distance drawn on them: the OAK's on-camera detector
+            # (sensors/oak_rgbd, ~10 fps) or the SAM 2 segmenter (seconds per
+            # frame), whichever topics.yaml camera_segmented names. Same binary
+            # format as "camera", stamped with the camera frame's capture time,
+            # so its age is the picture's age. Full link only: absent from the
+            # reduced and minimal profiles.
+            "camera_seg", "Camera frames with each object's mask, label and distance",
+            default_rate_hz=5.0, max_rate_hz=10.0, typical_bytes=70_000,
         ),
     ]
 }

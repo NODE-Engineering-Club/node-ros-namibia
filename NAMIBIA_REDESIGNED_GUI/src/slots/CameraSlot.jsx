@@ -24,11 +24,12 @@ export function cameraLevel(state) {
 }
 
 /**
- * The segmented view (stream "camera_seg"): the frame SAM 2 last segmented,
- * with each object's mask and distance drawn on it by the boat. A new one
- * every few seconds on the CPU, so its thresholds are in seconds, not frame
- * intervals — but the rule is the same: its age is the age of the PICTURE
- * (the camera stamp), and a result that has stopped is blanked.
+ * The segmented view (stream "camera_seg"): camera frames with each object's
+ * mask, label and distance drawn on them by the boat. Normally the OAK's
+ * on-camera detector (~10 fps); with SAM 2 a new one comes every few seconds,
+ * so the thresholds are in seconds, not frame intervals. The rule is the same
+ * as the live view: its age is the age of the PICTURE (the camera stamp), and
+ * a result that has stopped is blanked.
  */
 export const SEG_LIVE_MS = 15000;
 export const SEG_LAGGED_MS = 30000;
@@ -99,9 +100,9 @@ function SegmentedSlot({ v }) {
     <div className="slot camera-slot segmented">
       {showFrame ? (
         <>
-          <img src={seg.url} alt="Camera frame segmented by SAM 2, with the distance to each object" className={status.level === 'lagged' ? 'stale' : ''} />
+          <img src={seg.url} alt="Camera frame with each detected object's mask, label and distance" className={status.level === 'lagged' ? 'stale' : ''} />
           <span className={`age pill ${status.level === 'lagged' ? 'warn' : 'neutral'}`}>
-            <span className="dot" />Segmented frame, {(status.age / 1000).toFixed(1)} s old
+            <span className="dot" />{status.age < 1500 ? 'Live, objects and distances' : `Segmented frame, ${(status.age / 1000).toFixed(1)} s old`}
           </span>
         </>
       ) : (
@@ -119,7 +120,7 @@ function SegmentedSlot({ v }) {
               ? `Last result ${(status.age / 1000).toFixed(0)} s ago. Hidden so old masks are not read as the view now.`
               : status.level === 'refused'
                 ? status.reason || 'Only the full link carries the segmented view.'
-                : 'SAM 2 masks each object and the OAK depth gives its distance. On the CPU a new frame arrives every few seconds.'}
+                : 'The OAK detects objects on the camera itself and measures each distance with its stereo depth.'}
           </span>
         </div>
       )}

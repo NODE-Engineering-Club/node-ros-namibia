@@ -64,12 +64,14 @@ sources:
     topic: /oak/rgb/image_raw/compressed
     type: sensor_msgs/msg/CompressedImage
     optional: true
-  # The Camera panel's "Segmented" view: the last frame SAM 2 segmented,
-  # masks and per-object distance drawn on it, from
-  # sam2_vision/sam2_depth_segmenter (OAK colour + aligned stereo depth).
-  # About one frame every 4 s on the CPU. Served on the full link only.
+  # The Camera panel's "Segmented + distance" view. Since 2026-11-12 it is the
+  # OAK's ON-CAMERA detector (sensors/oak_rgbd, YOLOv8n COCO on the camera's
+  # RVC2 chip, distance from its stereo depth, mask from the depth near that
+  # distance): ~10 fps, ~0% Jetson CPU. The SAM 2 segmenter's output
+  # (/perception/segmentation/image/compressed, seconds per frame on the CPU)
+  # can be put back here when the GPU worker runs. Full link only.
   camera_segmented:
-    topic: /perception/segmentation/image/compressed
+    topic: /oak/detections/image/compressed
     type: sensor_msgs/msg/CompressedImage
     optional: true
   # Which firmware the flight controller's heartbeat says it runs

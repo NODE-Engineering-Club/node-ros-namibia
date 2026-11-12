@@ -443,3 +443,20 @@ def test_the_reasons_are_spelled_the_same_on_both_sides():
         video_frame.REASON_DEAD, video_frame.REASON_FROZEN,
         video_frame.REASON_NOT_STARTED,
     ]
+
+
+def test_two_video_streams_do_not_starve_each_other():
+    """camera and camera_seg due on the same tick: both frames must survive.
+
+    With one shared newest-wins slot the second always replaced the first, so
+    one stream never reached the browser (2026-11-12).
+    """
+    from gui_backend.core.hub import VideoSlots
+
+    slots = VideoSlots()
+    assert not slots.put_latest("camera", b"cam-1")
+    assert not slots.put_latest("camera_seg", b"seg-1")
+    assert slots.put_latest("camera", b"cam-2")  # same stream: newest wins
+    got = {slots.get_nowait(), slots.get_nowait()}
+    assert got == {b"cam-2", b"seg-1"}
+    assert slots.empty()

@@ -29,12 +29,29 @@ Published (relative to the node's namespace; launch it in ``/oak``)
 * ``stereo/depth``              sensor_msgs/Image, 16UC1, millimetres, 0 = no
                                  measurement, on the rgb pixel grid
 
+On-camera detection (``detection_blob``, default YOLOv8n COCO for RVC2)
+--------------------------------------------------------------------
+The OAK's own chip runs the detector and measures each object's 3D position
+from its stereo depth (YoloSpatialDetectionNetwork), in the same Sync group
+as the frame, so boxes, depth and picture are one instant. The Jetson only
+draws: a mask per object from the depth pixels near that object's distance,
+its outline, and "<label> <distance>". About 0% Jetson CPU for the detector
+and ~10 fps, against seconds per frame for SAM 2 on the CPU (2026-11-12).
+
+* ``detections/image/compressed`` sensor_msgs/CompressedImage, the annotated
+                                 frame (the GUI's "Segmented + distance" view)
+* ``detections``                 std_msgs/String, JSON: per object label,
+                                 confidence, distance and x/y/z in metres,
+                                 bearing, bbox in pixels
+
 Connection is USB (the camera is plugged in over USB on the bench) unless
 ``device_ip`` is set, which selects the PoE unit at that address.
 """
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import threading
 import time
@@ -46,6 +63,7 @@ from builtin_interfaces.msg import Time
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+from std_msgs.msg import String
 
 try:
     import depthai as dai
@@ -54,6 +72,92 @@ try:
 except Exception as exc:  # noqa: BLE001
     dai = None
     _DAI_ERROR = exc
+
+
+COCO_LABELS = [
+    "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat", "traffic light",
+    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+    "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa",
+    "pottedplant", "bed", "diningtable", "toilet", "tvmonitor", "laptop", "mouse", "remote", "keyboard",
+    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush",
+]
+
+#: Mask / outline colours (BGR), one per object in a frame.
+PALETTE = [(60, 180, 255), (80, 220, 100), (255, 140, 60), (200, 90, 255), (60, 220, 230),
+           (255, 90, 160), (150, 255, 140), (90, 140, 255)]
+
+
+def depth_mask(depth_mm: np.ndarray, box: tuple[int, int, int, int], z_mm: float) -> np.ndarray | None:
+    """Pixels inside ``box`` (x0, y0, x1, y1) at about the object's distance.
+
+    The OAK measured the object at ``z_mm`` (from the centre of its box). The
+    object is the connected region of depth pixels within a tolerance of that
+    distance: 0.4 m, or 15 % of the distance, whichever is larger (stereo
+    error grows with range). Returns a full-frame bool mask, or None.
+    """
+    x0, y0, x1, y1 = box
+    if z_mm <= 0 or x1 - x0 < 4 or y1 - y0 < 4:
+        return None
+    roi = depth_mm[y0:y1, x0:x1].astype(np.float32)
+    tol = max(400.0, 0.15 * z_mm)
+    m = ((roi > 0) & (np.abs(roi - z_mm) < tol)).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    n, labels, stats, centroids = cv2.connectedComponentsWithStats(m, connectivity=8)
+    if n <= 1:
+        return None
+    # The object is the region at the centre of its box, not the largest one:
+    # on a dark, glossy object stereo depth has holes, and the largest patch
+    # at that distance was a strip of wall at the box edge (2026-11-12).
+    h, w = m.shape
+    cy, cx = h / 2.0, w / 2.0
+    areas = stats[1:, cv2.CC_STAT_AREA].astype(np.float64)
+    dist = np.hypot(centroids[1:, 0] - cx, centroids[1:, 1] - cy) / max(h, w)
+    best = 1 + int(np.argmax(areas * np.clip(1.0 - 1.5 * dist, 0.05, 1.0)))
+    obj = labels == best
+    # A believable mask: a fair share of the box, and centred in it. Anything
+    # else is shown as the box, never as a confident wrong outline.
+    ys, xs = np.nonzero(obj)
+    if obj.sum() < 0.15 * m.size or abs(xs.mean() - cx) > 0.3 * w or abs(ys.mean() - cy) > 0.3 * h:
+        return None
+    full = np.zeros(depth_mm.shape[:2], bool)
+    full[y0:y1, x0:x1] = obj
+    return full
+
+
+def annotate(bgr: np.ndarray, objects: list[dict], title: str) -> np.ndarray:
+    """Masks, outlines, boxes and "<label> <distance>" on a copy of the frame."""
+    out = bgr.copy()
+    overlay = bgr.copy()
+    for i, o in enumerate(objects):
+        if o["mask"] is not None:
+            overlay[o["mask"]] = PALETTE[i % len(PALETTE)]
+    out = cv2.addWeighted(overlay, 0.45, out, 0.55, 0)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for i, o in enumerate(objects):
+        colour = PALETTE[i % len(PALETTE)]
+        x0, y0, x1, y1 = o["box"]
+        if o["mask"] is not None:
+            contours, _ = cv2.findContours(o["mask"].astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(out, contours, -1, colour, 2, cv2.LINE_AA)
+        else:  # no usable depth: the box is all there is
+            cv2.rectangle(out, (x0, y0), (x1, y1), colour, 2, cv2.LINE_AA)
+        dist = f"{o['distance_m']:.1f} m" if o["distance_m"] is not None else "-- m"
+        text = f"{o['label']} {dist}"
+        (tw, th), base = cv2.getTextSize(text, font, 0.6, 2)
+        tx = int(np.clip(x0, 2, out.shape[1] - tw - 6))
+        ty = int(np.clip(y0 - th - base - 6, 2, out.shape[0] - th - base - 6))
+        cv2.rectangle(out, (tx - 3, ty - 3), (tx + tw + 3, ty + th + base + 1), (20, 20, 20), -1)
+        cv2.rectangle(out, (tx - 3, ty - 3), (tx + tw + 3, ty + th + base + 1), colour, 1)
+        cv2.putText(out, text, (tx, ty + th), font, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+    (tw, th), base = cv2.getTextSize(title, font, 0.5, 1)
+    cv2.rectangle(out, (0, 0), (tw + 12, th + base + 10), (20, 20, 20), -1)
+    cv2.putText(out, title, (6, th + 5), font, 0.5, (230, 230, 230), 1, cv2.LINE_AA)
+    return out
 
 
 class OakRgbdNode(Node):
@@ -74,6 +178,12 @@ class OakRgbdNode(Node):
         # bootloader) the moment its three sensors start (seen 2026-11-12).
         # 960x600 colour + depth at 10 fps fits in USB2 comfortably.
         self.declare_parameter("usb2_mode", True)
+        # On-camera detector (RVC2 .blob, YOLO with 80 COCO classes by default).
+        # Empty or missing file = colour + depth only, as before.
+        self.declare_parameter("detection_blob", "/ws/models/yolov8n_coco_640x352.blob")
+        self.declare_parameter("detection_input", [640, 352])
+        self.declare_parameter("detection_confidence", 0.4)
+        self.declare_parameter("detection_labels", COCO_LABELS)
 
         self._fps = float(self.get_parameter("fps").value)
         self._w = int(self.get_parameter("width").value)
@@ -82,16 +192,26 @@ class OakRgbdNode(Node):
         self._jpeg_q = int(self.get_parameter("jpeg_quality").value)
         self._ip = str(self.get_parameter("device_ip").value)
         self._publish_raw = bool(self.get_parameter("publish_raw").value)
+        blob = str(self.get_parameter("detection_blob").value)
+        self._blob = blob if blob and os.path.isfile(blob) else ""
+        if blob and not self._blob:
+            self.get_logger().warn(f"detection blob not found at {blob!r}: colour + depth only")
+        self._nn_size = [int(v) for v in self.get_parameter("detection_input").value]
+        self._nn_conf = float(self.get_parameter("detection_confidence").value)
+        self._labels = list(self.get_parameter("detection_labels").value)
 
         qos = QoSProfile(depth=2, reliability=ReliabilityPolicy.BEST_EFFORT)
         self._pub_rgb = self.create_publisher(Image, "rgb/image_raw", qos)
         self._pub_jpeg = self.create_publisher(CompressedImage, "rgb/image_raw/compressed", qos)
         self._pub_info = self.create_publisher(CameraInfo, "rgb/camera_info", 10)
         self._pub_depth = self.create_publisher(Image, "stereo/depth", qos)
+        self._pub_det_img = self.create_publisher(CompressedImage, "detections/image/compressed", qos)
+        self._pub_det = self.create_publisher(String, "detections", 5)
 
         self._info: CameraInfo | None = None
         self._stop = threading.Event()
         self._frames = 0
+        self._detections = 0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         self.create_timer(10.0, self._report)
@@ -137,6 +257,30 @@ class OakRgbdNode(Node):
         sync.setSyncThreshold(__import__("datetime").timedelta(milliseconds=int(500 / self._fps)))
         rgb.isp.link(sync.inputs["rgb"])
         stereo.depth.link(sync.inputs["depth"])
+
+        if self._blob:
+            # The detector's input: the same sensor's full field of view,
+            # squeezed to the network's size, so a normalised box maps straight
+            # onto the colour frame and the depth aligned to it.
+            rgb.setPreviewSize(*self._nn_size)
+            rgb.setPreviewKeepAspectRatio(False)
+            rgb.setInterleaved(False)
+            rgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+            nn = p.create(dai.node.YoloSpatialDetectionNetwork)
+            nn.setBlobPath(self._blob)
+            nn.setConfidenceThreshold(self._nn_conf)
+            nn.setNumClasses(len(self._labels))
+            nn.setCoordinateSize(4)
+            nn.setIouThreshold(0.5)
+            nn.setBoundingBoxScaleFactor(0.5)  # distance from the box's centre half
+            nn.setDepthLowerThreshold(300)
+            nn.setDepthUpperThreshold(60000)
+            nn.setNumInferenceThreads(2)
+            nn.input.setBlocking(False)
+            nn.input.setQueueSize(1)
+            rgb.preview.link(nn.input)
+            stereo.depth.link(nn.inputDepth)
+            nn.out.link(sync.inputs["det"])
         out = p.create(dai.node.XLinkOut)
         out.setStreamName("rgbd")
         sync.out.link(out.input)
@@ -222,9 +366,15 @@ class OakRgbdNode(Node):
         if depth.shape[:2] != bgr.shape[:2]:
             depth = cv2.resize(depth, (bgr.shape[1], bgr.shape[0]), interpolation=cv2.INTER_NEAREST)
 
-        if self._publish_raw:
+        # Raw colour (1.7 MB) and depth (1.1 MB) at 10 fps are ~28 MB/s of
+        # best-effort UDP (ROS shared memory does not work in this container).
+        # Unread, they only crowd out the JPEGs the GUI needs: with nobody
+        # subscribed the annotated frames never reached gui_backend
+        # (2026-11-12). Only the SAM 2 segmenter reads them.
+        if self._publish_raw and self._pub_rgb.get_subscription_count() > 0:
             self._pub_rgb.publish(self._image(bgr, "bgr8", stamp))
-        self._pub_depth.publish(self._image(depth.astype(np.uint16), "16UC1", stamp))
+        if self._pub_depth.get_subscription_count() > 0:
+            self._pub_depth.publish(self._image(depth.astype(np.uint16), "16UC1", stamp))
 
         ok, jpg = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), self._jpeg_q])
         if ok:
@@ -237,7 +387,50 @@ class OakRgbdNode(Node):
         if self._info is not None:
             self._info.header.stamp = stamp
             self._pub_info.publish(self._info)
+        if self._blob and "det" in group.getMessageNames():
+            self._publish_detections(group["det"], bgr, depth, stamp)
         self._frames += 1
+
+    def _publish_detections(self, det_msg, bgr: np.ndarray, depth: np.ndarray, stamp: Time) -> None:
+        h, w = bgr.shape[:2]
+        fx = self._info.k[0] if self._info else None
+        cx = self._info.k[2] if self._info else w / 2
+        objects = []
+        for d in det_msg.detections:
+            box = (int(max(0.0, d.xmin) * w), int(max(0.0, d.ymin) * h),
+                   int(min(1.0, d.xmax) * w), int(min(1.0, d.ymax) * h))
+            z = float(d.spatialCoordinates.z)
+            label = self._labels[d.label] if 0 <= d.label < len(self._labels) else str(d.label)
+            objects.append({
+                "label": label,
+                "confidence": round(float(d.confidence), 3),
+                "distance_m": round(z / 1000.0, 2) if z > 0 else None,
+                "xyz_m": [round(float(d.spatialCoordinates.x) / 1000.0, 2),
+                          round(float(d.spatialCoordinates.y) / 1000.0, 2), round(z / 1000.0, 2)],
+                "bearing_deg": round(math.degrees(math.atan2((box[0] + box[2]) / 2 - cx, fx)), 1) if fx else None,
+                "box": box,
+                "mask": depth_mask(depth, box, z),
+            })
+        objects.sort(key=lambda o: (o["distance_m"] is None, o["distance_m"] or 0.0))
+        img = annotate(bgr, objects, f"OAK on-camera YOLO | {len(objects)} objects")
+        ok, jpg = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), self._jpeg_q])
+        if ok:
+            c = CompressedImage()
+            c.header.stamp, c.header.frame_id = stamp, self._frame_id
+            c.format = "jpeg"
+            c.data = jpg.tobytes()
+            self._pub_det_img.publish(c)
+        self._pub_det.publish(String(data=json.dumps({
+            "stamp_utc_ms": stamp.sec * 1000 + stamp.nanosec // 1_000_000,
+            "source": "oak_on_camera_yolo",
+            "width": w,
+            "height": h,
+            "objects": [dict({k: v for k, v in o.items() if k != "mask"},
+                             bbox=[o["box"][0], o["box"][1], o["box"][2] - o["box"][0], o["box"][3] - o["box"][1]],
+                             mask_px=int(o["mask"].sum()) if o["mask"] is not None else 0)
+                        for o in objects],
+        }, separators=(",", ":"))))
+        self._detections += len(objects)
 
     def _image(self, array: np.ndarray, encoding: str, stamp: Time) -> Image:
         msg = Image()
@@ -255,7 +448,9 @@ class OakRgbdNode(Node):
         rate = (self._frames - n0) / max(1e-6, now - t0)
         self._last_report = (now, self._frames)
         if self._frames:
-            self.get_logger().info(f"publishing {rate:.1f} fps (rgb + aligned depth)")
+            extra = f", on-camera detector, {self._detections} objects in 10 s" if self._blob else ""
+            self._detections = 0
+            self.get_logger().info(f"publishing {rate:.1f} fps (rgb + aligned depth{extra})")
         else:
             self.get_logger().warn("no frames from the OAK yet")
 

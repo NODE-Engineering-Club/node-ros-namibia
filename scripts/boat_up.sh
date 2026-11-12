@@ -65,7 +65,10 @@ fi
 SEG=false
 if [ "$OAK" = true ]; then
   python3 -c "import depthai" 2>/dev/null || pip install --break-system-packages -q "depthai>=2.28,<3"
-  [ -f /ws/models/sam2.1_hiera_tiny/vision_encoder_int8.onnx ] && SEG=true
+  # Objects, masks and distances come from the OAK's own chip (oak_rgbd's
+  # detection_blob). SAM 2 on the Jetson is opt-in: SAM2=1 (worth it with the
+  # GPU worker; seconds per frame on the CPU).
+  [ "${SAM2:-0}" = 1 ] && [ -f /ws/models/sam2.1_hiera_tiny/vision_encoder_int8.onnx ] && SEG=true
 fi
 
 nohup ros2 launch bringup njord.launch.py \
@@ -75,4 +78,4 @@ nohup ros2 launch bringup njord.launch.py \
   enable_nav2:=false enable_perception:=false enable_vision:=false \
   enable_boat_bt:=false enable_mission:=false \
   ${EXTRA_ARGS:-} > /workspace/boat_data/boat_up.log 2>&1 &
-echo "launched (oak=$OAK${OAK_IP:+ at $OAK_IP}, segmentation=$SEG). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"
+echo "launched (oak=$OAK${OAK_IP:+ at $OAK_IP}, on-camera detection, sam2=$SEG). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"
