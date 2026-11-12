@@ -147,6 +147,17 @@ export function distanceM(a, b) {
   return 2 * EARTH_R * Math.asin(Math.sqrt(h));
 }
 
+/** Initial great-circle bearing from a to b, degrees 0–360 (0 = north). */
+export function bearingDeg(a, b) {
+  const rad = Math.PI / 180;
+  const p1 = a.lat * rad;
+  const p2 = b.lat * rad;
+  const dl = (b.lon - a.lon) * rad;
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+  return ((Math.atan2(y, x) / rad) + 360) % 360;
+}
+
 export function legs(waypoints) {
   return waypoints.map((w, i) => (i === 0 ? 0 : distanceM(waypoints[i - 1], w)));
 }

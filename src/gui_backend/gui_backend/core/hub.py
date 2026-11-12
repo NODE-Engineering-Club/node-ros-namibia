@@ -807,8 +807,8 @@ class Hub:
     ) -> None:
         spec = STREAMS[name]
 
-        if name == "camera":
-            self._push_camera(session, sub, now_s, now_utc)
+        if name in ("camera", "camera_seg"):
+            self._push_camera(session, sub, now_s, now_utc, name)
             return
 
         if spec.on_change_only:
@@ -853,7 +853,8 @@ class Hub:
         )
 
     def _push_camera(
-        self, session: ClientSession, sub: Subscription, now_s: float, now_utc: int
+        self, session: ClientSession, sub: Subscription, now_s: float, now_utc: int,
+        name: str = "camera",
     ) -> None:
         """Pixels, or a reason there are none.
 
@@ -870,12 +871,12 @@ class Hub:
             return
         sub.next_due_s = now_s + 1.0 / sub.resolution.rate_hz
 
-        sample = self.source.snapshot("camera", sub.resolution.detail, sub.cursor)
+        sample = self.source.snapshot(name, sub.resolution.detail, sub.cursor)
         if sample is None:
             # The source does not produce this stream at all — no camera
             # configured, or a RosSource with nothing subscribed. That is a
             # different silence again, and the ordinary machinery words it.
-            self._report_unavailable(session, "camera", sub, now_s, now_utc)
+            self._report_unavailable(session, name, sub, now_s, now_utc)
             return
 
         payload = sample.payload
@@ -891,6 +892,7 @@ class Hub:
                 size_bytes=len(image),
                 detail=sub.resolution.detail,
                 rate_hz=sub.resolution.rate_hz,
+                stream=name,
             )
             sub.sent += 1
         else:
@@ -900,6 +902,7 @@ class Hub:
                 rate_hz=sub.resolution.rate_hz,
                 last_frame_utc_ms=payload.get("last_frame_utc_ms"),
                 frames_produced=payload.get("frames_produced", 0),
+                stream=name,
             )
         session.send_video(video_frame.encode(header, image))
 

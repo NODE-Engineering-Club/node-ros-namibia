@@ -19,6 +19,7 @@ setup(
     entry_points={
         "console_scripts": [
             "camera_driver = sensors.camera_driver:main",
+            "oak_rgbd = sensors.oak_rgbd_node:main",
             "imu_gps_driver = sensors.imu_gps_driver:main",
             "datum_sync = sensors.datum_sync:main",
             "bms_reader = sensors.bms_reader:main",

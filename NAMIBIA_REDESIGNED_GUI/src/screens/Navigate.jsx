@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { LINK_LABELS, MODE_LABELS, PROFILE_LABELS } from '@asket/lib/labels.js';
 import { streamAgeMs, streamPayload } from '@asket/lib/connection.js';
 import { staleness, thresholdsForRate } from '@asket/lib/staleness.js';
@@ -14,8 +15,8 @@ import {
 } from '../components/Icons.jsx';
 import { WorkspaceHeader } from '../components/Shell.jsx';
 import { GpsSlot } from '../slots/GpsSlot.jsx';
-import { CameraSlot, CAMERA_PILL, cameraLevel } from '../slots/CameraSlot.jsx';
-import { distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } from '../lib/missionFile.js';
+import { CameraSlot, CAMERA_PILL, cameraLevel, segmentedLevel } from '../slots/CameraSlot.jsx';
+import { bearingDeg, distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } from '../lib/missionFile.js';
 import { preflightVerdict, worstAlarm } from '../lib/vessel.js';
 import { streamNotes } from '../lib/streamNotes.js';
 
@@ -287,6 +288,55 @@ function Compass({ heading, level = 'fresh' }) {
   );
 }
 
+const fmtRange = (m) => (!Number.isFinite(m) ? '—' : m < 1000 ? `${m.toFixed(1)} m` : `${(m / 1000).toFixed(3)} km`);
+
+/**
+ * Distance and bearing from the autopilot's home (vessel.home_lat/lon, from
+ * /mavros/home_position/home) and the furthest point of the track so far.
+ * Range tests read this; it is the same on the boat network and in the cloud
+ * view because the home comes from the boat, not from this browser.
+ */
+function HomeRange({ v, pos }) {
+  const { vessel } = v;
+  const home = Number.isFinite(vessel?.home_lat) && Number.isFinite(vessel?.home_lon)
+    ? { lat: vessel.home_lat, lon: vessel.home_lon } : null;
+  const here = Number.isFinite(vessel?.lat) && Number.isFinite(vessel?.lon)
+    ? { lat: vessel.lat, lon: vessel.lon } : null;
+  const track = streamPayload(v.state, 'track')?.points || [];
+  if (!home) {
+    return (
+      <div className="home-range">
+        <div className="label">From home</div>
+        <span className="muted">{vessel ? 'No home from the autopilot yet (set at its first good fix)' : 'Not received'}</span>
+      </div>
+    );
+  }
+  const d = here ? distanceM(home, here) : NaN;
+  const brg = here ? bearingDeg(home, here) : NaN;
+  let max = Number.isFinite(d) ? d : 0;
+  for (const [lon, lat] of track) max = Math.max(max, distanceM(home, { lat, lon }));
+  return (
+    <div className="home-range">
+      <div>
+        <div className="label">From home</div>
+        <div className="big"><Value {...pos}>{fmtRange(d)}</Value></div>
+      </div>
+      <div>
+        <div className="label">Bearing</div>
+        <div className="big"><Value {...pos} showAge={false}>{Number.isFinite(brg) ? `${Math.round(brg)}°` : '—'}<small>{dir(brg)}</small></Value></div>
+      </div>
+      <div>
+        <div className="label">Furthest</div>
+        <div className="big"><Value {...pos} showAge={false}>{fmtRange(max)}</Value></div>
+      </div>
+      <div>
+        <div className="label">Home</div>
+        <div className="mono">{coord(home.lat, 'N', 'S')}<br />{coord(home.lon, 'E', 'W')}</div>
+      </div>
+    </div>
+  );
+}
+
 function TelemetryPanel({ v, connection }) {
   const { vessel, heading } = v;
   // The heading stream when it carries a heading, else the vessel's; the age
@@ -323,6 +373,7 @@ function TelemetryPanel({ v, connection }) {
         </div>
         <Compass heading={hdg} level={ageLevel(hdgAge)} />
       </div>
+      <HomeRange v={v} pos={pos} />
     </GlassPanel>
   );
 }
@@ -445,7 +496,11 @@ function MissionPanel({ v, connection, active, onNavigate }) {
 }
 
 export function Navigate({ v, connection, active, onNavigate, sonarState = v.state }) {
-  const cam = cameraLevel(v.state);
+  // Live feed or the SAM 2 segmented view. The cloud cockpit has no
+  // segmented stream (it mirrors snapshots only), so it stays on live.
+  const [cameraView, setCameraView] = useState('live');
+  const view = v.isCloud ? 'live' : cameraView;
+  const cam = view === 'segmented' ? segmentedLevel(v.state) : cameraLevel(v.state);
   const verdict = preflightVerdict(v);
   const vessel = v.vessel;
   return (
@@ -489,6 +544,14 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
                   <Pill level={v.mission?.state === 'RECORDING' ? 'alarm' : 'neutral'}>
                     {v.mission?.state === 'RECORDING' ? 'REC' : 'Not recording'}
                   </Pill>
+                  {!v.isCloud && (
+                    <span className="view-toggle" role="group" aria-label="Camera view">
+                      <button type="button" className={view === 'live' ? 'on' : ''} aria-pressed={view === 'live'}
+                        onClick={() => setCameraView('live')}>Live</button>
+                      <button type="button" className={view === 'segmented' ? 'on' : ''} aria-pressed={view === 'segmented'}
+                        onClick={() => setCameraView('segmented')}>Segmented + distance</button>
+                    </span>
+                  )}
                   <span className="feed-legend">
                     <span className={cam.level === 'live' ? 'on' : ''}>LIVE</span>|
                     <span className={cam.level === 'lagged' ? 'on' : ''}>LAGGED</span>|
@@ -497,7 +560,7 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
                 </div>
               )}
             >
-              <CameraSlot v={v} />
+              <CameraSlot v={v} view={view} />
             </GlassPanel>
             <div className="row-bottom">
               <SonarGlass state={sonarState} connection={connection} />

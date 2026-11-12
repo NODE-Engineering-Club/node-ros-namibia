@@ -67,8 +67,9 @@ def _format_of(msg_format: str) -> str:
 
 
 class CompressedCamera:
-    def __init__(self, clock=time.monotonic) -> None:
+    def __init__(self, clock=time.monotonic, frozen_after_s: float = FROZEN_AFTER_S) -> None:
         self._clock = clock
+        self._frozen_after_s = frozen_after_s
         self._msg = None
         self._received = None
         self._utc_ms = None
@@ -95,7 +96,7 @@ class CompressedCamera:
                 "frames_produced": 0,
                 "last_frame_utc_ms": None,
             }
-        if self._clock() - self._received > FROZEN_AFTER_S:
+        if self._clock() - self._received > self._frozen_after_s:
             return self._utc_ms, {
                 "image": b"",
                 "reason": video_frame.REASON_FROZEN,

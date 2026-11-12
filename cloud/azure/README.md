@@ -1,8 +1,9 @@
-# Azure telemetry history and dashboard
+# Azure telemetry history and the cloud cockpit
 
-The boat writes every telemetry packet to an Azure Storage account. A static
-web page, served from the same account, shows it live and replays any stored
-hour. No server or VM, no Azure CLI. The only secret is the storage
+The boat writes every telemetry packet to an Azure Storage account. The
+cockpit (NAMIBIA_REDESIGNED_GUI's cloud build), served from the same account,
+shows it read-only. It is the same cockpit the Jetson serves on the boat
+network at http://node2026.local:8090; there is no separate dashboard. No server or VM, no Azure CLI. The only secret is the storage
 account's connection string, and it stays on the Jetson.
 
 ```
@@ -10,7 +11,7 @@ Jetson: cloud_telemetry_node ──► disk spool (/data/cloud_spool) ──► 
         (GPS, sonar 3D, camera,       survives link drops,            ASKET_02/latest.json
          SAM2, hazards, signal)       uploads the backlog later       ASKET_02/telemetry/YYYY/MM/DD/HH.jsonl
                                                                       ASKET_02/images/YYYY/MM/DD/HH/<ms>.jpg
-Browser: static website ($web/index.html) ──read-only SAS token──► the blobs above
+Browser: the cockpit on the static website ($web) ──read-only SAS token──► the blobs above
 ```
 
 ## What gets stored
@@ -49,7 +50,7 @@ transactions, about two every 2 s.
    sudo chmod 600 /srv/asket/data/secrets/azure_storage_connection_string
    ```
 
-2. **Provision and publish the dashboard** (anywhere with Python and the file
+2. **Provision and publish the cockpit** (anywhere with Python and the file
    above):
 
    ```bash
@@ -58,7 +59,8 @@ transactions, about two every 2 s.
    ```
 
    This creates the private `telemetry` container, adds a read-only CORS rule,
-   turns on the static website, uploads `web/index.html`, and prints a
+   turns on the static website, uploads the cockpit's cloud build
+   (`NAMIBIA_REDESIGNED_GUI/dist-cloud`, build it first), and prints a
    **viewer link**. The link carries a read+list token for `telemetry`, valid
    180 days. Anyone holding the link can read the telemetry, so share it
    only with the team.
@@ -78,8 +80,8 @@ ls /data/cloud_spool/telemetry/                # local copy of everything record
 ```
 
 `backlog_kb` rising while `connected` is false means the shore link is down.
-That's normal; it uploads when the link returns. The dashboard header
-shows the age of the newest packet.
+That's normal; it uploads when the link returns. The cockpit marks every
+value with its age, so a stale picture shows as stale.
 
 ## Parameters (`cloud_bridge_params.yaml`)
 
@@ -201,6 +203,6 @@ dev:cloud` and open `http://localhost:5174/#blob=…` with your viewer link.
   real storage account, in headless Chromium (screens, camera, refusal of
   Cut propulsion and Run checks, 2–3 s data age). Not yet run on the boat.
 - Tested end to end against the Azurite emulator on 2026-11-11, with fake
-  sensors, a 25 s storage outage, and the dashboard in Chromium. Not yet
+  sensors, a 25 s storage outage, and the (since removed) one-page dashboard in Chromium. Not yet
   run against the real Azure account, and the static website step can't be
   tested in Azurite.

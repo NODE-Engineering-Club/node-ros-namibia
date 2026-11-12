@@ -18,6 +18,10 @@
           "detail": "full",
           "max_rate_hz": 15.0
         },
+        "camera_seg": {
+          "detail": "full",
+          "max_rate_hz": 2.0
+        },
         "coverage": {
           "detail": "full",
           "max_rate_hz": 4.0
@@ -169,6 +173,14 @@
       "max_rate_hz": 15.0,
       "on_change_only": false,
       "typical_bytes": 45000
+    },
+    "camera_seg": {
+      "critical": false,
+      "default_rate_hz": 1.0,
+      "description": "Camera frames segmented by SAM 2, a distance on each object",
+      "max_rate_hz": 2.0,
+      "on_change_only": false,
+      "typical_bytes": 70000
     },
     "coverage": {
       "critical": false,

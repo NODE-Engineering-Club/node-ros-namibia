@@ -96,6 +96,7 @@ def frame_header(
     size_bytes: int,
     detail: str,
     rate_hz: float,
+    stream: str = "camera",
 ) -> dict:
     """The header on a frame that carries a picture.
 
@@ -107,7 +108,7 @@ def frame_header(
     """
     return {
         "type": KIND_FRAME,
-        "stream": "camera",
+        "stream": stream,
         "reason": REASON_LIVE,
         "seq": seq,
         "source_utc_ms": source_utc_ms,
@@ -128,6 +129,7 @@ def status_header(
     rate_hz: float,
     last_frame_utc_ms: int | None = None,
     frames_produced: int = 0,
+    stream: str = "camera",
 ) -> dict:
     """The header on a frame that carries no picture, and why.
 
@@ -138,7 +140,7 @@ def status_header(
     """
     return {
         "type": KIND_STATUS,
-        "stream": "camera",
+        "stream": stream,
         "reason": reason,
         "server_utc_ms": server_utc_ms,
         "rate_hz": round(rate_hz, 3),

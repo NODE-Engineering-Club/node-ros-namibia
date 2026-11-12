@@ -31,6 +31,9 @@ export const SUBSCRIPTIONS = [
   { name: 'diagnostics', rate_hz: 0.2 },
   { name: 'plan' },
   { name: 'camera', rate_hz: 5 },
+  // SAM 2 masks + distances on the camera frame (full link only; refused
+  // elsewhere). ~1 frame / 4 s on the CPU, so 1 Hz never misses one.
+  { name: 'camera_seg', rate_hz: 1 },
 ];
 
 /** Re-render on a timer so ages and "no data for N s" keep moving. */

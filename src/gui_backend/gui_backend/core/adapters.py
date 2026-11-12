@@ -333,6 +333,8 @@ def vessel_from_odometry(fix, odom_filtered, imu=None, extra=None, gps_raw=None)
         position_sigma_m=sigma_m,
         distance_travelled_m=(extra or {}).get("distance_travelled_m", 0.0),
         on_survey=(extra or {}).get("on_survey", False),
+        home_lat=(extra or {}).get("home_lat"),
+        home_lon=(extra or {}).get("home_lon"),
     )
 
 

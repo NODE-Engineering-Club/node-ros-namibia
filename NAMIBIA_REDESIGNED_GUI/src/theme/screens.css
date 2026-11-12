@@ -28,6 +28,13 @@
 .telemetry .big small { font-size: 12px; color: var(--text-2); margin-left: 4px; }
 .telemetry .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); margin: 10px 0 3px; }
 .telemetry .label:first-child { margin-top: 0; }
+/* Range from the autopilot's home, under the telemetry grid. */
+.home-range { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; padding: 10px 14px 12px; border-top: 1px solid var(--border-soft); }
+.home-range .big { font-size: 20px; font-weight: 300; }
+.home-range .big small { font-size: 12px; color: var(--text-2); margin-left: 4px; }
+.home-range .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); margin: 0 0 3px; }
+.home-range .mono { font-size: 12px; }
+@media (max-width: 720px) { .home-range { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .compass { width: 150px; height: 150px; }
 /* A heading that has stopped updating must not look like a live needle. */
 .compass.stale { opacity: 0.6; }
@@ -58,6 +65,13 @@
 .slot { position: absolute; inset: 0; }
 .camera-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .camera-slot img.stale { filter: grayscale(0.8) brightness(0.6); }
+/* The segmented frame is shown whole: its labels sit at the objects, and
+   "cover" would crop the ones near the edges. */
+.camera-slot.segmented img { object-fit: contain; background: #000; }
+.camera-controls .view-toggle { display: inline-flex; border: 1px solid var(--border-soft); border-radius: 6px; overflow: hidden; }
+.camera-controls .view-toggle button { font: inherit; font-size: 10px; padding: 3px 8px; background: transparent; color: inherit; border: 0; cursor: pointer; }
+.camera-controls .view-toggle button + button { border-left: 1px solid var(--border-soft); }
+.camera-controls .view-toggle button.on { background: var(--glass-well); font-weight: 600; }
 .camera-slot .blank { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 24px; background: var(--glass-well); }
 .camera-slot .blank strong { font-size: 14px; }
 .camera-slot .age { position: absolute; top: 10px; right: 10px; }

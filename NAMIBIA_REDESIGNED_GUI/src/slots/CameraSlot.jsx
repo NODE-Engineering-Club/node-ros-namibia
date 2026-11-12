@@ -23,11 +23,34 @@ export function cameraLevel(state) {
   return { level: 'disconnected', text: 'Disconnected', age };
 }
 
+/**
+ * The segmented view (stream "camera_seg"): the frame SAM 2 last segmented,
+ * with each object's mask and distance drawn on it by the boat. A new one
+ * every few seconds on the CPU, so its thresholds are in seconds, not frame
+ * intervals — but the rule is the same: its age is the age of the PICTURE
+ * (the camera stamp), and a result that has stopped is blanked.
+ */
+export const SEG_LIVE_MS = 15000;
+export const SEG_LAGGED_MS = 30000;
+
+export function segmentedLevel(state) {
+  if (!isFitted(state, 'camera')) return { level: 'not-fitted', text: 'Not fitted' };
+  const sub = state.subscriptions?.camera_seg;
+  if (sub && !sub.granted) return { level: 'refused', text: 'Not carried', reason: sub.reason };
+  const seg = state.cameraSeg;
+  if (!seg?.url || !seg.sourceUtcMs) return { level: 'waiting', text: 'Waiting' };
+  const age = Date.now() + (state.skewMs || 0) - seg.sourceUtcMs;
+  if (age < SEG_LIVE_MS) return { level: 'live', text: 'Segmented', age };
+  if (age < SEG_LAGGED_MS) return { level: 'lagged', text: 'Lagged', age };
+  return { level: 'disconnected', text: 'Stopped', age };
+}
+
 export const CAMERA_PILL = {
   live: 'ok', lagged: 'warn', disconnected: 'alarm', waiting: 'neutral', refused: 'neutral', 'not-fitted': 'neutral',
 };
 
-export function CameraSlot({ v }) {
+export function CameraSlot({ v, view = 'live' }) {
+  if (view === 'segmented') return <SegmentedSlot v={v} />;
   const status = cameraLevel(v.state);
   const camera = v.state.camera;
   const showFrame = camera?.url && (status.level === 'live' || status.level === 'lagged');
@@ -61,6 +84,42 @@ export function CameraSlot({ v }) {
               : status.level === 'refused'
                 ? status.reason || 'The current link profile does not carry video.'
                 : 'The live OAK feed appears here.'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SegmentedSlot({ v }) {
+  const status = segmentedLevel(v.state);
+  const seg = v.state.cameraSeg;
+  const showFrame = seg?.url && (status.level === 'live' || status.level === 'lagged');
+  return (
+    <div className="slot camera-slot segmented">
+      {showFrame ? (
+        <>
+          <img src={seg.url} alt="Camera frame segmented by SAM 2, with the distance to each object" className={status.level === 'lagged' ? 'stale' : ''} />
+          <span className={`age pill ${status.level === 'lagged' ? 'warn' : 'neutral'}`}>
+            <span className="dot" />Segmented frame, {(status.age / 1000).toFixed(1)} s old
+          </span>
+        </>
+      ) : (
+        <div className="blank">
+          <strong>
+            {{
+              'not-fitted': 'No camera fitted on this vessel',
+              refused: 'Segmentation not carried on this link',
+              waiting: 'Waiting for the first segmented frame',
+              disconnected: 'Segmentation stopped',
+            }[status.level]}
+          </strong>
+          <span className="hint">
+            {status.level === 'disconnected'
+              ? `Last result ${(status.age / 1000).toFixed(0)} s ago. Hidden so old masks are not read as the view now.`
+              : status.level === 'refused'
+                ? status.reason || 'Only the full link carries the segmented view.'
+                : 'SAM 2 masks each object and the OAK depth gives its distance. On the CPU a new frame arrives every few seconds.'}
           </span>
         </div>
       )}

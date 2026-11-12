@@ -34,6 +34,7 @@ setup(
             # design note.
             "sam2_prompt_node = sam2_vision.sam2_prompt_node:main",
             "sam2_inference_node = sam2_vision.sam2_inference_node:main",
+            "sam2_depth_segmenter = sam2_vision.sam2_depth_segmenter_node:main",
         ],
     },
 )

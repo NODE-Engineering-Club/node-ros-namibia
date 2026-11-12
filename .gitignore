@@ -37,3 +37,10 @@ src/gui_backend/gui_backend/static/
 /data/
 *.mbtiles
 *.bin.gz
+
+# Local overlay build (container cannot write root-owned build/ install/)
+build_local/
+install_local/
+boat_data/
+# ONNX weights (~200 MB): fetch/export on the Jetson, never commit
+models/sam2.1_hiera_tiny/

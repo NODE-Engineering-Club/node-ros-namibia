@@ -67,7 +67,8 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
   const showSurvey = simulated;
   const showObstacles = simulated || isFitted(state, 'lidar');
   const legend = LEGEND.filter(
-    (item) => (showSurvey || !item.survey) && (showObstacles || !item.obstacle),
+    (item) => (showSurvey || !item.survey) && (showObstacles || !item.obstacle)
+      && (!item.home || Number.isFinite(vessel?.home_lat)),
   );
 
   // -- tile availability ------------------------------------------------
@@ -247,6 +248,22 @@ export function MissionMap({ state, connection, follow, onFollowChange, showRawL
         ]
       : [];
     setData(instance, 'vessel', { type: 'FeatureCollection', features: vesselFeatures });
+
+    // The autopilot's home and a dashed line out to the boat: the range at a
+    // glance. Only when the boat reports a home; never a guessed one.
+    const hasHome = Number.isFinite(vessel?.home_lat) && Number.isFinite(vessel?.home_lon);
+    const homePt = hasHome ? [vessel.home_lon, vessel.home_lat] : null;
+    setData(instance, 'home', {
+      type: 'FeatureCollection',
+      features: hasHome
+        ? [
+            { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: homePt } },
+            ...(vessel?.lat
+              ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [homePt, [vessel.lon, vessel.lat]] } }]
+              : []),
+          ]
+        : [],
+    });
 
     if (follow && vessel?.lat) {
       instance.easeTo({ center: [vessel.lon, vessel.lat], duration: 400 });
@@ -560,6 +577,7 @@ const COLOURS = {
   track: '#000000',
   lidar: '#d34500',
   graticule: '#aeaeae',
+  home: '#6a1b9a',
 };
 
 const LEGEND = [
@@ -567,11 +585,12 @@ const LEGEND = [
   { label: 'Planned line', color: COLOURS.plan, survey: true },
   { label: 'Track', color: COLOURS.track },
   { label: 'Geofence', color: COLOURS.geofence },
+  { label: 'Home', color: COLOURS.home, home: true },
   { label: 'Obstacle', color: COLOURS.lidar, fill: true, obstacle: true },
 ];
 
 function addLayers(map, withGraticule) {
-  for (const id of ['graticule', 'geofence', 'plan', 'coverage', 'track', 'lidar', 'vessel']) {
+  for (const id of ['graticule', 'geofence', 'plan', 'coverage', 'track', 'home', 'lidar', 'vessel']) {
     map.addSource(id, { type: 'geojson', data: empty() });
   }
 
@@ -626,6 +645,26 @@ function addLayers(map, withGraticule) {
     // Where the boat actually went, in black: it must read over coverage,
     // over the plan, and over the graticule, at any zoom.
     paint: { 'line-color': COLOURS.track, 'line-width': 1.6 },
+  });
+
+  map.addLayer({
+    id: 'home-line',
+    type: 'line',
+    source: 'home',
+    filter: ['==', ['geometry-type'], 'LineString'],
+    paint: { 'line-color': COLOURS.home, 'line-width': 1.5, 'line-dasharray': [2, 2] },
+  });
+  map.addLayer({
+    id: 'home',
+    type: 'circle',
+    source: 'home',
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': 7,
+      'circle-color': '#ffffff',
+      'circle-stroke-width': 3,
+      'circle-stroke-color': COLOURS.home,
+    },
   });
 
   map.addLayer({

@@ -84,6 +84,10 @@ def vessel_payload(sample, detail: str = DETAIL_FULL) -> dict:
             # "RTK fixed", "RTK float", "GPS", "no position": the one GNSS
             # word an operator needs, so it travels on the reduced link too.
             "fix_quality": _fix_quality(sample),
+            # The autopilot's home, for distance/bearing on the Navigate
+            # screen. None when no home is set; never a stand-in point.
+            "home_lat": _f(getattr(sample, "home_lat", None), 7),
+            "home_lon": _f(getattr(sample, "home_lon", None), 7),
         }
     )
     if detail == DETAIL_REDUCED:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Set up the ASKET telemetry storage account and publish the dashboard.
+"""Set up the ASKET telemetry storage account and publish the cloud cockpit.
 
 Needs only the storage account's connection string; no Azure CLI or portal
 login. Safe to run again: every step checks before it changes anything.
@@ -8,12 +8,12 @@ What it does, in order:
 
 1. Creates the private ``telemetry`` container (no public access).
 2. Adds one CORS rule to the Blob service (GET/HEAD/OPTIONS from any origin)
-   so the dashboard in a browser can read blobs. Existing rules are kept.
+   so the cockpit in a browser can read blobs. Existing rules are kept.
    CORS only lets a browser *ask*; every read still needs the SAS token.
 3. Turns on the account's static website and publishes the cockpit
    (NAMIBIA_REDESIGNED_GUI's cloud build, ``npm run build:cloud``) to the
-   ``$web`` container. ``--simple-dashboard`` publishes ``web/index.html``
-   (the one-page dashboard) instead.
+   ``$web`` container. It is the same cockpit the Jetson serves on the boat
+   network (http://node2026.local:8090); there is no other web page.
 4. Creates a read + list SAS token for the ``telemetry`` container only,
    valid for ``--sas-days``. It cannot write, delete, or see other containers.
 5. Prints the viewer link. The token is in the link's ``#fragment``, which
@@ -101,19 +101,17 @@ def ensure_cors(svc: BlobServiceClient) -> None:
 COCKPIT_DIST = HERE.parent.parent / "NAMIBIA_REDESIGNED_GUI" / "dist-cloud"
 
 
-def _site_files(simple: bool) -> tuple[str, list[tuple[str, Path]]]:
-    if not simple:
-        if not (COCKPIT_DIST / "index.html").is_file():
-            sys.exit(f"[3] no cockpit build at {COCKPIT_DIST}. Run: cd NAMIBIA_REDESIGNED_GUI && "
-                     "npm ci && npm run build:cloud   (or pass --simple-dashboard)")
-        files = [(p.relative_to(COCKPIT_DIST).as_posix(), p) for p in sorted(COCKPIT_DIST.rglob("*")) if p.is_file()]
-        return "cockpit (NAMIBIA_REDESIGNED_GUI cloud build)", files
-    return "simple dashboard", [("index.html", HERE / "web" / "index.html")]
+def _site_files() -> tuple[str, list[tuple[str, Path]]]:
+    if not (COCKPIT_DIST / "index.html").is_file():
+        sys.exit(f"[3] no cockpit build at {COCKPIT_DIST}. Run: cd NAMIBIA_REDESIGNED_GUI && "
+                 "npm ci && npm run build:cloud")
+    files = [(p.relative_to(COCKPIT_DIST).as_posix(), p) for p in sorted(COCKPIT_DIST.rglob("*")) if p.is_file()]
+    return "cockpit (NAMIBIA_REDESIGNED_GUI cloud build)", files
 
 
-def ensure_website(svc: BlobServiceClient, marker: str, simple: bool = False) -> bool:
+def ensure_website(svc: BlobServiceClient, marker: str) -> bool:
     import mimetypes
-    label, files = _site_files(simple)
+    label, files = _site_files()
     try:
         svc.set_service_properties(static_website=StaticWebsite(enabled=True, index_document="index.html"))
     except HttpResponseError as exc:
@@ -173,8 +171,6 @@ def main() -> None:
     ap.add_argument("--asv-id", default="ASKET_02")
     ap.add_argument("--sas-days", type=int, default=180)
     ap.add_argument("--skip-website", action="store_true", help="only container, CORS and token")
-    ap.add_argument("--simple-dashboard", action="store_true",
-                    help="publish the one-page dashboard (web/index.html) instead of the cockpit")
     ap.add_argument("--cockpit-url", default="",
                     help="where NAMIBIA_REDESIGNED_GUI's cloud build is hosted (e.g. https://asket.vercel.app)")
     ap.add_argument("--print-sas-only", action="store_true",
@@ -193,7 +189,7 @@ def main() -> None:
         ensure_cors(svc)
         if not args.skip_website:
             marker = secrets.token_hex(8)
-            if ensure_website(svc, marker, simple=args.simple_dashboard):
+            if ensure_website(svc, marker):
                 web_url = find_web_endpoint(account, marker)
                 if not web_url:
                     print("    could not find the website address automatically; it is in the portal "

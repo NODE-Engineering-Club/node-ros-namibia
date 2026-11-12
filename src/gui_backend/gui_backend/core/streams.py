@@ -143,6 +143,16 @@ STREAMS: dict[str, StreamSpec] = {
             "camera", "Forward camera, with its age on every frame",
             default_rate_hz=5.0, max_rate_hz=15.0, typical_bytes=45_000,
         ),
+        StreamSpec(
+            # The frame SAM 2 last segmented, each object's mask and distance
+            # drawn on it (sam2_vision/sam2_depth_segmenter). Same binary
+            # format as "camera" and stamped with the camera frame's capture
+            # time, so its age is the picture's age. On the CPU a new one
+            # arrives every ~4 s; the ceiling allows for the GPU path. Full
+            # link only: it is absent from the reduced and minimal profiles.
+            "camera_seg", "Camera frames segmented by SAM 2, a distance on each object",
+            default_rate_hz=1.0, max_rate_hz=2.0, typical_bytes=70_000,
+        ),
     ]
 }
 

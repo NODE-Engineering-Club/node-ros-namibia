@@ -47,6 +47,14 @@ sources:
     topic: /mavros/gpsstatus/gps1/raw
     type: mavros_msgs/msg/GPSRAW
     optional: true
+  # ArduPilot's home (set at the first good fix, and again on arming). The
+  # Navigate screen shows distance and bearing from it, for range tests and for
+  # "how far out is she". Absent until the autopilot has a home: the GUI says
+  # "no home" rather than measuring from somewhere made up.
+  home:
+    topic: /mavros/home_position/home
+    type: mavros_msgs/msg/HomePosition
+    optional: true
   # The Camera panel: a compressed (JPEG) image, sent to the browser as it
   # comes on the full link profile and scaled down on the reduced one. For the
   # OAK-D-LR through depthai_ros_driver (njord.launch.py enable_oak:=true)
@@ -54,6 +62,14 @@ sources:
   # name with `ros2 topic list` on the boat. Read only when camera_fitted.
   camera_image:
     topic: /oak/rgb/image_raw/compressed
+    type: sensor_msgs/msg/CompressedImage
+    optional: true
+  # The Camera panel's "Segmented" view: the last frame SAM 2 segmented,
+  # masks and per-object distance drawn on it, from
+  # sam2_vision/sam2_depth_segmenter (OAK colour + aligned stereo depth).
+  # About one frame every 4 s on the CPU. Served on the full link only.
+  camera_segmented:
+    topic: /perception/segmentation/image/compressed
     type: sensor_msgs/msg/CompressedImage
     optional: true
   # Which firmware the flight controller's heartbeat says it runs

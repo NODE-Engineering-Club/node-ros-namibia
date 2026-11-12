@@ -232,6 +232,9 @@ class RosSource:
         self._radio, self._station_origin = _radio_from_config(config)
         self._radio_profile = None
         self._camera = CompressedCamera()
+        # SAM 2 on the CPU produces a segmented frame every ~4 s, so "frozen"
+        # means several missed results, not several missed camera frames.
+        self._camera_seg = CompressedCamera(frozen_after_s=20.0)
 
         self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
         self._link = adapters.link_from_measurements("wifi", 1.0, 0.0, 800_000.0)
@@ -287,13 +290,15 @@ class RosSource:
             )
 
     def _make_callback(self, name: str):
-        if name == "camera_image":
+        if name in ("camera_image", "camera_segmented"):
+            target = self._camera if name == "camera_image" else self._camera_seg
+
             def on_frame(msg) -> None:
                 self.latest[name] = LatestMessage(msg, time.monotonic())
                 # Stamped with the driver's capture time when it sets one, so
                 # a frame that queued shows its true age.
                 stamp = adapters._stamp_to_utc_ms(msg.header)
-                self._camera.on_message(msg, stamp or self.now_utc_ms())
+                target.on_message(msg, stamp or self.now_utc_ms())
 
             return on_frame
 
@@ -352,6 +357,11 @@ class RosSource:
         if self.latest.get("gps_raw", LatestMessage()).age_s > 5.0:
             gps_raw = None
 
+        home = self._msg("home")
+        geo = getattr(home, "geo", None)
+        home_ok = geo is not None and math.isfinite(geo.latitude) and math.isfinite(geo.longitude) \
+            and not (geo.latitude == 0.0 and geo.longitude == 0.0)
+
         return adapters.vessel_from_odometry(
             fix,
             odom,
@@ -361,6 +371,8 @@ class RosSource:
                 "heading_source": SOURCE_EKF if heading_valid else SOURCE_NONE,
                 "heading_valid": heading_valid,
                 "distance_travelled_m": self._track_distance_m(),
+                "home_lat": geo.latitude if home_ok else None,
+                "home_lon": geo.longitude if home_ok else None,
             },
         )
 
@@ -525,6 +537,15 @@ class RosSource:
             if not self.describe()["fitted"].get("camera"):
                 return None
             utc, payload = self._camera.payload(detail)
+            return Sample(stream, utc or self.now_utc_ms(), payload)
+
+        if stream == "camera_seg":
+            # Only when the camera is fitted and a segmenter topic is
+            # configured; otherwise the stream does not exist here.
+            if not self.describe()["fitted"].get("camera") or \
+                    "camera_segmented" not in (self.config.get("sources") or {}):
+                return None
+            utc, payload = self._camera_seg.payload(detail)
             return Sample(stream, utc or self.now_utc_ms(), payload)
 
         if stream == "link":

@@ -42,6 +42,15 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument(
+            "gui_static_dir",
+            default_value=static_dir,
+            description=(
+                "The built cockpit to serve. Default: src/asket_gui's build "
+                "installed with this package. For the redesigned cockpit pass "
+                "<workspace>/NAMIBIA_REDESIGNED_GUI/dist."
+            ),
+        ),
+        DeclareLaunchArgument(
             "gui_host",
             default_value="0.0.0.0",
             description=(
@@ -168,7 +177,7 @@ def generate_launch_description():
                     "tiles_path": LaunchConfiguration("tiles_path"),
                     "tile_cache_path": LaunchConfiguration("tile_cache_path"),
                     "online_tiles": LaunchConfiguration("online_tiles"),
-                    "static_dir": static_dir,
+                    "static_dir": LaunchConfiguration("gui_static_dir"),
                     "lidar_fitted": LaunchConfiguration("lidar_fitted"),
                     "camera_fitted": LaunchConfiguration("camera_fitted"),
                     "geofence_file": LaunchConfiguration("geofence_file"),

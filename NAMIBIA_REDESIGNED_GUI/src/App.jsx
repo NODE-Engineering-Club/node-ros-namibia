@@ -177,7 +177,8 @@ export function App({ connection }) {
   const lidarFitted = isFitted(v.state, 'lidar');
   const cameraFitted = isFitted(v.state, 'camera');
   useEffect(() => {
-    const absent = [!lidarFitted && 'lidar', !cameraFitted && 'camera'].filter(Boolean);
+    const absent = [!lidarFitted && 'lidar', !cameraFitted && 'camera', !cameraFitted && 'camera_seg']
+      .filter(Boolean);
     connection.subscribe(SUBSCRIPTIONS.filter((s) => !absent.includes(s.name)));
     if (absent.length) connection.unsubscribe(absent);
   }, [connection, lidarFitted, cameraFitted]);

@@ -54,7 +54,7 @@ omniscan_bridge:
     # PROVISIONAL (Q1): depth profile in Namibia unknown. Adjustable at runtime
     # from the GUI via ~/set_ping_parameters — the range is meant to be tuned
     # on site, not fixed at launch.
-    range_m: 30.0
+    range_m: 100.0
     # -1 is auto gain, which is Cerulean's recommendation. 0..10 is manual.
     gain_index: -1
     ping_rate_hz: 5.0

@@ -47,6 +47,9 @@ export function initialState() {
     // blob URL rather than a JSON value, and because its age has to survive
     // the frames stopping.
     camera: null,
+    // The SAM 2 segmented view ("camera_seg"): same frame format, same
+    // fields, its own slot so the live feed and it never overwrite each other.
+    cameraSeg: null,
     alarms: [],
     commands: {},
     skewMs: 0,
@@ -429,13 +432,15 @@ export class Connection {
       return;
     }
 
-    const previous = this.state.camera;
+    // Which picture this is: the live feed, or the segmented one.
+    const key = header.stream === 'camera_seg' ? 'cameraSeg' : 'camera';
+    const previous = this.state[key];
     const now = Date.now();
 
     if (header.type === 'camera_frame' && image.length > 0) {
       if (previous?.url) URL.revokeObjectURL(previous.url);
       this.#set({
-        camera: {
+        [key]: {
           url: URL.createObjectURL(
             new Blob([image], { type: `image/${header.format}` }),
           ),
@@ -469,7 +474,7 @@ export class Connection {
     // arriving the link is up and the camera is the problem; when they stop,
     // the link is. One timestamp could not tell those apart.
     this.#set({
-      camera: {
+      [key]: {
         ...(previous ?? { url: null, seq: null, sourceUtcMs: null }),
         reason: header.reason,
         rateHz: header.rate_hz,
