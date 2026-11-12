@@ -104,6 +104,7 @@ RUN wget -q https://raw.githubusercontent.com/mavlink/mavros/ros2/mavros/scripts
 RUN pip install --break-system-packages --no-cache-dir \
      "numpy<2" \
      onnxruntime \
+     "depthai>=2.28,<3" \
      opencv-python \
      transforms3d \
      simple-pid \

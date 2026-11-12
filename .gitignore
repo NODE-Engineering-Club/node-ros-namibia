@@ -44,3 +44,5 @@ install_local/
 boat_data/
 # ONNX weights (~200 MB): fetch/export on the Jetson, never commit
 models/sam2.1_hiera_tiny/
+# DepthAI crash dumps etc. (the container HOME is the workspace)
+.cache/

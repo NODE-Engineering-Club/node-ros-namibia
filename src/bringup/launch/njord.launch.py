@@ -100,6 +100,23 @@ def generate_launch_description():
         DeclareLaunchArgument("enable_oak",           default_value="false",
                               description="Start depthai_ros_driver for the OAK-D-LR (config/oak.yaml). "
                                           "The package must be installed; it is not in the image yet."),
+        # The OAK-D-LR through this repo's own DepthAI v2 node (sensors/oak_rgbd):
+        # colour + depth aligned pixel-for-pixel, plus the JPEG topic the GUI's
+        # Camera panel reads (/oak/rgb/image_raw/compressed). USB unless
+        # oak_device_ip is set (PoE). Needs `pip install "depthai<3"` and, on a
+        # USB host, the Luxonis udev rule (docs/CAMERA_OAK.md).
+        DeclareLaunchArgument("enable_oak_rgbd",      default_value="false",
+                              description="Start sensors/oak_rgbd for the OAK-D-LR (USB, or PoE with oak_device_ip)."),
+        DeclareLaunchArgument("oak_device_ip",        default_value="",
+                              description="PoE OAK address; empty = the first USB OAK."),
+        # SAM 2 (ONNX, CPU) masks on the OAK frame with the depth under each mask:
+        # the Camera panel's "Segmented + distance" view
+        # (/perception/segmentation/image/compressed). Needs enable_oak_rgbd (or
+        # any driver publishing /oak/rgb/image_raw, /oak/stereo/depth,
+        # /oak/rgb/camera_info) and the weights in models/sam2.1_hiera_tiny.
+        DeclareLaunchArgument("enable_segmentation",  default_value="false",
+                              description="Start sam2_vision/sam2_depth_segmenter on the OAK frames."),
+        DeclareLaunchArgument("sam2_model_dir",       default_value="/ws/models/sam2.1_hiera_tiny"),
         DeclareLaunchArgument("use_sim",         default_value="false"),
         DeclareLaunchArgument(
             "headless",
@@ -445,6 +462,30 @@ def generate_launch_description():
                 "'", LaunchConfiguration("enable_oak"), "' == 'true' and '",
                 LaunchConfiguration("use_sim"), "' != 'true'"
             ])),
+        ),
+        Node(
+            package="sensors",
+            executable="oak_rgbd",
+            name="oak_rgbd",
+            namespace="oak",
+            output="screen",
+            respawn=True,
+            respawn_delay=1.0,
+            parameters=[{"device_ip": LaunchConfiguration("oak_device_ip")}],
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("enable_oak_rgbd"), "' == 'true' and '",
+                LaunchConfiguration("use_sim"), "' != 'true'"
+            ])),
+        ),
+        Node(
+            package="sam2_vision",
+            executable="sam2_depth_segmenter",
+            name="sam2_depth_segmenter",
+            output="screen",
+            respawn=True,
+            respawn_delay=5.0,
+            parameters=[{"model_dir": LaunchConfiguration("sam2_model_dir")}],
+            condition=IfCondition(LaunchConfiguration("enable_segmentation")),
         ),
         # RPLIDAR S2M1-R2L via Slamtec's official driver (vendored as the
         # src/sllidar_ros2 submodule). The A-series custom driver that used to
@@ -938,8 +979,9 @@ def generate_launch_description():
                 # images only, so it fills the panel only once a compressed
                 # republisher is added.
                 "camera_fitted": PythonExpression([
-                    "'true' if '", LaunchConfiguration("enable_oak"), "' == 'true' or '",
-                    LaunchConfiguration("enable_usb_camera"), "' == 'true' else 'false'",
+                    "'true' if 'true' in ('", LaunchConfiguration("enable_oak"), "', '",
+                    LaunchConfiguration("enable_oak_rgbd"), "', '",
+                    LaunchConfiguration("enable_usb_camera"), "') else 'false'",
                 ]),
                 "geofence_file": LaunchConfiguration("geofence_file"),
                 "autopilot": LaunchConfiguration("autopilot"),

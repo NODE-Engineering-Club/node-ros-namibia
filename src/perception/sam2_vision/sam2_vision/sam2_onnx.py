@@ -127,16 +127,14 @@ def label_anchor(mask: np.ndarray) -> tuple[int, int]:
 
 class Sam2Onnx:
     def __init__(self, model_dir: str, encoder: str = "vision_encoder.onnx",
-                 decoder: str = "prompt_encoder_mask_decoder.onnx", threads: int = 6) -> None:
-        import onnxruntime as ort
+                 decoder: str = "prompt_encoder_mask_decoder.onnx", threads: int = 6,
+                 gpu_server: str = "", gpu_encoder: str = "vision_encoder.onnx", log=print) -> None:
+        # Sessions are HybridSession (remote_ort.py): the Jetson's GPU through
+        # the GPU container when `gpu_server` answers, the CPU otherwise. The
+        # local CPU sessions use an explicit thread count: ORT's default pins
+        # threads to cores, and that fails inside a container's cpuset.
+        from sam2_vision.remote_ort import HybridSession
 
-        so = ort.SessionOptions()
-        # Explicit thread count: ORT's default pins threads to cores, and the
-        # affinity call fails inside containers with a restricted cpuset.
-        so.intra_op_num_threads = int(threads)
-        so.inter_op_num_threads = 1
-        so.log_severity_level = 3
-        prov = ["CPUExecutionProvider"]
         enc_path = os.path.join(model_dir, encoder)
         dec_path = os.path.join(model_dir, decoder)
         for p in (enc_path, dec_path):
@@ -145,10 +143,19 @@ class Sam2Onnx:
                     f"SAM 2 ONNX file missing: {p}. Run src/perception/sam2_vision/"
                     "scripts/fetch_sam2_onnx.sh"
                 )
-        self.encoder = ort.InferenceSession(enc_path, so, providers=prov)
-        self.decoder = ort.InferenceSession(dec_path, so, providers=prov)
-        variant = encoder.replace("vision_encoder", "").replace(".onnx", "").strip("_") or "fp32"
-        self.name = f"SAM2.1-tiny {variant} (CPU)"
+        gpu_enc = os.path.join(model_dir, gpu_encoder)
+        if not os.path.isfile(gpu_enc):
+            gpu_enc = enc_path
+        self.encoder = HybridSession(enc_path, gpu_enc, threads, gpu_server, log)
+        self.decoder = HybridSession(dec_path, dec_path, threads, gpu_server, log)
+        self._variant = encoder.replace("vision_encoder", "").replace(".onnx", "").strip("_") or "fp32"
+
+    @property
+    def name(self) -> str:
+        """Model and where it is running now (it can change: GPU lost or back)."""
+        if self.encoder.backend == "GPU":
+            return "SAM2.1-tiny fp32 (GPU)"
+        return f"SAM2.1-tiny {self._variant} (CPU)"
 
     def encode(self, bgr: np.ndarray) -> list[np.ndarray]:
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
@@ -207,6 +214,9 @@ class SegmenterConfig:
     nms_iou: float = 0.5
     nms_contain: float = 0.8
     max_objects: int = 12
+    #: Point-grid prompts ("segment everything"). Off = only detector boxes
+    #: (every mask labelled, and a much shorter decode).
+    grid_prompts: bool = True
 
 
 def segment_frame(sam: Sam2Onnx, bgr: np.ndarray, depth_mm: np.ndarray | None,
@@ -219,10 +229,11 @@ def segment_frame(sam: Sam2Onnx, bgr: np.ndarray, depth_mm: np.ndarray | None,
     t1 = time.monotonic()
 
     candidates: list[Segment] = []
-    pts = grid_points(w, h, cfg.grid_x, cfg.grid_y)
-    masks, ious, objs = sam.decode(emb, w, h, points=pts)
-    for m, iou, obj in zip(masks, ious, objs):
-        candidates.append(Segment(mask=m, score=iou, prompt="grid", extra={"obj": obj}))
+    if cfg.grid_prompts or not boxes:
+        pts = grid_points(w, h, cfg.grid_x, cfg.grid_y)
+        masks, ious, objs = sam.decode(emb, w, h, points=pts)
+        for m, iou, obj in zip(masks, ious, objs):
+            candidates.append(Segment(mask=m, score=iou, prompt="grid", extra={"obj": obj}))
     if boxes:
         arr = np.array([b[:4] for b in boxes], np.float32)
         bm, bi, bo = sam.decode(emb, w, h, boxes=arr)
@@ -267,7 +278,9 @@ def annotate(bgr: np.ndarray, segments: list[Segment], title: str) -> np.ndarray
         contours, _ = cv2.findContours(s.mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(out, contours, -1, colour, 2, cv2.LINE_AA)
         dist = f"{s.distance_m:.1f} m" if s.distance_m is not None else "-- m"
-        text = f"{s.label} {dist}" if s.label else dist
+        # Every mask says what it is: the detector's class, or "object" for a
+        # shape SAM 2 found that no detector recognised.
+        text = f"{s.label or 'object'} {dist}"
         x, y = label_anchor(s.mask)
         (tw, th), base = cv2.getTextSize(text, font, 0.6, 2)
         x0 = int(np.clip(x - tw // 2, 2, out.shape[1] - tw - 6))

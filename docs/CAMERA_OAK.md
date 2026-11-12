@@ -58,3 +58,48 @@ recognises on the picture:
 
 Until then the panel shows the picture alone, and the operator is the
 classifier.
+
+## OAK-D-LR on USB with this repo's own node (current bench/boat setup)
+
+`njord.launch.py enable_oak_rgbd:=true` starts `sensors/oak_rgbd` (DepthAI v2,
+`pip install "depthai>=2.28,<3"`, now in the Containerfile) in the `/oak`
+namespace. It publishes the JPEG the Camera panel shows. `enable_segmentation:=true`
+adds `sam2_vision/sam2_depth_segmenter`, which fills the panel's
+"Segmented + distance" view (weights in `models/sam2.1_hiera_tiny`, not in git).
+`scripts/boat_up.sh` turns both on by itself when an OAK is on USB.
+
+`sam2_vision` sits inside the `perception` package folder, so colcon does not
+find it on its own: build it with `--base-paths src/perception/sam2_vision`.
+
+A USB OAK needs the Luxonis udev rule on the **host** (once), or DepthAI
+reports `X_LINK_INSUFFICIENT_PERMISSIONS`:
+
+```bash
+echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="03e7", MODE="0666"' | sudo tee /etc/udev/rules.d/80-movidius.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Then unplug and replug the camera.
+
+### Over PoE (current setup, 2026-11-12)
+
+The OAK is on a PoE injector wired straight to the Jetson's `eth0`. With no DHCP
+server on that cable the camera falls back to **169.254.1.222**. The Jetson's
+wired connection carries `169.254.1.10/16` (and `10.10.20.10/24`, the boat plan)
+next to `192.168.88.10/24`:
+
+```bash
+nmcli con mod "Wired connection 1" +ipv4.addresses 10.10.20.10/24 +ipv4.addresses 169.254.1.10/16
+nmcli device reapply eth0
+```
+
+`scripts/boat_up.sh` finds the camera with DepthAI's network discovery and passes
+`oak_device_ip` to `oak_rgbd`. Measured: 10 fps colour + depth.
+
+### GPU for SAM 2 / YOLO
+
+The host is JetPack 5.1.2; the ROS container (Jazzy, Python 3.12) has no GPU
+ONNX Runtime. `scripts/boat.sh` (run on the host) starts a second, rootful
+container from `dustynv/onnxruntime:r35.4.1` that serves the models on
+`127.0.0.1:7090` (`sam2_vision/remote_ort.py`). The segmenter uses it when it
+answers and its own CPU sessions when it does not (`gpu_server` parameter).

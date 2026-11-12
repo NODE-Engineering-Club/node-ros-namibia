@@ -35,6 +35,7 @@ Connection is USB (the camera is plugged in over USB on the bench) unless
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 
@@ -68,6 +69,11 @@ class OakRgbdNode(Node):
         self.declare_parameter("jpeg_quality", 80)
         self.declare_parameter("device_ip", "")
         self.declare_parameter("publish_raw", True)
+        # USB2 (480 Mb/s) instead of USB3. Bus-powered through a hub, the LR
+        # boots at USB3, then drops off the bus ("USB disconnect", back to its
+        # bootloader) the moment its three sensors start (seen 2026-11-12).
+        # 960x600 colour + depth at 10 fps fits in USB2 comfortably.
+        self.declare_parameter("usb2_mode", True)
 
         self._fps = float(self.get_parameter("fps").value)
         self._w = int(self.get_parameter("width").value)
@@ -139,7 +145,31 @@ class OakRgbdNode(Node):
     def _open_device(self, pipeline):
         if self._ip:
             return dai.Device(pipeline, dai.DeviceInfo(self._ip))
-        return dai.Device(pipeline)
+        # Give the host 30 s (not the default ~8 s) to connect after the camera
+        # boots, so the restart below has time to reach it.
+        board = dai.BoardConfig()
+        board.watchdogInitialDelayMs = 30000
+        pipeline.setBoardConfig(board)
+        # Already booted (by the previous run of this node): connect straight to it.
+        booted = [d for d in dai.XLinkConnection.getAllConnectedDevices(dai.XLinkDeviceState.X_LINK_ANY_STATE)
+                  if d.state == dai.XLinkDeviceState.X_LINK_BOOTED]
+        if booted:
+            return dai.Device(pipeline, booted[0])
+        speed = dai.UsbSpeed.HIGH if self.get_parameter("usb2_mode").value else dai.UsbSpeed.SUPER
+        try:
+            return dai.Device(pipeline, maxUsbSpeed=speed)
+        except RuntimeError as exc:
+            if "after booting" not in str(exc):
+                raise
+            # The camera booted and came back on USB as a NEW device, but this
+            # process never sees it: in a rootless container libusb gets no
+            # hotplug events, so its device list is frozen at start-up (seen
+            # 2026-11-12). A fresh process does see it. Exit and let the launch
+            # respawn us; the next run takes the "already booted" branch.
+            self.get_logger().warn(
+                "OAK booted but this process cannot see it re-enumerate (rootless container); "
+                "restarting to connect")
+            os._exit(3)
 
     def _camera_info(self, device) -> CameraInfo:
         cal = device.readCalibration()

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Bring the boat stack up for operation with or without internet.
 #
+#   (normally via scripts/boat.sh on the host, which also starts the GPU server)
 #   podman start namibia-gps-check
 #   podman exec namibia-gps-check bash /workspace/scripts/boat_up.sh      # (re)start
 #   podman exec namibia-gps-check bash /workspace/scripts/boat_up.sh stop
@@ -13,9 +14,20 @@
 #
 # Env overrides: FCU_URL (default /dev/ttyACM1:57600), EXTRA_ARGS (more launch args).
 # (no set -u: ROS setup scripts read unset variables)
-pkill -9 -f "ros2 launch bringup njord.launch.py" 2>/dev/null
-pkill -9 -f "/workspace/install" 2>/dev/null; pkill -9 -f "/workspace/install_local" 2>/dev/null
-pkill -9 -f gui_backend_node 2>/dev/null; pkill -9 -f mavros_node 2>/dev/null
+# Stop EVERYTHING ROS in this container, not just the launch process: killing
+# `ros2 launch` alone leaves its nodes running (seen 2026-11-12: seven copies of
+# every node after a few restarts, load average 265). Nodes run from
+# /ws/install*, /workspace/install* or /opt/ros. This script itself does not match.
+stop_all() {
+  for pat in "ros2 launch" "/ws/install" "/workspace/install" "/opt/ros/jazzy/lib" "gui_backend_node" "mavros_node"; do
+    pkill -9 -f "$pat" 2>/dev/null
+  done
+  for _ in $(seq 10); do
+    pgrep -f "/ws/install|/opt/ros/jazzy/lib|ros2 launch" >/dev/null || break
+    sleep 1
+  done
+}
+stop_all
 [ "${1:-}" = stop ] && { echo stopped; exit 0; }
 sleep 1
 
@@ -32,13 +44,35 @@ source /opt/ros/jazzy/setup.bash
 source /ws/install/setup.bash
 source /ws/install_local/setup.bash   # sensors, gui_backend, cloud_bridge, ... rebuilt here
 
-OAK=false; lsusb 2>/dev/null | grep -qi "03e7:" && OAK=true
+# OAK-D-LR on USB -> camera (sensors/oak_rgbd) + SAM 2 segmented view.
+# Up to 15 s: right after a stop the camera resets and is briefly off the bus.
+OAK=false
+for _ in $(seq 15); do
+  grep -qx 03e7 /sys/bus/usb/devices/*/idVendor 2>/dev/null && { OAK=true; break; }
+  sleep 1
+done
+# Or over PoE: OAK_IP if given, else ask DepthAI to find one on the network
+# (with no DHCP on the camera's cable it sits at its fallback 169.254.1.222;
+# the Jetson's eth0 has 169.254.1.10/16 and 10.10.20.10/24 for that).
+OAK_IP="${OAK_IP:-}"
+if [ "$OAK" = false ]; then
+  [ -n "$OAK_IP" ] || OAK_IP=$(timeout 20 python3 -c "
+import depthai as dai
+for d in dai.Device.getAllAvailableDevices():
+    if d.protocol == dai.XLinkProtocol.X_LINK_TCP_IP: print(d.name); break" 2>/dev/null | tail -1)
+  [ -n "$OAK_IP" ] && OAK=true
+fi
+SEG=false
+if [ "$OAK" = true ]; then
+  python3 -c "import depthai" 2>/dev/null || pip install --break-system-packages -q "depthai>=2.28,<3"
+  [ -f /ws/models/sam2.1_hiera_tiny/vision_encoder_int8.onnx ] && SEG=true
+fi
 
 nohup ros2 launch bringup njord.launch.py \
   fcu_url:="${FCU_URL:-/dev/ttyACM1:57600}" \
   enable_gui:=true gui_static_dir:=/workspace/NAMIBIA_REDESIGNED_GUI/dist \
-  enable_gui_cloud_mirror:=true enable_sonar:=true enable_oak:=$OAK \
+  enable_gui_cloud_mirror:=true enable_sonar:=true enable_oak_rgbd:=$OAK oak_device_ip:="$OAK_IP" enable_segmentation:=$SEG \
   enable_nav2:=false enable_perception:=false enable_vision:=false \
   enable_boat_bt:=false enable_mission:=false \
   ${EXTRA_ARGS:-} > /workspace/boat_data/boat_up.log 2>&1 &
-echo "launched (oak=$OAK). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"
+echo "launched (oak=$OAK${OAK_IP:+ at $OAK_IP}, segmentation=$SEG). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"

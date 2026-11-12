@@ -19,8 +19,14 @@ One frame at a time: the newest synchronised pair is taken when the
 previous inference finishes, and frames in between are dropped. At ~3 s
 per frame on the CPU, queueing would only make every result older.
 
-Prompts: a point grid ("segment everything"), plus — when the buoy model
-loads — one box prompt per detected navigation mark, labelled with its class.
+Prompts and labels: SAM 2 finds shapes but does not know what they are, so
+labels come from detectors whose boxes become SAM 2 box prompts:
+  * the general object model (``object_model_path``, YOLO26n-seg on COCO:
+    person, boat, bird, car, ... 80 classes), and
+  * the navigation-mark model (``buoy_model_path``: green/red/cardinal buoys).
+Each detected object is drawn as its mask with "<label> <distance>". The
+point grid (``grid_prompts``) adds the shapes no detector knows, drawn as
+"object <distance>". A missing model file only removes its labels.
 """
 
 from __future__ import annotations
@@ -52,22 +58,32 @@ def _image_to_array(msg: Image) -> np.ndarray:
     raise ValueError(f"unsupported encoding {msg.encoding}")
 
 
-class BuoyDetector:
-    """The repo's YOLO26n-seg navigation-mark model, used for box prompts only."""
+class YoloDetector:
+    """A YOLO26 ONNX export (end-to-end, NMS-free), used for labelled box prompts only.
 
-    def __init__(self, path: str, conf: float, threads: int) -> None:
+    Works for the repo's navigation-mark model and for the COCO object model:
+    both output ``[x1, y1, x2, y2, score, class, ...]`` rows.
+    """
+
+    def __init__(self, path: str, conf: float, threads: int, suffix: str = "",
+                 gpu_server: str = "", log=print) -> None:
         import onnxruntime as ort
 
+        from sam2_vision.remote_ort import HybridSession
+
+        # Class names from the file's own metadata (a cheap local read), then
+        # inference through the GPU server when it answers.
         so = ort.SessionOptions()
-        so.intra_op_num_threads = threads
+        so.intra_op_num_threads = 1
         so.log_severity_level = 3
-        self.sess = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
-        meta = self.sess.get_modelmeta().custom_metadata_map
+        meta = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"]).get_modelmeta().custom_metadata_map
+        self.sess = HybridSession(path, path, threads, gpu_server, log)
         import ast
 
         self.names = ast.literal_eval(meta.get("names", "{}"))
         self.size = 640
         self.conf = conf
+        self.suffix = suffix
 
     def __call__(self, bgr: np.ndarray):
         h, w = bgr.shape[:2]
@@ -85,7 +101,7 @@ class BuoyDetector:
                 continue
             x1, y1, x2, y2 = ((row[[0, 1, 2, 3]] - [left, top, left, top]) / r).tolist()
             name = self.names.get(int(row[5]), str(int(row[5])))
-            boxes.append((max(0.0, x1), max(0.0, y1), min(w, x2), min(h, y2), f"{name} buoy", score))
+            boxes.append((max(0.0, x1), max(0.0, y1), min(w, x2), min(h, y2), f"{name}{self.suffix}", score))
         return boxes
 
 
@@ -107,6 +123,13 @@ class Sam2DepthSegmenter(Node):
         p("max_objects", 12)
         p("buoy_model_path", "/ws/models/yolo26n-seg-navier.onnx")
         p("buoy_confidence", 0.4)
+        p("object_model_path", "/ws/models/yolo26n-seg-coco.onnx")
+        p("object_confidence", 0.35)
+        p("grid_prompts", True)
+        # The GPU container's ONNX Runtime server (remote_ort.py, started by
+        # scripts/boat_up.sh). Empty = CPU only. Unreachable = CPU until it is back.
+        p("gpu_server", "127.0.0.1:7090")
+        p("gpu_encoder_file", "vision_encoder.onnx")
         p("jpeg_quality", 80)
         p("min_period_s", 0.0)
         g = lambda n: self.get_parameter(n).value  # noqa: E731
@@ -116,17 +139,26 @@ class Sam2DepthSegmenter(Node):
             max_area_frac=float(g("max_area_frac")), max_objects=int(g("max_objects")),
         )
         threads = int(g("threads"))
-        self.sam = Sam2Onnx(g("model_dir"), g("encoder_file"), g("decoder_file"), threads)
+        gpu = str(g("gpu_server"))
+        log = self.get_logger().info
+        self.sam = Sam2Onnx(g("model_dir"), g("encoder_file"), g("decoder_file"), threads,
+                            gpu_server=gpu, gpu_encoder=str(g("gpu_encoder_file")), log=log)
         self.get_logger().info(f"Loaded {self.sam.name} from {g('model_dir')}, {threads} threads")
 
-        self.buoys = None
-        path = str(g("buoy_model_path"))
-        if path and os.path.isfile(path):
+        self.detectors = []
+        for key, suffix in (("object", ""), ("buoy", " buoy")):
+            path = str(g(f"{key}_model_path"))
+            if not (path and os.path.isfile(path)):
+                self.get_logger().warn(f"{key} model not found at {path!r}: no {key} labels")
+                continue
             try:
-                self.buoys = BuoyDetector(path, float(g("buoy_confidence")), threads)
-                self.get_logger().info(f"Buoy box prompts from {path}: {list(self.buoys.names.values())}")
+                det = YoloDetector(path, float(g(f"{key}_confidence")), threads, suffix, gpu, log)
+                self.detectors.append(det)
+                names = list(det.names.values())
+                self.get_logger().info(f"{key} labels from {path}: {names[:12]}{' ...' if len(names) > 12 else ''}")
             except Exception as exc:  # noqa: BLE001
-                self.get_logger().warn(f"Buoy model not loaded ({exc}); grid prompts only")
+                self.get_logger().warn(f"{key} model not loaded ({exc})")
+        self.cfg.grid_prompts = bool(g("grid_prompts"))
 
         self._jpeg_q = int(g("jpeg_quality"))
         self._min_period = float(g("min_period_s"))
@@ -180,7 +212,7 @@ class Sam2DepthSegmenter(Node):
         h, w = bgr.shape[:2]
 
         t0 = time.monotonic()
-        boxes = self.buoys(bgr) if self.buoys is not None else []
+        boxes = [b for det in self.detectors for b in det(bgr)]
         t_det = time.monotonic() - t0
         segs, t = segment_frame(self.sam, bgr, depth, self.cfg, fx=self._fx, cx=self._cx, boxes=boxes)
         total = t["total_s"] + t_det
@@ -202,7 +234,7 @@ class Sam2DepthSegmenter(Node):
             "width": w,
             "height": h,
             "timing_s": {k: round(v, 3) for k, v in t.items() if k.endswith("_s")} | {"detect_s": round(t_det, 3)},
-            "buoy_boxes": len(boxes),
+            "detections": len(boxes),
             "objects": segments_json(segs, w, h),
         }, separators=(",", ":"))))
         dists = ", ".join(
@@ -211,7 +243,7 @@ class Sam2DepthSegmenter(Node):
         )
         self.get_logger().info(
             f"{len(segs)} objects in {total:.2f} s (enc {t['encode_s']:.2f}, dec {t['decode_s']:.2f}, "
-            f"{t['prompts']} prompts, {len(boxes)} buoys): {dists}",
+            f"{t['prompts']} prompts, {len(boxes)} detections): {dists}",
             throttle_duration_sec=15.0,
         )
 
