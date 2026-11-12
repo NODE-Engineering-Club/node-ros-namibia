@@ -49,3 +49,13 @@ export const IconTrash = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M2
 export const IconPlus = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M8 3v10M3 8h10" /></svg>);
 export const IconSave = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M2.5 2.5h8.5l2.5 2.5v8.5h-11v-11ZM5 2.5v3.5h5V2.5M5 13.5V9.5h6v4" /></svg>);
 export const IconDownload = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M8 2v8.5m0 0L4.8 7.3M8 10.5l3.2-3.2M2 10.5v2.3c0 .7.5 1.2 1.2 1.2h9.6c.7 0 1.2-.5 1.2-1.2v-2.3" /></svg>);
+export const IconSearch = () => (<svg viewBox="0 0 16 16" {...stroke}><circle cx="7" cy="7" r="4.8" /><path d="m10.5 10.5 3.5 3.5" /></svg>);
+export const IconChevron = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="m4.5 6.2 3.5 3.5 3.5-3.5" /></svg>);
+export const IconChevronRight = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="m6.2 4 3.8 4-3.8 4" /></svg>);
+export const IconPencil = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M10.8 2.2a1.6 1.6 0 0 1 2.3 2.3l-8 8-3.1.8.8-3.1 8-8Z" /></svg>);
+export const IconFileJson = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M9.5 1.5H4c-.7 0-1.2.5-1.2 1.2v10.6c0 .7.5 1.2 1.2 1.2h8c.7 0 1.2-.5 1.2-1.2V5.2L9.5 1.5Z" /><path d="M9.5 1.5v3.7h3.7M6.6 8c-.6 0-.9.3-.9.8v.4c0 .3-.2.6-.5.6.3 0 .5.3.5.6v.4c0 .5.3.8.9.8m2.8-3.6c.6 0 .9.3.9.8v.4c0 .3.2.6.5.6-.3 0-.5.3-.5.6v.4c0 .5-.3.8-.9.8" /></svg>);
+export const IconLock = () => (<svg viewBox="0 0 16 16" {...stroke}><rect x="3" y="7" width="10" height="7.5" rx="1.2" /><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2" /></svg>);
+export const IconFocus = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M2 5.5V3c0-.6.4-1 1-1h2.5M10.5 2H13c.6 0 1 .4 1 1v2.5M14 10.5V13c0 .6-.4 1-1 1h-2.5M5.5 14H3c-.6 0-1-.4-1-1v-2.5" /></svg>);
+export const IconAnchor = () => (<svg viewBox="0 0 16 16" {...stroke}><circle cx="8" cy="3.3" r="1.6" /><path d="M8 4.9v9.6M5 7.5h6M2.5 9.5a5.5 5 0 0 0 11 0" /></svg>);
+export const IconFolder = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M1.8 4c0-.7.5-1.2 1.2-1.2h3.2l1.5 1.7H13c.7 0 1.2.5 1.2 1.2v6.6c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2V4Z" /></svg>);
+export const IconSort = () => (<svg viewBox="0 0 16 16" {...stroke}><path d="M2 4h8M2 8h6M2 12h4M12.5 3v10m0 0-2-2m2 2 2-2" /></svg>);

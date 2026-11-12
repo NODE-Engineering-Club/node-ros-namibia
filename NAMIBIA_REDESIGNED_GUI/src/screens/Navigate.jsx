@@ -1,19 +1,18 @@
-import { LINK_LABELS, MODE_LABELS, PROFILE_LABELS } from '@asket/lib/labels.js';
+import { CONFIRM_PROMPTS, LINK_LABELS, MODE_LABELS, PROFILE_LABELS } from '@asket/lib/labels.js';
 import { streamAgeMs, streamPayload } from '@asket/lib/connection.js';
 import { staleness, thresholdsForRate } from '@asket/lib/staleness.js';
 import { PanelAge, Value } from '@asket/components/Value.jsx';
 import { ModeButtons } from '@asket/panels/ModeCommands.jsx';
 import { SonarPanel } from '@asket/panels/SonarPanel.jsx';
-import { LinkStatus } from '@asket/panels/LinkStatus.jsx';
 import { duration, endurance } from '@asket/lib/format.js';
 
 import { GlassPanel, Pill, ConfirmAction, StreamNotes } from '../components/ui.jsx';
 import { AsketEmbed } from '../components/Embed.jsx';
 import {
-  IconCamera, IconFlag, IconMap, IconPlay, IconPulse, IconSend, IconStop, IconWave,
+  IconAnchor, IconCamera, IconFlag, IconPin, IconPlay, IconPulse, IconSend, IconStop, IconWave,
 } from '../components/Icons.jsx';
 import { WorkspaceHeader } from '../components/Shell.jsx';
-import { GpsSlot } from '../slots/GpsSlot.jsx';
+import { AreaMap } from '../slots/AreaMap.jsx';
 import { CameraSlot, CAMERA_PILL, cameraLevel } from '../slots/CameraSlot.jsx';
 import { distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } from '../lib/missionFile.js';
 import { preflightVerdict, worstAlarm } from '../lib/vessel.js';
@@ -47,10 +46,10 @@ const ageLevel = ({ ageMs, rateHz }) => staleness(ageMs, ...thresholdsForRate(ra
  * one. `pill` is a plain string: absent data is said in words ("no data",
  * "not sent"), never as a default that looks healthy.
  */
-function StatusTile({ label, pill, level, sub, age }) {
+function StatusTile({ label, pill, level, sub, age, title }) {
   const stale = age ? ageLevel(age) : 'fresh';
   return (
-    <div className={`status-tile ${stale}`}>
+    <div className={`status-tile ${stale}`} title={title}>
       <div className="label">{label}</div>
       <Pill level={stale === 'very-stale' ? 'neutral' : level}>
         {age && stale !== 'missing' ? <Value {...age} showAge={false}>{pill}</Value> : pill}
@@ -61,6 +60,23 @@ function StatusTile({ label, pill, level, sub, age }) {
     </div>
   );
 }
+
+/*
+ * Short armed labels for the mode buttons. The reused ConfirmButton writes
+ * "Confirm: <prompt>" in the button and puts the prompt in its title while
+ * armed (and only then). The title is matched against the same CONFIRM_PROMPTS
+ * the button uses, so the text shown becomes "Confirm manual" / "Confirm
+ * autonomous"; the full question stays on hover. If the prompts ever change,
+ * the selector stops matching and the button falls back to its own text.
+ */
+const ARMED_LABELS = [
+  [CONFIRM_PROMPTS.set_mode_MANUAL, 'Confirm manual'],
+  [CONFIRM_PROMPTS.set_mode_AUTONOMOUS, 'Confirm autonomous'],
+];
+const ARMED_CSS = ARMED_LABELS.map(([prompt, text]) => {
+  const sel = `.mode-slim button[title^=${JSON.stringify(prompt)}]`;
+  return `${sel}{font-size:0}${sel}::after{content:${JSON.stringify(text)};font-size:12px}`;
+}).join('\n');
 
 const rcLine = (ok) => (ok === true ? 'RC link OK' : ok === false ? 'RC link LOST' : 'RC link: not sent');
 
@@ -128,10 +144,15 @@ function StatusPanel({ v, connection }) {
         <StatusTile
           label="Arming"
           age={live(v, 'pico')}
-          level={pico?.armed ? 'ok' : 'neutral'}
+          level={pico?.arming_block ? 'warn' : pico?.armed ? 'ok' : 'neutral'}
           pill={!pico ? 'no data' : pico.armed == null ? 'not sent' : pico.armed ? 'Armed' : 'Disarmed'}
+          /* Why propulsion cannot start (backend's arming_block): shown here,
+             short, with the full sentence on hover, instead of as a paragraph
+             above the mode buttons. */
+          title={pico?.arming_block || undefined}
           sub={
             !pico ? 'Not received'
+              : pico.arming_block ? 'Propulsion blocked'
               : pico.estop_latched === true ? 'Propulsion cut latched'
                 : pico.estop_latched == null ? 'cut latch: not sent'
                   : pico.armed ? 'Thrusters enabled' : 'Thrusters off'
@@ -147,43 +168,25 @@ function StatusPanel({ v, connection }) {
             : 'Not received'}
         />
       </div>
-    </GlassPanel>
-  );
-}
-
-/**
- * Mode commands: the existing ModeButtons from src/asket_gui, unmodified, in
- * a glass frame. Reused rather than rewritten because every rule in the
- * developer guide's section 3 about modes lives in it: two-step confirmation,
- * pending rendered unlike confirmed, the soft stop labelled "Cut propulsion",
- * and all five NO-GO steps (AUTONOMOUS stays pressable while NO-GO, the
- * backend refuses it with the reason, and only then the checkbox and the
- * separate force button appear).
- *
- * The pill shows the mode the VESSEL reports (pico stream), never the one
- * that was requested.
- */
-function ModePanel({ v, connection }) {
-  const mode = v.pico?.mode;
-  return (
-    <GlassPanel
-      title="Mode" icon={<IconPulse />}
-      notes={notesFor(v, connection, ['pico'])}
-      aside={(
-        <>
-        <PanelAge {...live(v, 'pico')} />
-        <Pill
-          level={!v.pico ? 'neutral' : mode === 'ESTOP' ? 'alarm' : mode === 'AUTONOMOUS' ? 'info' : 'neutral'}
-          title="What the vessel reports, not what was requested."
-        >
-          {!v.pico ? 'Mode: no data' : `Vessel: ${MODE_LABELS[mode] ?? 'not sent'}`}
-        </Pill>
-        </>
-      )}
-    >
-      <AsketEmbed className="mode-embed">
-        <ModeButtons state={v.state} connection={connection} />
-      </AsketEmbed>
+      {/*
+        Mode commands, minimal, inside Status: the existing ModeButtons from
+        src/asket_gui, unmodified. Reused rather than rewritten because every
+        rule in the developer guide's section 3 about modes lives in it:
+        two-step confirmation, pending rendered unlike confirmed, the soft stop
+        labelled "Cut propulsion", and all five NO-GO steps. The Mode tile
+        above shows the mode the VESSEL reports (pico stream), never the one
+        that was requested. Only the layout is slimmed (screens.css .mode-slim):
+        Details off (the stop's effect stays in its tooltip and prompt), the
+        arming-block paragraph moves to the Arming tile, and the confirm
+        prompt and result stay on one line (full text on hover).
+      */}
+      <div className="mode-bar">
+        <style>{ARMED_CSS}</style>
+        <span className="mode-bar-label">Mode command</span>
+        <AsketEmbed className="mode-embed mode-slim" details={false}>
+          <ModeButtons state={v.state} connection={connection} />
+        </AsketEmbed>
+      </div>
     </GlassPanel>
   );
 }
@@ -270,7 +273,7 @@ function Compass({ heading, level = 'fresh' }) {
         return (
           <g key={t}>
             <line x1={75 + 56 * Math.cos(a)} y1={75 + 56 * Math.sin(a)} x2={75 + 62 * Math.cos(a)} y2={75 + 62 * Math.sin(a)} stroke="var(--text-3)" />
-            <text x={75 + 46 * Math.cos(a)} y={75 + 46 * Math.sin(a) + 3} fontSize="8" fill="var(--text-2)" textAnchor="middle">
+            <text x={75 + 46 * Math.cos(a)} y={75 + 46 * Math.sin(a) + 3} fontSize="8" fill={t === 0 ? 'var(--alarm)' : 'var(--text-2)'} fontWeight={t === 0 ? 700 : 400} textAnchor="middle">
               {{ 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[t] ?? t}
             </text>
           </g>
@@ -287,8 +290,66 @@ function Compass({ heading, level = 'fresh' }) {
   );
 }
 
-function TelemetryPanel({ v, connection }) {
+/**
+ * Sonar as one strip in the telemetry box, styled like the alerts strip:
+ * is it connected, and is it collecting. Same three health words as
+ * sonarHealth() (alive / silent / not monitored), with "alive" split into
+ * collecting vs. idle, because an idle Omniscan is connected but pings only
+ * after ~/start_pinging.
+ */
+function sonarStrip(state) {
+  const sonar = streamPayload(state, 'sonar');
+  const ageMs = streamAgeMs(state, 'sonar');
+  if (!sonar) {
+    return { level: 'warn', head: 'SONAR NOT MONITORED', text: 'No sonar stream: omniscan_bridge is not running.' };
+  }
+  const stale = ageMs !== null && ageMs > 10_000;
+  if (!sonar.connected || stale) {
+    return {
+      level: 'alarm',
+      head: '⚠ SONAR SILENT',
+      text: stale ? `No sonar data for ${Math.round(ageMs / 1000)} s.` : 'Sonar not connected.',
+    };
+  }
+  const hz = sonar.actual_ping_rate_hz;
+  return hz > 0
+    ? { level: 'clear', head: '✓ SONAR CONNECTED', text: `Collecting data · ${n(hz, 1)} Hz` }
+    : { level: 'warn', head: 'SONAR CONNECTED', text: 'Not collecting: pinging starts only with ~/start_pinging at the boat.' };
+}
+
+/** The shore link, reduced to the four values that matter on this screen. */
+function LinkRow({ v }) {
+  const { link } = v;
+  const connected = v.state.connected;
+  const age = live(v, 'link');
+  const shown = (x) => (age && ageLevel(age) !== 'missing' ? <Value {...age}>{x}</Value> : x);
+  const bearer = !connected ? 'Disconnected'
+    : !link ? 'no data'
+      : link.active_link === 'none' ? 'Lost'
+        : LINK_LABELS[link.active_link] ?? 'not sent';
+  const latency = !link ? '—' : Number.isFinite(link.rtt_ms) ? `${n(link.rtt_ms, 0)} ms` : 'not sent';
+  const signal = !link ? '—' : link.rssi_dbm != null
+    ? `${n(link.rssi_dbm, 0)} dBm${link.rssi_source === 'predicted' ? ' (from range)' : ''}`
+    : 'not sent';
+  const range = !link ? '—' : link.distance_m != null ? `${n(link.distance_m, 0)} m` : 'not sent';
+  return (
+    <div className="telemetry-link">
+      <div>
+        <div className="label">Link</div>
+        <Pill level={!connected || link?.active_link === 'none' ? 'alarm' : !link ? 'neutral' : link.quality != null && link.quality < 0.4 ? 'warn' : 'ok'}>
+          {shown(bearer)}
+        </Pill>
+      </div>
+      <div><div className="label">Latency</div><div className="mono">{shown(latency)}</div></div>
+      <div><div className="label">Signal</div><div className="mono">{shown(signal)}</div></div>
+      <div><div className="label">Range</div><div className="mono">{shown(range)}</div></div>
+    </div>
+  );
+}
+
+function TelemetryPanel({ v, connection, sonarState = v.state }) {
   const { vessel, heading } = v;
+  const sonar = sonarStrip(sonarState);
   // The heading stream when it carries a heading, else the vessel's; the age
   // shown is the age of whichever one is displayed.
   const fromHeading = Number.isFinite(heading?.heading_deg);
@@ -296,19 +357,32 @@ function TelemetryPanel({ v, connection }) {
   const pos = live(v, 'vessel');
   const hdgAge = fromHeading ? live(v, 'heading') : pos;
   return (
-    <GlassPanel title="Vessel telemetry" icon={<IconFlag />} bodyClass="flush-body"
-      notes={notesFor(v, connection, ['vessel', 'heading'])}
+    <GlassPanel title="Vessel telemetry" icon={<IconAnchor />} bodyClass="flush-body"
+      notes={(
+        <>
+          {notesFor(v, connection, ['vessel', 'heading', 'link'])}
+          <StreamNotes notes={streamNotes(connection, sonarState, ['sonar'])} />
+        </>
+      )}
       aside={<PanelAge {...live(v, 'vessel')} />}
+      footer={(
+        <div className={`alerts-strip ${sonar.level}`}>
+          <strong>{sonar.head}</strong>
+          <span className="muted">{sonar.text}</span>
+          <span className="spacer" />
+          <PanelAge ageMs={streamAgeMs(sonarState, 'sonar')} rateHz={sonarState.subscriptions.sonar?.rate_hz} />
+        </div>
+      )}
     >
       <div className="telemetry" style={{ padding: 0 }}>
         <div>
           <div className="label">Coordinates</div>
-          <div className="mono" style={{ fontSize: 16 }}>
+          <div className="coords">
             <Value {...pos} showAge={false}>{coord(vessel?.lat, 'N', 'S')}</Value><br />
             <Value {...pos}>{coord(vessel?.lon, 'E', 'W')}</Value>
           </div>
           <div className="label">Heading</div>
-          <div className="big">
+          <div className="big heading">
             <Value {...hdgAge}>{Number.isFinite(hdg) ? `${Math.round(hdg)}°` : 'not sent'}<small>{dir(hdg)}</small></Value>
           </div>
           {(heading?.valid ?? vessel?.heading_valid) === false && <Pill level="alarm">Heading invalid</Pill>}
@@ -321,6 +395,7 @@ function TelemetryPanel({ v, connection }) {
             <div><div className="label">Pitch</div><div className="big" style={{ fontSize: 18 }}><Value {...pos} showAge={false}>{n(vessel?.pitch_deg, 1)}°</Value></div></div>
           </div>
         </div>
+        <LinkRow v={v} />
         <Compass heading={hdg} level={ageLevel(hdgAge)} />
       </div>
     </GlassPanel>
@@ -339,7 +414,7 @@ function MissionPanel({ v, connection, active, onNavigate }) {
   const here = Number.isFinite(vessel?.lat) ? { lat: vessel.lat, lon: vessel.lon } : null;
 
   return (
-    <GlassPanel title="Mission" icon={<IconFlag />}
+    <GlassPanel title="Mission" icon={<IconFlag />} className="mission-glass"
       notes={notesFor(v, connection, ['mission', 'power'])}
       aside={(
         <>
@@ -359,12 +434,14 @@ function MissionPanel({ v, connection, active, onNavigate }) {
               label="Start mission" icon={<IconPlay />} variant="go"
               prompt="Start recording this mission?"
               disabled={!state.connected || recording}
+              failuresOnly
             />
             <ConfirmAction
               connection={connection} state={state} command="stop_mission"
               label="Abort" icon={<IconStop />} variant="danger"
               prompt="Stop the mission recording?"
               disabled={!recording}
+              failuresOnly
             />
             <button
               type="button" className="btn info" disabled
@@ -450,14 +527,14 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
   const vessel = v.vessel;
   return (
     <>
-      <WorkspaceHeader title="Navigate" crumb="ASKET / Live operation">
+      <WorkspaceHeader title="Navigation">
         <Pill level={verdict.level}>{verdict.text}</Pill>
       </WorkspaceHeader>
-      <div className="workspace-body">
+      <div className="workspace-body navigate-body">
         <div className="navigate">
           <div className="col left">
             <GlassPanel
-              title="GPS basemap" icon={<IconMap />} flush
+              title="GPS basemap" icon={<IconPin />} flush
               notes={notesFor(v, connection, ['vessel', 'track'])}
               aside={(
                 <>
@@ -474,7 +551,7 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
                 </>
               )}
             >
-              <GpsSlot v={v} connection={connection} />
+              <AreaMap v={v} connection={connection} />
             </GlassPanel>
             <GlassPanel
               title="OAK camera" icon={<IconCamera />} flush
@@ -499,26 +576,20 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
             >
               <CameraSlot v={v} />
             </GlassPanel>
+            {/*
+              Hidden, kept for later: the full Sonar panel (SonarGlass above).
+              Sonar is now one strip at the bottom of Vessel telemetry, and
+              link / latency / signal / range moved into that box too, so the
+              Shore link panel is gone.
+
             <div className="row-bottom">
               <SonarGlass state={sonarState} connection={connection} />
-              {/* The reused LinkStatus: which profile is in force, what it no
-                  longer carries and why, and "no connection to the vessel"
-                  when the socket is gone. */}
-              <GlassPanel
-                title="Shore link" icon={<IconPulse />}
-                aside={<PanelAge {...live(v, 'link')} />}
-                notes={notesFor(v, connection, ['link'])}
-              >
-                <AsketEmbed className="link-embed">
-                  <LinkStatus state={v.state} connection={connection} />
-                </AsketEmbed>
-              </GlassPanel>
             </div>
+            */}
           </div>
           <div className="col right">
             <StatusPanel v={v} connection={connection} />
-            <ModePanel v={v} connection={connection} />
-            <TelemetryPanel v={v} connection={connection} />
+            <TelemetryPanel v={v} connection={connection} sonarState={sonarState} />
             <MissionPanel v={v} connection={connection} active={active} onNavigate={onNavigate} />
           </div>
         </div>

@@ -2,9 +2,10 @@ import { useRef, useState } from 'react';
 
 import { isFitted } from '@asket/lib/fitted.js';
 
-import { Banner, GlassPanel, Pill } from '../components/ui.jsx';
+import { GlassPanel, Pill } from '../components/ui.jsx';
 import {
-  IconDown, IconDownload, IconMap, IconPin, IconPlus, IconSave, IconSend, IconTrash, IconUp, IconUpload,
+  IconDown, IconDownload, IconFileJson, IconFocus, IconLock, IconPencil, IconPin, IconPlus, IconSave,
+  IconSend, IconTrash, IconUp, IconUpload,
 } from '../components/Icons.jsx';
 import { WorkspaceHeader } from '../components/Shell.jsx';
 import { PlannerMap } from '../slots/PlannerMap.jsx';
@@ -13,20 +14,21 @@ import {
 } from '../lib/missionFile.js';
 import { preflightVerdict } from '../lib/vessel.js';
 
-const STATUS_TEXT = { PASS: 'verified', WARN: 'warning', FAIL: 'failed', SKIPPED: 'not checked' };
+const STATUS_TEXT = { PASS: 'Verified', WARN: 'Warning', FAIL: 'Failed', SKIPPED: 'Not checked' };
 const STATUS_LEVEL = { PASS: 'ok', WARN: 'warn', FAIL: 'alarm', SKIPPED: 'neutral' };
 
 function itemFor(report, prefix) {
   return (report?.items || []).find((i) => i.id.startsWith(prefix));
 }
 
+/** Figma: a ticked (required, not editable) box, then the snapshot in colour. */
 function HardwareRow({ label, item }) {
   return (
     <div className="config-row">
-      <span>{label}</span>
-      {item
-        ? <Pill level={STATUS_LEVEL[item.status]}>{STATUS_TEXT[item.status]}</Pill>
-        : <Pill level="neutral">no report</Pill>}
+      <label className="check"><input type="checkbox" checked readOnly disabled />{label}</label>
+      <span className={`status-text ${item ? STATUS_LEVEL[item.status] : 'neutral'}`}>
+        {item ? STATUS_TEXT[item.status] : 'No report'}
+      </span>
     </div>
   );
 }
@@ -91,31 +93,49 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
     { key: 'camera', label: 'OAK camera', available: cameraFitted ? 'Fitted' : 'Not fitted', ok: cameraFitted },
   ];
 
+  // Figma: a separate Readiness panel under the configuration.
   let readiness;
   if (!valid) {
-    readiness = <Banner level="warn" title="Route incomplete" detail="A mission needs a name and at least two in-range GPS points. Planning, saving and export remain available." />;
+    readiness = {
+      level: 'warn', title: 'Route incomplete', pill: 'Draft',
+      ok: null,
+      body: 'A mission needs a name and at least two in-range GPS points. Planning, saving and export remain available.',
+    };
   } else if (!preflightGo) {
-    readiness = <Banner level="warn" title="Send blocked — NO-GO" detail="Route format and coordinates are valid for planning. Resolve the preflight first; saving and export remain available." />;
+    readiness = {
+      level: 'warn', title: 'Send blocked', pill: 'NO-GO',
+      ok: 'Route format and coordinates valid for planning',
+      body: 'Resolve the preflight first, then re-run it. Saving and export remain available.',
+    };
   } else {
-    readiness = <Banner level="ok" title="Ready to go" detail="Route, required hardware and preflight verified. Mission validated and not yet sent. Sending does not arm or launch the vessel." />;
+    readiness = {
+      level: 'ok', title: 'Mission validated', pill: 'Ready to go',
+      ok: 'Route, required hardware and preflight verified',
+      body: 'Mission validated and not yet sent. Sending does not arm or launch the vessel.',
+    };
   }
 
   return (
     <>
-      <WorkspaceHeader title="Mission Design" crumb="ASKET / Autonomy">
+      <WorkspaceHeader title="Mission Design">
         <Pill level={verdict.level}>{verdict.text}</Pill>
       </WorkspaceHeader>
       <div className="workspace-body">
         <div className="design">
           <div className="design-top">
-            <label>
-              <div className="upper faint" style={{ marginBottom: 4 }}>Mission name</div>
-              <input
-                className={`input ${draft.name.trim() ? '' : 'invalid'}`} style={{ width: 320, fontSize: 16 }}
-                value={draft.name} onChange={(e) => update({ name: e.target.value.toUpperCase() })}
-              />
+            <label className="name-field">
+              <div className="name-label">Mission name</div>
+              <span className="name-edit">
+                <input
+                  className={`name-input ${draft.name.trim() ? '' : 'invalid'}`}
+                  size={Math.max(8, draft.name.length + 1)}
+                  value={draft.name} onChange={(e) => update({ name: e.target.value.toUpperCase() })}
+                  placeholder="MISSION_NAME"
+                />
+                <IconPencil />
+              </span>
             </label>
-            <Pill level={valid ? 'info' : 'neutral'}>{state}</Pill>
+            <Pill level={valid ? (preflightGo ? 'ok' : 'info') : 'info'}>{state}</Pill>
             <div className="summary">
               <div className="big">{wps.length} waypoints / {fmtKm(routeLengthM(wps))} / {fmtMin(estimateS(draft))}</div>
               <div className="hint">Open route · estimate at {draft.cruise_speed_ms} m/s · no endurance validation</div>
@@ -124,7 +144,7 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
 
           <div className="source-row">
             <div className="glass source-card">
-              <IconUpload />
+              <IconFileJson />
               <div className="text">
                 <strong>Import an existing .json mission</strong>
                 {importResult?.mission && (
@@ -148,20 +168,21 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
                 <strong>Or create a mission on the basemap</strong>
                 <div className="hint">Place GPS points in order, then edit the shared route below. Invalid JSON or out-of-range coordinates are rejected, not sent.</div>
               </div>
-              <button type="button" className={`btn ${addMode ? 'primary' : 'info'}`} onClick={() => setAddMode((a) => !a)}>
-                <IconPin /> {addMode ? 'Done placing' : 'Place GPS points'}
+              <button type="button" className={`btn ${addMode ? 'go' : 'primary'}`} onClick={() => setAddMode((a) => !a)}>
+                <IconSend /> {addMode ? 'Done placing' : 'Place GPS points'}
               </button>
             </div>
           </div>
 
+          <div className="design-left">
           <GlassPanel
-            title="GPS basemap" icon={<IconMap />} flush className="planner-panel"
+            title="GPS basemap / Shearwater Bay" flush className="planner-panel"
             aside={<span className="hint">WGS 84 · decimal degrees</span>}
             footer={(
               <div className="planner-bar">
-                <span>{addMode ? `Click the map to add WP ${wps.length + 1}` : 'Drag a pin to edit · click a pin to select'}</span>
-                <span style={{ marginLeft: 'auto' }} />
-                <button type="button" className="btn small" onClick={() => setFitKey((k) => k + 1)} disabled={!wps.length}>Fit route</button>
+                <span className="place-hint"><IconSend /> {addMode ? `Place points in order · click map to add WP ${wps.length + 1}` : 'Place GPS points to add to the route'}</span>
+                <span className="mid">Drag a pin to edit · click a pin to select</span>
+                <button type="button" className="btn" onClick={() => setFitKey((k) => k + 1)} disabled={!wps.length}><IconFocus /> Fit route</button>
               </div>
             )}
           >
@@ -179,9 +200,40 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
             </div>
           </GlassPanel>
 
-          <GlassPanel title="Mission configuration" className="config-panel">
+          <GlassPanel
+            title={`Waypoints / ${wps.length} points`}
+            aside={<span className="hint">{wps.length ? `Selected: WP ${selected + 1} · all fields editable` : ''}</span>}
+          >
+            <table className="table">
+              <thead>
+                <tr><th>#</th><th>Latitude (−90…90)</th><th>Longitude (−180…180)</th><th>Leg distance</th><th>Reorder / delete</th></tr>
+              </thead>
+              <tbody>
+                {wps.map((w, i) => (
+                  <tr key={i} className={i === selected ? 'selected' : ''} onClick={() => setSelected(i)}>
+                    <td><span className="wp-num">{i + 1}</span></td>
+                    <td><input className={`input mono ${validLat(w.lat) ? '' : 'invalid'}`} value={w.lat} onChange={(e) => editWp(i, 'lat', e.target.value)} /></td>
+                    <td><input className={`input mono ${validLon(w.lon) ? '' : 'invalid'}`} value={w.lon} onChange={(e) => editWp(i, 'lon', e.target.value)} /></td>
+                    <td className="mono">{i === 0 ? 'Start' : Number.isFinite(legM[i]) ? `${Math.round(legM[i])} m` : '—'}</td>
+                    <td>
+                      <span className="btn-row">
+                        <button type="button" className="btn small ghost" onClick={() => moveWp(i, -1)} disabled={i === 0} aria-label="Move up"><IconUp /></button>
+                        <button type="button" className="btn small ghost" onClick={() => moveWp(i, 1)} disabled={i === wps.length - 1} aria-label="Move down"><IconDown /></button>
+                        <button type="button" className="btn small ghost" onClick={() => deleteWp(i)} aria-label="Delete"><IconTrash /></button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button type="button" className="btn" onClick={addWp}><IconPlus /> Add waypoint</button>
+          </GlassPanel>
+
+          </div>
+          <div className="design-right">
+          <GlassPanel title="Mission configuration" className="config-panel" aside={<span className="hint">Applies to either route source</span>}>
             <div className="config-section">
-              <span className="upper">Hardware required · snapshot</span>
+              <div className="config-heads"><span className="upper">Hardware required</span><span className="upper">Snapshot availability</span></div>
               <HardwareRow label="Pico + propulsion / safety chain" item={itemFor(v.report, 'pico')} />
               <HardwareRow label="RC link + hardware killswitch" item={itemFor(v.report, 'rc')} />
               <HardwareRow label="GNSS fix" item={itemFor(v.report, 'gnss')} />
@@ -198,20 +250,19 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
                     />
                     {s.label}
                   </label>
-                  <Pill level={s.ok ? 'ok' : 'neutral'}>{s.available}</Pill>
+                  <span className={`status-text ${s.ok ? 'ok' : draft.sensors[s.key] ? 'warn' : 'neutral'}`}>{s.available}</span>
                 </div>
               ))}
               <p className="hint">Checked = required by this mission, not proof of readiness.</p>
             </div>
-            <div className="config-section">
-              <span className="upper">Cruise speed</span>
-              <div className="btn-row">
-                <input
-                  className="input" type="number" min="0.1" max="5" step="0.1" style={{ width: 90 }}
-                  value={draft.cruise_speed_ms} onChange={(e) => update({ cruise_speed_ms: Number(e.target.value) })}
-                />
-                <span className="muted">m/s · illustrative planning value</span>
-              </div>
+            <div className="config-section speed-row">
+              <span>Cruise speed</span>
+              <input
+                className="input mono" type="number" min="0.1" max="5" step="0.1" style={{ width: 64 }}
+                value={draft.cruise_speed_ms} onChange={(e) => update({ cruise_speed_ms: Number(e.target.value) })}
+                title="Illustrative planning value"
+              />
+              <span className="muted">m/s</span>
             </div>
             <div className="config-section">
               <span className="upper">On obstacle detection</span>
@@ -234,53 +285,35 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
                   : 'No healthy obstacle detector is confirmed. Stop is a saved policy, not a working detection guarantee.'}
               </p>
             </div>
-            {readiness}
           </GlassPanel>
-
-          <GlassPanel
-            title={`Waypoints / ${wps.length} points`}
-            aside={<span className="hint">{wps.length ? `Selected: WP ${selected + 1} · all fields editable` : ''}</span>}
-          >
-            <table className="table">
-              <thead>
-                <tr><th>#</th><th>Latitude (−90…90)</th><th>Longitude (−180…180)</th><th>Leg distance</th><th>Reorder / delete</th></tr>
-              </thead>
-              <tbody>
-                {wps.map((w, i) => (
-                  <tr key={i} className={i === selected ? 'selected' : ''} onClick={() => setSelected(i)}>
-                    <td><span className="wp-num">{i + 1}</span></td>
-                    <td><input className={`input ${validLat(w.lat) ? '' : 'invalid'}`} value={w.lat} onChange={(e) => editWp(i, 'lat', e.target.value)} /></td>
-                    <td><input className={`input ${validLon(w.lon) ? '' : 'invalid'}`} value={w.lon} onChange={(e) => editWp(i, 'lon', e.target.value)} /></td>
-                    <td className="mono">{i === 0 ? 'Start' : Number.isFinite(legM[i]) ? `${Math.round(legM[i])} m` : '—'}</td>
-                    <td>
-                      <span className="btn-row">
-                        <button type="button" className="btn small ghost" onClick={() => moveWp(i, -1)} disabled={i === 0} aria-label="Move up"><IconUp /></button>
-                        <button type="button" className="btn small ghost" onClick={() => moveWp(i, 1)} disabled={i === wps.length - 1} aria-label="Move down"><IconDown /></button>
-                        <button type="button" className="btn small ghost" onClick={() => deleteWp(i)} aria-label="Delete"><IconTrash /></button>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button type="button" className="btn small" onClick={addWp}><IconPlus /> Add waypoint</button>
-          </GlassPanel>
+          <section className={`glass panel readiness ${readiness.level}`}>
+            <header className="panel-header">
+              <span>Readiness / {readiness.title}</span>
+              <span className="aside"><Pill level={readiness.level}>{readiness.pill}</Pill></span>
+            </header>
+            <div className="panel-body">
+              {readiness.ok && <div className="ok-line">✓ {readiness.ok}</div>}
+              <p className={readiness.level === 'ok' ? '' : 'warn-text'}>{readiness.body}</p>
+              {!preflightGo && <p className="hint">No endurance clearance: speed and duration are estimates, not vessel capability.</p>}
+            </div>
+          </section>
+          </div>
 
           <div className="glass design-actions">
             <div className="msg">
-              <strong>{valid ? (preflightGo ? 'Ready to go. Mission validated · not yet sent.' : 'Planning is available. Deployment is blocked.') : 'Draft — complete the route to validate it.'}</strong>
+              <strong className={valid && preflightGo ? 'ok-text' : ''}>{valid ? (preflightGo ? 'Ready to go. Mission validated · not yet sent.' : 'Planning is available. Deployment is blocked.') : 'Draft — complete the route to validate it.'}</strong>
               <div className="hint">
                 Saving, exporting or sending does not arm or launch the vessel.
                 {savedAt && ' · Saved to the mission library.'}
               </div>
             </div>
-            <button type="button" className="btn" onClick={save} disabled={!draft.name.trim()}><IconSave /> Save mission</button>
+            <button type="button" className="btn primary" onClick={save} disabled={!draft.name.trim()}><IconSave /> Save mission</button>
             <button type="button" className="btn" onClick={() => downloadMission(draft)} disabled={!valid}><IconDownload /> Export .json</button>
             <button
-              type="button" className="btn primary" disabled
+              type="button" className="btn" disabled
               title="Route upload is not wired yet: gui_backend has no command to send waypoints to the vessel (see README)."
             >
-              <IconSend /> Send to vessel
+              <IconLock /> Send to vessel · not wired
             </button>
           </div>
         </div>
