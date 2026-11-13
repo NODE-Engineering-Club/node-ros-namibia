@@ -123,3 +123,30 @@ box is drawn instead, never a doubtful outline.
 * SAM 2 on the Jetson is opt-in: `SAM2=1 scripts/boat_up.sh`.
 * gui_backend now has one newest-wins video slot per stream. A single shared
   slot starved one of camera / camera_seg completely.
+
+## Water / obstacle segmentation (layer 1 of collision avoidance, 2026-11-13)
+
+For collision avoidance the boat does not need to know *what* floats ahead
+(kelp, branches, debris), only that it is not water and how far away it is.
+`oak_rgbd` runs **eWaSR** (ResNet-18, trained on MaSTr1325, Apache-2.0,
+<https://github.com/tersekmatija/eWaSR>) on the Jetson CPU, in a worker thread
+on the newest frame: about 350 ms per frame on 4 threads, so ~2.4 Hz while the
+video stays at 10 fps. Weights: `scripts/fetch_models.sh` → `models/ewasr/`
+(not in git). Parameter `water_seg_model` (empty = off), `water_seg_threads` (4
+was fastest; 2 and 8 were slower).
+
+- The "Segmented + distance" view tints water blue and outlines every region on
+  the water as `obstacle` (or `shore` for a band across the frame), with its
+  stereo distance (median over the region's lowest third, where it meets the
+  water). `-- m` means stereo had no measurement there; nothing is guessed.
+- `/oak/water_obstacles` (JSON): water fraction, per obstacle label, distance,
+  bearing, bbox. `/oak/detections` stays the on-camera detector's only.
+- Rules in `sensors/water_seg.py` (tested in `src/sensors/test/test_water_seg.py`):
+  water below the region (or around it, for a region cut by the bottom of the
+  frame); nothing reported when under 10 % of the frame is water (indoors).
+
+Known limits, to fix with the mounting calibration: no self-mask for the bow yet
+(if the bow is in view it shows as an obstacle); flat kelp gives stereo little
+to measure, so its distance will need camera height + horizon geometry;
+MaSTr1325 is Slovenian coastal water, so a fine-tune on frames from the kelp
+farm will likely be needed.

@@ -44,6 +44,17 @@ and ~10 fps, against seconds per frame for SAM 2 on the CPU (2026-11-12).
                                  confidence, distance and x/y/z in metres,
                                  bearing, bbox in pixels
 
+Water / obstacle segmentation (``water_seg_model``, eWaSR, sensors/water_seg.py)
+------------------------------------------------------------------------------
+On the Jetson, in a worker thread on the newest frame (~350 ms on 4 CPU
+threads, so ~2.5 Hz; the 10 fps video never waits for it). Water is tinted
+blue in the annotated view and every non-water region floating on it (kelp,
+branches, debris, boats, the shore) is outlined as ``obstacle`` / ``shore``
+with its stereo distance, beside the detector's named objects.
+
+* ``water_obstacles``            std_msgs/String, JSON: water fraction and per
+                                 obstacle label, distance, bearing, bbox
+
 Connection is USB (the camera is plugged in over USB on the bench) unless
 ``device_ip`` is set, which selects the PoE unit at that address.
 """
@@ -64,6 +75,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 from std_msgs.msg import String
+
+from sensors import water_seg
 
 try:
     import depthai as dai
@@ -184,6 +197,10 @@ class OakRgbdNode(Node):
         self.declare_parameter("detection_input", [640, 352])
         self.declare_parameter("detection_confidence", 0.4)
         self.declare_parameter("detection_labels", COCO_LABELS)
+        # Water / obstacle segmentation on the Jetson (eWaSR ONNX). Empty or
+        # missing file = off.
+        self.declare_parameter("water_seg_model", "/ws/models/ewasr/ewasr_resnet18.onnx")
+        self.declare_parameter("water_seg_threads", 4)
 
         self._fps = float(self.get_parameter("fps").value)
         self._w = int(self.get_parameter("width").value)
@@ -199,6 +216,19 @@ class OakRgbdNode(Node):
         self._nn_size = [int(v) for v in self.get_parameter("detection_input").value]
         self._nn_conf = float(self.get_parameter("detection_confidence").value)
         self._labels = list(self.get_parameter("detection_labels").value)
+        self._water = None          # latest result: (labels, objects, water_frac, monotonic time)
+        self._water_in = None       # newest frame for the worker: (bgr, depth, stamp)
+        self._water_ev = threading.Event()
+        ws_model = str(self.get_parameter("water_seg_model").value)
+        self._ws = None
+        if ws_model and os.path.isfile(ws_model):
+            try:
+                self._ws = water_seg.WaterSegmenter(ws_model, int(self.get_parameter("water_seg_threads").value))
+            except Exception as exc:  # noqa: BLE001 — onnxruntime missing, bad file
+                self.get_logger().error(f"water segmentation off: {exc}")
+        elif ws_model:
+            self.get_logger().warn(f"water segmentation model not found at {ws_model!r}: off")
+        self._water_runs = 0
 
         qos = QoSProfile(depth=2, reliability=ReliabilityPolicy.BEST_EFFORT)
         self._pub_rgb = self.create_publisher(Image, "rgb/image_raw", qos)
@@ -207,6 +237,7 @@ class OakRgbdNode(Node):
         self._pub_depth = self.create_publisher(Image, "stereo/depth", qos)
         self._pub_det_img = self.create_publisher(CompressedImage, "detections/image/compressed", qos)
         self._pub_det = self.create_publisher(String, "detections", 5)
+        self._pub_water = self.create_publisher(String, "water_obstacles", 5)
 
         self._info: CameraInfo | None = None
         self._stop = threading.Event()
@@ -214,6 +245,8 @@ class OakRgbdNode(Node):
         self._detections = 0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        if self._ws is not None:
+            threading.Thread(target=self._water_worker, daemon=True).start()
         self.create_timer(10.0, self._report)
         self._last_report = (time.monotonic(), 0)
 
@@ -444,10 +477,39 @@ class OakRgbdNode(Node):
             self._publish_detections(det_msg, bgr, depth, stamp)
         self._frames += 1
 
+    def _water_worker(self) -> None:
+        """Segments the newest frame, again and again; frames in between are skipped."""
+        while not self._stop.is_set():
+            if not self._water_ev.wait(1.0):
+                continue
+            self._water_ev.clear()
+            bgr, depth, stamp = self._water_in
+            try:
+                labels = self._ws.segment(bgr)
+                fx = self._info.k[0] if self._info else None
+                cx = self._info.k[2] if self._info else bgr.shape[1] / 2
+                objs, frac = water_seg.floating_obstacles(labels, depth, fx, cx)
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().error(f"water segmentation failed: {exc}", throttle_duration_sec=10.0)
+                continue
+            self._water = (labels, objs, frac, time.monotonic())
+            self._water_runs += 1
+            self._pub_water.publish(String(data=json.dumps({
+                "stamp_utc_ms": stamp.sec * 1000 + stamp.nanosec // 1_000_000,
+                "source": "ewasr_resnet18",
+                "water_fraction": round(frac, 3),
+                "objects": [{"label": o["label"], "distance_m": o["distance_m"], "bearing_deg": o["bearing_deg"],
+                             "bbox": [o["box"][0], o["box"][1], o["box"][2] - o["box"][0], o["box"][3] - o["box"][1]],
+                             "area_px": o["area_px"]} for o in objs],
+            }, separators=(",", ":"))))
+
     def _publish_detections(self, det_msg, bgr: np.ndarray, depth: np.ndarray, stamp: Time) -> None:
         h, w = bgr.shape[:2]
         fx = self._info.k[0] if self._info else None
         cx = self._info.k[2] if self._info else w / 2
+        if self._ws is not None:
+            self._water_in = (bgr, depth, stamp)
+            self._water_ev.set()
         objects = []
         for d in (det_msg.detections if det_msg is not None else []):
             box = (int(max(0.0, d.xmin) * w), int(max(0.0, d.ymin) * h),
@@ -465,7 +527,17 @@ class OakRgbdNode(Node):
                 "mask": depth_mask(depth, box, z),
             })
         objects.sort(key=lambda o: (o["distance_m"] is None, o["distance_m"] or 0.0))
-        img = annotate(bgr, objects, f"OAK on-camera YOLO | {len(objects)} objects")
+        title = f"OAK on-camera YOLO | {len(objects)} objects"
+        base, drawn = bgr, objects
+        water = self._water
+        # Drawn on the current frame from the latest segmentation (up to ~0.4 s
+        # older); dropped when stale so a stopped worker shows no water at all.
+        if water is not None and time.monotonic() - water[3] < 1.5:
+            labels, wobjs, frac, t = water
+            base = water_seg.tint(bgr, labels)
+            title += f" | water {frac:.0%}, {len(wobjs)} on it"
+            drawn = objects + wobjs  # drawn only; /oak/detections stays the detector's
+        img = annotate(base, drawn, title)
         ok, jpg = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), self._jpeg_q])
         if ok:
             c = CompressedImage()
@@ -502,6 +574,9 @@ class OakRgbdNode(Node):
         self._last_report = (now, self._frames)
         if self._frames:
             extra = f", on-camera detector, {self._detections} objects in 10 s" if self._blob else ""
+            if self._ws is not None:
+                extra += f", water seg {self._water_runs / 10.0:.1f} Hz"
+                self._water_runs = 0
             self._detections = 0
             self.get_logger().info(f"publishing {rate:.1f} fps (rgb + aligned depth{extra})")
         else:
