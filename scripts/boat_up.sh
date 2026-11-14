@@ -74,7 +74,7 @@ fi
 nohup ros2 launch bringup njord.launch.py \
   fcu_url:="${FCU_URL:-/dev/ttyACM1:57600}" \
   enable_gui:=true gui_static_dir:=/workspace/NAMIBIA_REDESIGNED_GUI/dist \
-  enable_gui_cloud_mirror:=true enable_sonar:=true enable_oak_rgbd:=$OAK oak_device_ip:="$OAK_IP" enable_segmentation:=$SEG \
+  enable_gui_cloud_mirror:=true enable_sonar:=true enable_oak_rgbd:=$OAK ${OAK_IP:+oak_device_ip:=$OAK_IP} enable_segmentation:=$SEG \
   enable_nav2:=false enable_perception:=false enable_vision:=false \
   enable_boat_bt:=false enable_mission:=false \
   ${EXTRA_ARGS:-} > /workspace/boat_data/boat_up.log 2>&1 &

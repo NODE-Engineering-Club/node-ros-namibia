@@ -28,8 +28,8 @@
   --divider: rgba(255, 255, 255, 0.12);
   --blur-panel: 16px;
   --blur-sidebar: 20px;
-  --radius: 10px;
-  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-sm: 4px;
 
   --text: #e6edf3;
   --text-2: #8b949e;

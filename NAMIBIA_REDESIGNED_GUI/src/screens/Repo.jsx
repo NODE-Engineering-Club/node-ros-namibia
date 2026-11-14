@@ -2,8 +2,12 @@ import { useRef, useState } from 'react';
 
 import { bytes, duration } from '@asket/lib/format.js';
 
-import { Banner, CoursePreview, GlassPanel, Pill } from '../components/ui.jsx';
-import { IconDownload, IconPlus, IconTrash, IconUpload } from '../components/Icons.jsx';
+import {
+  Banner, CoursePreview, GlassPanel, Pill, SearchInput, Select,
+} from '../components/ui.jsx';
+import {
+  IconDownload, IconFolder, IconPlus, IconSort, IconTrash, IconUpload,
+} from '../components/Icons.jsx';
 import { WorkspaceHeader } from '../components/Shell.jsx';
 import {
   downloadMission, estimateS, fmtKm, fmtMin, newMission, parseMission, routeLengthM, routeValid,
@@ -18,15 +22,26 @@ import { preflightVerdict } from '../lib/vessel.js';
  * "Launch mission" only opens a saved mission in Navigate; arming and launch
  * stay separate operator actions.
  */
+const SORTS = {
+  saved: { label: 'Last saved · newest first', fn: (a, b) => (b.saved_utc_ms || 0) - (a.saved_utc_ms || 0) },
+  name: { label: 'Name · A–Z', fn: (a, b) => a.name.localeCompare(b.name) },
+  distance: { label: 'Distance · shortest first', fn: (a, b) => routeLengthM(a.waypoints) - routeLengthM(b.waypoints) },
+};
+
 export function Repo({ v, library, onOpenInDesigner, onLaunch }) {
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState('saved');
   const [error, setError] = useState(null);
+  const [pickedId, setPickedId] = useState(null);
   const fileRef = useRef(null);
   const verdict = preflightVerdict(v);
   const ready = v.ready.ready;
   const recordings = v.mission?.missions || [];
 
-  const list = library.missions.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()));
+  const list = library.missions
+    .filter((m) => m.name.toLowerCase().includes(query.toLowerCase()))
+    .sort(SORTS[sort].fn);
+  const picked = list.find((m) => m.id === pickedId) || list.find((m) => m.id === library.active?.id) || list[0] || null;
 
   const onFile = async (e) => {
     const file = e.target.files?.[0];
@@ -38,69 +53,93 @@ export function Repo({ v, library, onOpenInDesigner, onLaunch }) {
 
   return (
     <>
-      <WorkspaceHeader title="Saved missions" crumb="ASKET / Repo">
+      <WorkspaceHeader title="Repo">
         <Pill level={verdict.level}>{verdict.text}</Pill>
       </WorkspaceHeader>
       <div className="workspace-body">
-        <div className="repo-head">
-          <input className="input" placeholder="Search by mission name…" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <span className="hint">Last saved · newest first</span>
-          <span style={{ marginLeft: 'auto' }} />
-          <Pill level="neutral" dot={false}>{library.missions.length} saved</Pill>
+        <div className="repo-title">
+          <h2 className="section-title">Saved missions</h2>
           <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} />
           <button type="button" className="btn" onClick={() => fileRef.current?.click()}><IconUpload /> Import .json</button>
           <button type="button" className="btn primary" onClick={() => onOpenInDesigner(newMission())}><IconPlus /> Create mission</button>
         </div>
 
-        {error && <><Banner level="alarm" title="Import rejected" detail={error} /><div style={{ height: 10 }} /></>}
+        <div className="filters">
+          <SearchInput className="repo-search" placeholder="Search by mission name…" value={query} onChange={setQuery} />
+          <Select
+            icon={<IconSort />} value={sort} onChange={setSort}
+            options={Object.entries(SORTS).map(([value, o]) => ({ value, label: o.label }))}
+          />
+          <span className="count-label" style={{ marginLeft: 'auto' }}>{library.missions.length} saved</span>
+        </div>
+
+        {error && <><Banner inline level="alarm" title="Import rejected" detail={error} /><div style={{ height: 12 }} /></>}
         {ready
-          ? <Banner level="ok" title="Ready to go. Preflight complete." detail="Launch mission opens the saved mission in Navigate; arming and launch remain separate operator actions." />
-          : <Banner level="warn" title="Review before reuse" detail="Saved routes do not confirm current vessel readiness. Review the plan and re-run preflight before deployment." />}
+          ? <Banner inline level="ok" title="Ready to go." detail="Preflight complete. Launch mission opens the saved mission in Navigate for launch; arming and launch remain separate operator actions." />
+          : <Banner inline level="warn" title="Review before reuse." detail="Saved routes do not confirm current vessel readiness. Review the plan and re-run preflight before deployment." />}
         <div style={{ height: 12 }} />
 
-        <GlassPanel title="Mission library · review before reuse" aside={<span className="hint">Travel estimate = distance ÷ cruise speed; excludes holds and conditions.</span>}>
+        <section className="glass panel repo-library">
           {list.length === 0 ? (
             <div className="empty">
-              No saved missions yet. Import a .json (an example is at <span className="mono">/missions/walvis_survey_01.json</span>) or create one.
+              {library.missions.length === 0
+                ? <>No saved missions yet. Import a .json (an example is at <span className="mono">/missions/walvis_survey_01.json</span>) or create one.</>
+                : 'No mission matches the search.'}
             </div>
           ) : (
-            <table className="table">
+            <table className="table lines">
               <thead>
-                <tr><th>Course preview</th><th>Mission name / route</th><th>Distance</th><th>Est. execution</th><th>Last saved</th><th /></tr>
+                <tr>
+                  <th>Course preview</th><th>Mission name / route</th><th>Distance</th><th>Est. execution</th><th>Last saved ↓</th>
+                  <th className={`ready-col ${ready ? 'ok' : 'warn'}`}>{ready ? 'Ready to go' : 'NO-GO'}</th>
+                </tr>
               </thead>
               <tbody>
                 {list.map((m) => (
-                  <tr key={m.id} className={library.active?.id === m.id ? 'selected' : ''}>
+                  <tr key={m.id} className={picked?.id === m.id ? 'selected' : ''} onClick={() => setPickedId(m.id)}>
                     <td><CoursePreview waypoints={m.waypoints} /></td>
                     <td>
-                      <div className="repo-name">{m.name} {library.active?.id === m.id && <Pill level="info">Selected</Pill>}</div>
+                      <div className="repo-name">
+                        {m.name}
+                        {picked?.id === m.id && <span className="selected-tag">Selected</span>}
+                      </div>
                       <div className="hint">{m.waypoints.length} waypoints · {m.source === 'json' ? 'imported .json' : 'designed on basemap'}</div>
                     </td>
                     <td className="mono">{fmtKm(routeLengthM(m.waypoints))}</td>
                     <td className="mono">{fmtMin(estimateS(m))}<div className="hint">at {m.cruise_speed_ms} m/s</div></td>
                     <td>{m.saved_utc_ms ? new Date(m.saved_utc_ms).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}<div className="hint">Saved locally · .json</div></td>
-                    <td>
-                      <div className="btn-row" style={{ justifyContent: 'flex-end' }}>
-                        <button type="button" className="btn small" onClick={() => onOpenInDesigner(m)}>Open in designer</button>
-                        <button type="button" className="btn small ghost" onClick={() => downloadMission(m)} aria-label="Export"><IconDownload /></button>
-                        <button type="button" className="btn small ghost" onClick={() => library.remove(m.id)} aria-label="Delete"><IconTrash /></button>
-                        <button
-                          type="button" className="btn small primary"
-                          disabled={!routeValid(m)}
-                          title={ready ? 'Opens in Navigate. Does not arm or launch.' : 'Opens in Navigate for review. Complete preflight before launch.'}
-                          onClick={() => onLaunch(m)}
-                        >
-                          {ready ? 'Launch mission' : 'Open in Navigate'}
-                        </button>
-                      </div>
+                    <td className="ready-col">
+                      <button
+                        type="button" className={`btn small ${ready ? 'go' : 'warn'}`}
+                        disabled={!routeValid(m)}
+                        title={ready ? 'Opens in Navigate. Does not arm or launch.' : 'Opens in Navigate for review. Complete preflight before launch.'}
+                        onClick={(e) => { e.stopPropagation(); onLaunch(m); }}
+                      >
+                        Launch mission
+                      </button>
+                      {!ready && <div className="launch-note">Complete preflight to launch</div>}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          <p className="hint" style={{ margin: '8px 0 0' }}>○ Start / ■ End · schematic courses · not for navigation. Opening does not arm or launch ASKET.</p>
-        </GlassPanel>
+          <div className="panel-foot hint">
+            Showing {list.length} of {library.missions.length} saved missions · ○ Start / ■ End · schematic courses, not for navigation · opening does not arm or launch ASKET.
+          </div>
+        </section>
+
+        {picked && (
+          <div className="glass repo-dock">
+            <strong>{picked.name}</strong>
+            <span>·</span><span>{fmtKm(routeLengthM(picked.waypoints))}</span>
+            <span>·</span><span>{fmtMin(estimateS(picked))}</span>
+            <span style={{ marginLeft: 'auto' }} />
+            <button type="button" className="btn ghost" onClick={() => downloadMission(picked)}><IconDownload /> Export .json</button>
+            <button type="button" className="btn ghost" onClick={() => { library.remove(picked.id); setPickedId(null); }}><IconTrash /> Delete</button>
+            <button type="button" className="btn primary" onClick={() => onOpenInDesigner(picked)}><IconFolder /> Open in mission designer</button>
+          </div>
+        )}
 
         <div style={{ height: 12 }} />
         <GlassPanel title="Recordings on the vessel" aside={<span className="hint">From the vessel’s mission recorder</span>}>

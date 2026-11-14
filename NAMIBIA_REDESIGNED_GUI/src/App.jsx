@@ -4,7 +4,7 @@ import { isFitted } from '@asket/lib/fitted.js';
 import { MockControls } from '@asket/components/MockControls.jsx';
 import { duration } from '@asket/lib/format.js';
 
-import { Background, ROUTES, Sidebar, Splash, SystemFooter } from './components/Shell.jsx';
+import { Background, ROUTES, ShellContext, Sidebar, Splash, SystemFooter } from './components/Shell.jsx';
 import { Alerts } from './screens/Alerts.jsx';
 import { MissionDesign } from './screens/MissionDesign.jsx';
 import { Navigate } from './screens/Navigate.jsx';
@@ -222,8 +222,8 @@ export function App({ connection }) {
           <Sidebar route={route} onNavigate={navigate} alarms={v.alarms} />
           <main className={`workspace ${linkLost ? 'link-lost' : ''}`}>
             <LinkBanner v={v} />
-            {screen}
-            <SystemFooter v={v} connection={connection} />
+            <ShellContext.Provider value={{ v, connection }}>{screen}</ShellContext.Provider>
+            <SystemFooter />
           </main>
           {connection.isMock && mockOpen && (
             <aside className="glass dev-drawer" aria-label="Developer panel, mock mode only">

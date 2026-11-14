@@ -6,6 +6,10 @@ import { buildStyle, graticule } from '@asket/lib/mapStyle.js';
 import { registerMockTileProtocol } from '@asket/lib/mock/tiles.js';
 import { MapUnavailable, hasWebGL } from '../components/MapGuard.jsx';
 
+import {
+  EMPTY, GRID_CENTER, MAX_ZOOM, addAreaLayers, gridBounds, loadGrid, readSatPref, setSatelliteVisible, writeSatPref,
+} from '../lib/areaLayers.js';
+
 /**
  * Mission Design basemap.
  *
@@ -15,7 +19,6 @@ import { MapUnavailable, hasWebGL } from '../components/MapGuard.jsx';
  * whenever a .json is imported (`fitKey` changes) or "Fit route" is pressed.
  */
 
-const WALVIS = [14.5053, -22.9576];
 
 function darkStyle() {
   return {
@@ -25,7 +28,7 @@ function darkStyle() {
   };
 }
 
-function styleFor(info, isMock, tileUrls = null) {
+export function styleFor(info, isMock, tileUrls = null) {
   if (isMock) {
     if (!info?.mbtiles?.available) return { style: darkStyle(), tiles: false };
     registerMockTileProtocol(maplibregl);
@@ -47,6 +50,11 @@ export function PlannerMap({
   const [ready, setReady] = useState(false);
   const [tiles, setTiles] = useState(null);
   const [noMap, setNoMap] = useState(null);
+  const [satellite, setSatellite] = useState(readSatPref);
+  const [satError, setSatError] = useState(false);
+  const satRef = useRef(satellite);
+  satRef.current = satellite;
+  const areaBounds = useRef(null);
   handlers.current = { onAdd, onMove, onSelect, addMode };
 
   // -- create ----------------------------------------------------------
@@ -55,13 +63,25 @@ export function PlannerMap({
     (async () => {
       let info = null;
       try { info = await connection.fetchTileInfo(); } catch { info = null; }
+      // The operating area (Shearwater Bay grid) over satellite imagery, the
+      // same layers as Navigate's GPS window (lib/areaLayers.js).
+      let grid = EMPTY;
+      try { grid = await loadGrid(); } catch { grid = EMPTY; }
       if (cancelled || !container.current) return;
+      const bounds = gridBounds(grid);
+      areaBounds.current = bounds;
       const { style, tiles: hasTiles } = styleFor(info, connection.isMock, connection.tileUrls);
       setTiles(hasTiles);
       if (!hasWebGL()) { setNoMap('The map needs WebGL, which this browser does not provide.'); return; }
       let m;
       try {
-        m = new maplibregl.Map({ container: container.current, style, center: WALVIS, zoom: 13, attributionControl: { compact: true } });
+        m = new maplibregl.Map({
+        container: container.current,
+        style,
+        maxZoom: MAX_ZOOM,
+        ...(bounds ? { bounds, fitBoundsOptions: { padding: 30 } } : { center: GRID_CENTER, zoom: 14 }),
+        attributionControl: { compact: true },
+        });
       } catch (err) {
         setNoMap(`The map failed to start (${String(err?.message || err).slice(0, 120)}).`);
         return;
@@ -69,8 +89,7 @@ export function PlannerMap({
       m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
       m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       m.on('load', () => {
-        m.addSource('route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-        m.addLayer({ id: 'route', type: 'line', source: 'route', paint: { 'line-color': '#79b9cd', 'line-width': 2.5 } });
+        addAreaLayers(m, grid, { satellite: satRef.current, onSatError: setSatError });
         if (!hasTiles) {
           m.addSource('grid', { type: 'geojson', data: graticule(m.getBounds()) });
           m.addLayer({ id: 'grid', type: 'line', source: 'grid', paint: { 'line-color': 'rgba(255,255,255,0.10)', 'line-width': 1 } });
@@ -81,6 +100,9 @@ export function PlannerMap({
           });
           m.on('moveend', () => m.getSource('grid')?.setData(graticule(m.getBounds())));
         }
+        // Route last, so it draws above the imagery and the area grid.
+        m.addSource('route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        m.addLayer({ id: 'route', type: 'line', source: 'route', paint: { 'line-color': '#f0b429', 'line-width': 3 } });
         setReady(true);
       });
       m.on('click', (e) => {
@@ -138,15 +160,34 @@ export function PlannerMap({
     if (map.current) map.current.getCanvas().style.cursor = addMode ? 'crosshair' : '';
   }, [addMode]);
 
+  // -- satellite on / off (shared preference with Navigate) -------------
+  useEffect(() => {
+    if (ready) setSatelliteVisible(map.current, satellite);
+    writeSatPref(satellite);
+  }, [satellite, ready]);
+
+  const fitArea = () => {
+    if (map.current && areaBounds.current) map.current.fitBounds(areaBounds.current, { padding: 30, duration: 500 });
+  };
+
   return (
     <>
       <div ref={container} className="map" />
       {noMap && <MapUnavailable reason={noMap} />}
-      {tiles === false && (
-        <span className="pill neutral" style={{ position: 'absolute', left: 10, top: 10, zIndex: 2 }}>
-          No map tiles · coordinate grid only
-        </span>
-      )}
+      <div className="map-tools">
+        <button type="button" className="btn small" onClick={fitArea}>Fit grid</button>
+        <button type="button" className={`btn small ${satellite ? 'primary' : ''}`} onClick={() => setSatellite((s) => !s)}>
+          Satellite {satellite ? 'on' : 'off'}
+        </button>
+      </div>
+      <div className="map-notes">
+        {satellite && satError && (
+          <div className="map-note warn">Satellite imagery not loading (no internet?).</div>
+        )}
+        {tiles === false && (!satellite || satError) && (
+          <div className="map-note">No map tiles · coordinate grid only</div>
+        )}
+      </div>
     </>
   );
 }

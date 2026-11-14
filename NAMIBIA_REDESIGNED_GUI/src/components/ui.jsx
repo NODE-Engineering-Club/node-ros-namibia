@@ -1,7 +1,9 @@
 import { useState } from 'react';
 
 import { latestCommand } from '../lib/vessel.js';
-import { IconCheck, IconUnknown, IconWarn, IconX } from './Icons.jsx';
+import {
+  IconCheck, IconChevron, IconSearch, IconShield, IconUnknown, IconWarn, IconX,
+} from './Icons.jsx';
 
 /** A frosted-glass panel: Figma ASKET/Glass/Surface + Border + Panel blur. */
 export function GlassPanel({
@@ -52,18 +54,47 @@ export function Pill({ level = 'neutral', children, title, dot = true }) {
   );
 }
 
-const BANNER_ICON = { ok: <IconCheck />, warn: <IconWarn />, alarm: <IconX />, info: <IconUnknown /> };
+const BANNER_ICON = { ok: <IconShield />, warn: <IconShield />, alarm: <IconX />, info: <IconUnknown /> };
 
-export function Banner({ level = 'info', title, detail, actions, icon }) {
+/**
+ * Figma banners come in two shapes: two lines (title over detail, Preflight)
+ * and one line (`inline`: bold title, then the detail, Alerts / Repo).
+ */
+export function Banner({ level = 'info', title, detail, actions, icon, inline = false }) {
   return (
-    <div className={`banner ${level}`} role={level === 'alarm' ? 'alert' : 'status'}>
+    <div className={`banner ${level} ${inline ? 'inline' : ''}`} role={level === 'alarm' ? 'alert' : 'status'}>
       {icon ?? BANNER_ICON[level]}
-      <div>
+      <div className="banner-text">
         <strong>{title}</strong>
-        {detail && <div className="detail">{detail}</div>}
+        {detail && <span className="detail">{detail}</span>}
       </div>
       {actions && <div className="actions">{actions}</div>}
     </div>
+  );
+}
+
+/** Figma search field: glass input with a magnifier. */
+export function SearchInput({ value, onChange, placeholder, className = '' }) {
+  return (
+    <label className={`search ${className}`}>
+      <IconSearch />
+      <input className="input" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
+/** Figma dropdown: "Label: Value ⌄" on glass. A native select underneath. */
+export function Select({ label, value, onChange, options, icon }) {
+  const current = options.find((o) => o.value === value);
+  return (
+    <label className="select">
+      {icon}
+      <span className="select-text">{label ? `${label}: ` : ''}{current?.label}</span>
+      <IconChevron />
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
   );
 }
 
@@ -74,9 +105,13 @@ export function Banner({ level = 'info', title, detail, actions, icon }) {
  *  - rule 5: a command that changes what the vessel does needs a second click;
  *  - rule 4: the button reports the SERVER's verdict (pending / confirmed /
  *    failed), never what was asked for.
+ *
+ * `failuresOnly`: where the confirmed outcome is already shown elsewhere on
+ * screen (e.g. the REC pill), only a failure is printed under the button.
  */
 export function ConfirmAction({
   connection, state, command, args = {}, label, prompt, icon, variant = '', disabled = false, title,
+  failuresOnly = false,
 }) {
   const [asking, setAsking] = useState(false);
   const latest = latestCommand(state, command);
@@ -112,7 +147,8 @@ export function ConfirmAction({
         {icon}
         {pending ? `${label}…` : label}
       </button>
-      {latest && latest.status !== 'pending' && latest.detail && (
+      {latest && latest.status !== 'pending' && latest.detail
+        && (!failuresOnly || latest.status === 'failed') && (
         <span className={`confirm-result ${latest.status}`}>{latest.detail}</span>
       )}
     </span>
@@ -140,7 +176,7 @@ export function CoursePreview({ waypoints, className = 'course' }) {
   const lons = waypoints.map((w) => w.lon);
   const [minLat, maxLat, minLon, maxLon] = [Math.min(...lats), Math.max(...lats), Math.min(...lons), Math.max(...lons)];
   const span = Math.max(maxLat - minLat, (maxLon - minLon) * Math.cos((minLat * Math.PI) / 180), 1e-6);
-  const W = 92; const H = 56; const pad = 8;
+  const W = 150; const H = 56; const pad = 10;
   const scale = Math.min((W - 2 * pad) / span, (H - 2 * pad) / span);
   const x = (lon) => pad + (lon - minLon) * Math.cos((minLat * Math.PI) / 180) * scale;
   const y = (lat) => H - pad - (lat - minLat) * scale;
