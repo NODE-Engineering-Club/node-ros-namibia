@@ -76,3 +76,26 @@ def test_throttled_reader_caps_rate():
     t0 = time.monotonic()
     assert b"".join(iter(r)) == b"x" * 20000
     assert time.monotonic() - t0 >= 0.15
+
+
+def test_tree_uploads_recordings_not_settings_and_resends_grown(tmp_path):
+    from mission_recorder.blackbox_upload import pending_tree, upload_one
+    sv = tmp_path / "sonarview"
+    (sv / "Omniscan 3D").mkdir(parents=True)
+    _touch(sv / "config.json")
+    _touch(sv / "errlog.jsonl")
+    rec = _touch(sv / "Omniscan 3D" / "2026-11-14-15-10.svlz", b"ab")
+    _touch(sv / "Omniscan 3D" / "new.svlz", age=5)   # still being written
+    (item,) = pending_tree(sv)
+    assert item.blob_suffix == "Omniscan 3D/2026-11-14-15-10.svlz"
+
+    class FakeCC:
+        def upload_blob(self, name, data, length, **kw):
+            self.name = name
+
+    cc = FakeCC()
+    upload_one(cc, "ASKET_02/sonarview", item)
+    assert cc.name == "ASKET_02/sonarview/Omniscan 3D/2026-11-14-15-10.svlz"
+    assert pending_tree(sv) == []
+    _touch(rec, b"abcd")
+    assert [p.rel for p in pending_tree(sv)] == ["Omniscan 3D/2026-11-14-15-10.svlz"]

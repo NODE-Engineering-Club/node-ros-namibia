@@ -42,10 +42,14 @@ class Pending:
     session: str
     path: Path
     size: int
+    # For files outside a black-box session (pending_tree): where the ledger
+    # lives and the blob name below the prefix.
+    ledger_dir: Path | None = None
+    rel: str | None = None
 
     @property
     def blob_suffix(self) -> str:
-        return f"{self.session}/{self.path.name}"
+        return self.rel if self.rel is not None else f"{self.session}/{self.path.name}"
 
 
 def load_ledger(session_dir: Path) -> dict:
@@ -92,6 +96,30 @@ def pending_files(root: Path, active_session: str | None, settle_s: float = 15.0
             if ledger.get(f.name, {}).get("size") == st.st_size:
                 continue
             out.append(Pending(sdir.name, f, st.st_size))
+    return out
+
+
+def pending_tree(root: Path, settle_s: float = 60.0, skip_suffixes=(".json", ".jsonl"),
+                 now: float | None = None) -> list[Pending]:
+    """Every file under ``root`` (e.g. SonarView's /userdata) not yet uploaded
+    at its current size and untouched for ``settle_s``. Settings and logs
+    (.json/.jsonl) are skipped. A file that grows after upload is sent again."""
+    now = time.time() if now is None else now
+    if not root.is_dir():
+        return []
+    ledger = load_ledger(root)
+    out = []
+    for f in sorted(p for p in root.rglob("*") if p.is_file()):
+        rel = f.relative_to(root).as_posix()
+        if f.name.startswith(".uploaded") or f.suffix in skip_suffixes:
+            continue
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if now - st.st_mtime < settle_s or ledger.get(rel, {}).get("size") == st.st_size:
+            continue
+        out.append(Pending("", f, st.st_size, ledger_dir=root, rel=rel))
     return out
 
 
@@ -146,4 +174,7 @@ def upload_one(container_client, prefix: str, item: Pending, max_kbps: float = 0
             overwrite=True, max_concurrency=1,
             content_settings=ContentSettings(content_type=ctype),
         )
-    mark_uploaded(item.path.parent, item.path.name, item.size)
+    if item.ledger_dir is not None:
+        mark_uploaded(item.ledger_dir, item.rel, item.size)
+    else:
+        mark_uploaded(item.path.parent, item.path.name, item.size)

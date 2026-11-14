@@ -75,11 +75,16 @@ if [ "$OAK" = true ]; then
   [ "${SAM2:-0}" = 1 ] && [ -f /ws/models/sam2.1_hiera_tiny/vision_encoder_int8.onnx ] && SEG=true
 fi
 
+# Sonar: SonarView (scripts/boat.sh, docker) is the 3D window and holds the
+# sonar's single TCP connection, so omniscan_bridge stays off unless SONAR=bridge.
+SONAR_BRIDGE=false
+[ "${SONAR:-sonarview}" = bridge ] && SONAR_BRIDGE=true
+
 nohup ros2 launch bringup njord.launch.py \
   fcu_url:="${FCU_URL:-/dev/ttyACM1:57600}" \
   enable_gui:=true gui_static_dir:=/workspace/NAMIBIA_REDESIGNED_GUI/dist \
-  enable_gui_cloud_mirror:=true enable_blackbox:=true enable_sonar:=true enable_oak_rgbd:=$OAK ${OAK_IP:+oak_device_ip:=$OAK_IP} enable_segmentation:=$SEG \
+  enable_gui_cloud_mirror:=true enable_blackbox:=true enable_sonar:=$SONAR_BRIDGE enable_oak_rgbd:=$OAK ${OAK_IP:+oak_device_ip:=$OAK_IP} enable_segmentation:=$SEG \
   enable_nav2:=false enable_perception:=false enable_vision:=false \
   enable_boat_bt:=false enable_mission:=false \
   ${EXTRA_ARGS:-} > /workspace/boat_data/boat_up.log 2>&1 &
-echo "launched (oak=$OAK${OAK_IP:+ at $OAK_IP}, on-camera detection, sam2=$SEG). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"
+echo "launched (sonar=${SONAR:-sonarview}, oak=$OAK${OAK_IP:+ at $OAK_IP}, on-camera detection, sam2=$SEG). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"

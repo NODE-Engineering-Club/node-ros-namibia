@@ -4,6 +4,16 @@ One page, for the beach. Names in **bold** are what the GUI shows. The RC
 transmitter is always the authority: **Ch8 down** stops the boat, whatever the
 GUI says.
 
+## 0. Start, and the two windows
+
+- Start everything from the Jetson host: **`scripts/boat.sh`** (stop: `scripts/boat.sh stop`).
+- Two windows open in Firefox on the Jetson screen (from a laptop use the Jetson's address):
+  - **Our cockpit** `:8090` for GPS, camera, status, mission. When there is internet the same cockpit is on the Azure website.
+  - **SonarView** `:7077` (Cerulean) for the sonar 3D point cloud. Press **Start** in it to ping.
+- SonarView holds the sonar's only connection, so our ROS sonar bridge is off in this mode (`SONAR=bridge scripts/boat.sh` swaps them).
+- Everything is recorded on the Jetson (`boat_data/blackbox/`, and SonarView's own recordings in `boat_data/sonarview/`) and copied to Azure (`asket-missions`) whenever there is internet. Nothing is deleted automatically.
+- Firefox, not Chromium: only Firefox has WebGL on the Jetson (forced on in the profile's `user.js`: `webgl.force-enabled`).
+
 ## 1. Before leaving the shore
 
 - [ ] Kit: RC transmitter (charged), shore station on its tripod and powered, laptop, killswitch reachable, boat batteries charged.

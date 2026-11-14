@@ -13,3 +13,6 @@ blackbox:
     container: "asket-missions"
     asv_id: "ASKET_02"
     max_upload_kbps: 4000.0      # leave room for the live cockpit mirror
+    # SonarView (scripts/boat.sh) records the sonar into boat_data/sonarview;
+    # copy those to Azure too, under ASKET_02/sonarview/.
+    extra_upload_dirs: ["/data/sonarview:sonarview"]

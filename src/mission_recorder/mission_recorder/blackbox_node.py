@@ -19,6 +19,9 @@ happened is missing because nobody pressed "record".
   ``container`` container under ``<asv>/blackbox/``, rate-capped by
   ``max_upload_kbps``, retrying with back-off while there is no internet.
   Nothing is deleted anywhere.
+* Also uploads ``extra_upload_dirs`` (default: SonarView's recordings in
+  /data/sonarview -> <asv>/sonarview/), since with SonarView holding the
+  sonar its own logs are the sonar record.
 * Status as JSON on /blackbox/status every 2 s.
 """
 
@@ -40,7 +43,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import String
 
-from mission_recorder.blackbox_upload import pending_files, upload_one
+from mission_recorder.blackbox_upload import pending_files, pending_tree, upload_one
 
 DEFAULT_TOPICS = [
     # GPS / autopilot / navigation
@@ -83,6 +86,13 @@ class BlackBox(Node):
         self.container = p("container", "asket-missions").value
         self.asv = p("asv_id", "ASKET_02").value
         self.max_kbps = float(p("max_upload_kbps", 4000.0).value)
+        # Other folders to copy to Azure as they fill: "local_dir:blob_subprefix",
+        # e.g. SonarView's recordings when it, not omniscan_bridge, has the sonar.
+        self.extra = []
+        for spec in p("extra_upload_dirs", ["/data/sonarview:sonarview"]).value:
+            local, _, sub = spec.partition(":")
+            if local:
+                self.extra.append((Path(local), sub or Path(local).name))
 
         self.root.mkdir(parents=True, exist_ok=True)
         self.proc: subprocess.Popen | None = None
@@ -160,18 +170,20 @@ class BlackBox(Node):
     def _upload_loop(self):
         cc, backoff = None, 30.0
         while not self._stop.is_set():
-            items = pending_files(self.root, self.session)
+            items = [(f"{self.asv}/blackbox", i) for i in pending_files(self.root, self.session)]
+            for local, sub in self.extra:
+                items += [(f"{self.asv}/{sub}", i) for i in pending_tree(local)]
             self.up["pending_files"] = len(items)
-            self.up["pending_bytes"] = sum(i.size for i in items)
+            self.up["pending_bytes"] = sum(i.size for _, i in items)
             if not items:
                 self._stop.wait(20.0)
                 continue
             try:
                 cc = cc or self._client()
-                for it in items:
+                for prefix, it in items:
                     if self._stop.is_set():
                         return
-                    upload_one(cc, f"{self.asv}/blackbox", it, self.max_kbps)
+                    upload_one(cc, prefix, it, self.max_kbps)
                     self.up["uploaded_files"] += 1
                     self.up["pending_files"] -= 1
                     self.up["pending_bytes"] -= it.size
