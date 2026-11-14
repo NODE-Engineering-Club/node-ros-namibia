@@ -1,0 +1,15 @@
+# Always-on black box (blackbox_node). Topics: see DEFAULT_TOPICS in
+# mission_recorder/blackbox_node.py; override with a `topics:` list here.
+blackbox:
+  ros__parameters:
+    root: "/data/blackbox"
+    split_s: 300                 # one .mcap chunk per 5 minutes
+    camera_topic: "/oak/rgb/image_raw/compressed"
+    camera_hz: 1.0               # decided 2026-11-14: 1 frame/s (~0.3 GB/h)
+    min_free_bytes: 1073741824   # stop recording below 1 GiB free
+    resume_free_bytes: 2147483648
+    upload: true                 # copy finished chunks to Azure when online
+    connection_string_file: "/data/secrets/azure_storage_connection_string"
+    container: "asket-missions"
+    asv_id: "ASKET_02"
+    max_upload_kbps: 4000.0      # leave room for the live cockpit mirror

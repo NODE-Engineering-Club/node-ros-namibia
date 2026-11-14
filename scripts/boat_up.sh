@@ -19,7 +19,11 @@
 # every node after a few restarts, load average 265). Nodes run from
 # /ws/install*, /workspace/install* or /opt/ros. This script itself does not match.
 stop_all() {
-  for pat in "ros2 launch" "/ws/install" "/workspace/install" "/opt/ros/jazzy/lib" "gui_backend_node" "mavros_node"; do
+  # The black-box recorder first, with SIGINT so it closes its .mcap and
+  # writes metadata.yaml (it runs in its own process group).
+  pkill -INT -f "ros2 bag record" 2>/dev/null
+  for _ in $(seq 15); do pgrep -f "ros2 bag record" >/dev/null || break; sleep 1; done
+  for pat in "ros2 bag record" in "ros2 launch" "/ws/install" "/workspace/install" "/opt/ros/jazzy/lib" "gui_backend_node" "mavros_node"; do
     pkill -9 -f "$pat" 2>/dev/null
   done
   for _ in $(seq 10); do
@@ -74,7 +78,7 @@ fi
 nohup ros2 launch bringup njord.launch.py \
   fcu_url:="${FCU_URL:-/dev/ttyACM1:57600}" \
   enable_gui:=true gui_static_dir:=/workspace/NAMIBIA_REDESIGNED_GUI/dist \
-  enable_gui_cloud_mirror:=true enable_sonar:=true enable_oak_rgbd:=$OAK ${OAK_IP:+oak_device_ip:=$OAK_IP} enable_segmentation:=$SEG \
+  enable_gui_cloud_mirror:=true enable_blackbox:=true enable_sonar:=true enable_oak_rgbd:=$OAK ${OAK_IP:+oak_device_ip:=$OAK_IP} enable_segmentation:=$SEG \
   enable_nav2:=false enable_perception:=false enable_vision:=false \
   enable_boat_bt:=false enable_mission:=false \
   ${EXTRA_ARGS:-} > /workspace/boat_data/boat_up.log 2>&1 &

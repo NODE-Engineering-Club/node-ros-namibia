@@ -124,6 +124,15 @@ def generate_launch_description():
             description="A camera the GUI can show is aboard and running.",
         ),
         DeclareLaunchArgument(
+            "enable_blackbox",
+            default_value="false",
+            description=(
+                "Always-on recording of GPS, sonar, camera (1 frame/s) and telemetry "
+                "to /data/blackbox, copied to Azure when there is internet "
+                "(mission_recorder blackbox_node)."
+            ),
+        ),
+        DeclareLaunchArgument(
             "enable_sonar",
             default_value="false",
             description=(
@@ -227,6 +236,19 @@ def generate_launch_description():
                      "config", "recorder.yaml"]
                 ),
                 sim_time,
+            ],
+        ),
+        Node(
+            package="mission_recorder",
+            executable="blackbox_node",
+            name="blackbox",
+            output="screen",
+            condition=IfCondition(LaunchConfiguration("enable_blackbox")),
+            parameters=[
+                PathJoinSubstitution(
+                    [get_package_share_directory("mission_recorder"),
+                     "config", "blackbox.yaml"]
+                ),
             ],
         ),
         Node(

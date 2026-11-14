@@ -218,6 +218,9 @@ def generate_launch_description():
         # docs/HARDWARE_DECISIONS.md §2) is where it would go if anybody
         # re-addressed it, and nobody has. ASKET_SONAR_HOST overrides the
         # default without editing this file.
+        DeclareLaunchArgument("enable_blackbox",      default_value="false",
+                              description="Always-on recording to /data/blackbox + Azure upload "
+                                          "when online. Requires enable_gui:=true."),
         DeclareLaunchArgument("enable_sonar",         default_value="false",
                               description="Start omniscan_bridge (sonar health only; SonarView owns the "
                                           "sonar). Requires enable_gui:=true."),
@@ -971,6 +974,7 @@ def generate_launch_description():
             launch_arguments={
                 "gui_port": LaunchConfiguration("gui_port"),
                 "use_sim": LaunchConfiguration("use_sim"),
+                "enable_blackbox": LaunchConfiguration("enable_blackbox"),
                 # The GUI shows the lidar and camera panels as "not fitted"
                 # rather than empty when their driver is not started.
                 "lidar_fitted": LaunchConfiguration("enable_lidar"),
