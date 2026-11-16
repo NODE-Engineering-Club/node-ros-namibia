@@ -44,6 +44,10 @@ sonarview_up() {
 
 gpu_up() {
   sudo -n podman rm -f asket-gpu >/dev/null 2>&1 || true
+  # Never download at start-up: the image is several GB and the pull blocks
+  # the whole boot (2026-11-16). Pull it once by hand when on good internet.
+  sudo -n podman image exists "$GPU_IMAGE" 2>/dev/null \
+    || { echo "GPU server: image not on the Jetson, skipped; CPU fallback"; return 0; }
   # Full path: podman has no "nvidia" runtime registered on this host.
   sudo -n podman run -d --name asket-gpu --runtime /usr/bin/nvidia-container-runtime --network host \
     --restart unless-stopped \
