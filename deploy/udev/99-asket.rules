@@ -1,0 +1,35 @@
+# Stable names for the boat's USB serial devices (hw-alignment step 8).
+#
+# Everything sits behind one USB hub, so /dev/ttyACM0..3 are handed out in
+# whatever order the devices enumerate, and that order changes between boots.
+# These rules name each device by its own USB serial number instead.
+#
+# EVERY "CHANGE_ME_..." BELOW IS A PLACEHOLDER. Fill each one in from the real
+# device with the commands in deploy/udev/README.md, then install. A rule with
+# a placeholder left in simply matches nothing — the link is not created, and
+# the node that needs it reports the port as missing.
+#
+# ID_SERIAL_SHORT is the device's iSerial string. ID_USB_INTERFACE_NUM keeps
+# the link on the first serial interface of devices that expose several (a
+# Pixhawk running ArduPilot exposes two: MAVLink first, then SLCAN).
+
+# Raspberry Pi Pico running firmware/pico-node_v4 (pico_bridge, pico_port).
+# Vendor 2e8a is Raspberry Pi; the serial is the flash chip's unique id.
+SUBSYSTEM=="tty", ENV{ID_VENDOR_ID}=="2e8a", ENV{ID_SERIAL_SHORT}=="CHANGE_ME_PICO_SERIAL", \
+  ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="pico", GROUP="dialout", MODE="0660"
+
+# BMS readers, one per 4S pack (sensors/bms_reader: bms_port, bms2_port),
+# each through a Microchip MCP2221 USB-UART bridge (04d8:00dd). Which pack is
+# which is decided here: label the cables to match. An MCP2221 reports a USB
+# serial only if one was programmed into it, and two unprogrammed ones look
+# identical — then use the ID_PATH variant in README.md (by hub socket).
+SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="CHANGE_ME_BMS_PACK1_SERIAL", \
+  ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="bms_pack1", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="CHANGE_ME_BMS_PACK2_SERIAL", \
+  ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="bms_pack2", GROUP="dialout", MODE="0660"
+
+# Pixhawk 4 (MAVROS fcu_url, Phase B). Matched on serial only, not on vendor:
+# PX4 enumerates as 26ac:0032, ArduPilot builds as 1209:5740/5741 or 26ac,
+# and the firmware on this board is still to be verified.
+SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="CHANGE_ME_PIXHAWK_SERIAL", \
+  ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="pixhawk", GROUP="dialout", MODE="0660"

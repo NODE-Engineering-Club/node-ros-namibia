@@ -157,7 +157,7 @@ global_costmap:
       # KELP_CAPABILITIES.md's style, e.g. float a kelp mat and confirm the
       # planner actually diverts, per the design note's G-06).
       kelp_keepout_layer:
-        plugin: "nav2_costmap_2d::KeepOutFilter"
+        plugin: "nav2_costmap_2d::KeepoutFilter"  # was KeepOutFilter: no such class, the costmap failed to load it
         enabled: true
         filter_info_topic: "/costmap_filter_info"
 
@@ -224,7 +224,7 @@ local_costmap:
       # Costmap Filters tutorial uses (filter layers resolve mask<->costmap
       # frame via TF internally), not an oversight.
       kelp_keepout_layer:
-        plugin: "nav2_costmap_2d::KeepOutFilter"
+        plugin: "nav2_costmap_2d::KeepoutFilter"  # was KeepOutFilter: no such class, the costmap failed to load it
         enabled: true
         filter_info_topic: "/costmap_filter_info"
 
@@ -296,7 +296,9 @@ collision_monitor:
     # conservative starting point, not a validated stopping distance.
     FootprintStop:
       type: "polygon"
-      points: [[0.75, 0.40], [0.75, -0.40], [-0.75, -0.40], [-0.75, 0.40]]
+      # A string, not a YAML list: Jazzy reads polygon points as "[[x, y], ...]",
+      # and a nested list makes the whole params file unparseable (every Nav2 node died).
+      points: "[[0.75, 0.40], [0.75, -0.40], [-0.75, -0.40], [-0.75, 0.40]]"
       action_type: "stop"
       min_points: 3
       visualize: true
@@ -304,7 +306,9 @@ collision_monitor:
 
     SafetySlow:
       type: "polygon"
-      points: [[3.5, 1.2], [3.5, -1.2], [-0.5, -1.2], [-0.5, 1.2]]
+      # A string, not a YAML list: Jazzy reads polygon points as "[[x, y], ...]",
+      # and a nested list makes the whole params file unparseable (every Nav2 node died).
+      points: "[[3.5, 1.2], [3.5, -1.2], [-0.5, -1.2], [-0.5, 1.2]]"
       action_type: "slowdown"
       slowdown_ratio: 0.35
       min_points: 4

@@ -1,0 +1,20 @@
+# Survey-area geofence — EXAMPLE. Copy to /data/setup/geofence.yaml on the
+# Jetson (host: /srv/asket/data/setup/geofence.yaml) and replace the corners
+# with the day's survey block. Read by sensors/geofence_mask_node at start-up;
+# restart the stack after editing it.
+#
+# The boat may not plan or follow a path outside this polygon (Nav2 survey
+# profile, nav2_params_survey.yaml). It is NOT obstacle avoidance: nothing
+# aboard sees obstacles. Draw it around open water only — not over moorings,
+# jetties or the shore — and keep the start point of every mission inside it.
+#
+# Corners: [latitude, longitude], decimal degrees, WGS84, in order around the
+# polygon (clockwise or anticlockwise). Do not repeat the first corner.
+# A quick way to get them: drop pins in any map app and copy the coordinates.
+geofence:
+  name: "EXAMPLE - Walvis Bay lagoon block (replace me)"
+  polygon:
+    - [-22.9500, 14.4800]
+    - [-22.9500, 14.4900]
+    - [-22.9580, 14.4900]
+    - [-22.9580, 14.4800]

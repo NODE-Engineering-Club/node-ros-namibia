@@ -1,0 +1,56 @@
+/*
+ * Design tokens, 1:1 with the Figma local styles in "GUI - Design".
+ * Figma style name               → CSS variable
+ * ASKET/Glass/Surface            → --glass
+ * ASKET/Glass/Surface raised     → --glass-raised
+ * ASKET/Glass/Well               → --glass-well
+ * ASKET/Glass/Sidebar            → --glass-sidebar
+ * ASKET/Glass/Header             → --glass-header
+ * ASKET/Glass/Border             → --border
+ * ASKET/Glass/Border soft        → --border-soft
+ * ASKET/Glass/Divider            → --divider
+ * ASKET/Glass/Panel blur         → --blur-panel
+ * ASKET/Glass/Sidebar blur       → --blur-sidebar
+ * ASKET/Status/* tint            → --ok-tint / --warn-tint / --info-tint
+ * ASKET/Background/Overlay       → --overlay
+ * Change a value in Figma → change it here, and every screen follows.
+ */
+:root {
+  --overlay: rgba(6, 17, 31, 0.55);
+
+  --glass: rgba(255, 255, 255, 0.06);
+  --glass-raised: rgba(255, 255, 255, 0.04);
+  --glass-well: rgba(2, 8, 16, 0.3);
+  --glass-sidebar: rgba(255, 255, 255, 0.05);
+  --glass-header: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.14);
+  --border-soft: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.12);
+  --blur-panel: 16px;
+  --blur-sidebar: 20px;
+  --radius: 8px;
+  --radius-sm: 4px;
+
+  --text: #e6edf3;
+  --text-2: #8b949e;
+  --text-3: #6e7681;
+
+  --ok: #3fb950;
+  --warn: #d29922;
+  --info: #79b9cd;
+  --alarm: #f85149;
+  --primary: #5995aa;
+  --neutral: #8b949e;
+
+  --ok-tint: rgba(63, 185, 80, 0.12);
+  --warn-tint: rgba(210, 153, 34, 0.12);
+  --info-tint: rgba(121, 185, 205, 0.12);
+  --alarm-tint: rgba(248, 81, 73, 0.12);
+  --neutral-tint: rgba(139, 148, 158, 0.12);
+
+  /* No web-font download: the Jetson serves everything offline. */
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --sidebar-w: 80px;
+}

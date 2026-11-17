@@ -114,6 +114,13 @@ IDs in brackets refer to the Kelp design documents in
 - [ ] Lawnmower lane generator: farm polygon + line spacing + range →
   waypoint list for `/mission/start`. Raise `desired_linear_vel` in
   `nav2_params.yaml` if surveying at 1.5 m/s.
+- [x] Omniscan decoding in ROS, first water test (`omniscan_bridge`, in a bucket,
+  2026-11-06; see `docs/SONAR_BRINGUP.md`).
+- [ ] Omniscan against a real target or seabed: are the points in the right place,
+  and does `pt_type` ever report bottom?
+- [ ] Sonar clock: NTP server on the Jetson, sonar pointed at it (`docs/SETUP.md`).
+- [ ] Decide who owns the sonar's TCP port per mission: it refused a second plain
+  TCP client, so SonarView and `omniscan_bridge` probably exclude each other.
 - [ ] SonarView on the onboard computer (BlueOS extension on the Pi, Docker
   on a Jetson); Omniscan in a tank first (T09).
 - [ ] `nmea_udp_bridge`: GGA + heading sentences from MAVROS to SonarView

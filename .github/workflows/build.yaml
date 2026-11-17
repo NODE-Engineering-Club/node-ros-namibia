@@ -18,6 +18,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # src/sllidar_ros2 (RPLIDAR S2 driver) is a git submodule; without
+          # this the image is built with an empty directory and has no lidar
+          # driver. See Containerfile, the COPY src/ comment.
+          submodules: recursive
 
       - uses: docker/setup-qemu-action@v3
         with:

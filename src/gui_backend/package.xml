@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>gui_backend</name>
+  <version>0.1.0</version>
+  <description>FastAPI + WebSocket backend serving the Asket mission GUI.</description>
+  <maintainer email="node@example.org">NODE Engineering Club</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>asket_interfaces</depend>
+  <depend>asket_common</depend>
+  <depend>asket_sim</depend>
+  <depend>omniscan_bridge</depend>
+  <depend>mission_recorder</depend>
+  <depend>system_test</depend>
+  <!-- deploy_route / abort_route / route_status: mission_manager's interfaces -->
+  <exec_depend>njord_msgs</exec_depend>
+  <exec_depend>geographic_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

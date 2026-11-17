@@ -1,0 +1,33 @@
+{
+  "id": "na-sb-n-09-kelp",
+  "format": "asket-mission",
+  "version": 1,
+  "name": "NA-SB-N-09_KELP",
+  "crs": "WGS84",
+  "cruise_speed_ms": 1.5,
+  "obstacle_policy": "stop",
+  "sensors": {},
+  "waypoints": [
+    {
+      "lat": -26.638939,
+      "lon": 15.108711
+    },
+    {
+      "lat": -26.638938,
+      "lon": 15.109716
+    },
+    {
+      "lat": -26.639841,
+      "lon": 15.109716
+    },
+    {
+      "lat": -26.639842,
+      "lon": 15.108712
+    },
+    {
+      "lat": -26.638939,
+      "lon": 15.108711
+    }
+  ],
+  "file_name": "Shearwater_Bay.kmz"
+}

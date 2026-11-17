@@ -1,0 +1,77 @@
+omniscan_bridge:
+  ros__parameters:
+    # MEASURED on the hardware, 2026-10-28: the sonar answers on
+    # 192.168.2.21, and SonarView reports "CONNECTED, tcp://192.168.2.21:62312,
+    # Product: Omniscan 3D". That is the default here because it is the only
+    # address the device has ever been seen on.
+    #
+    # It is NOT 192.168.2.92 (the figure previously carried here, which came
+    # from Cerulean's documentation for another model) and it is NOT
+    # 10.10.20.31 (the boat LAN plan in docs/HARDWARE_DECISIONS.md §2, which
+    # the sonar has not been moved onto).
+    #
+    # Note the conflict, which is a network decision nobody has taken yet: the
+    # 10.10.20.x plan puts the OAK-D-LR on .21, and the sonar is on .21 of
+    # 192.168.2.0/24 while SonarView has it talking to the host on .1 of that
+    # same /24. See docs/HARDWARE_DECISIONS.md §2.
+    #
+    # Override with the `host` parameter, or with ASKET_SONAR_HOST in the
+    # environment (the launch files read it). Overridden to 127.0.0.1 when
+    # sim:=true, where asket_sim serves real Ping Protocol frames on a real
+    # socket.
+    host: "192.168.2.21"
+    port: 62312
+
+    # TCP, measured. nmap against the sonar on 2026-10-28 found exactly ONE
+    # open TCP port -- 62312 -- with 51200 (Cerulean's documented port for the
+    # 450 family) and 7077 (SonarLink) closed, and SonarView itself reported
+    # "CONNECTED, tcp://192.168.2.21:62312". The port this package was built
+    # around was right; the transport was not.
+    #
+    # What is on that socket is Ping Protocol, measured 2026-11-06 with the
+    # transducer in water: status when idle, point sets once told to ping. The
+    # parser still rejects and counts what it cannot read, and the diagnostics
+    # refuse to say OK until a point set has decoded. See docs/SONAR_BRINGUP.md.
+    transport: "tcp"
+
+    # Whether this node may command the sonar to ping. OFF, and not as a
+    # cautious default: those parameters start the transducer, a transducer
+    # driven in air can damage itself, and a launch file runs when nobody is
+    # beside the boat. Turn it on when somebody is, and the transducer is wet.
+    # The ~/set_ping_parameters service works either way -- a person asking is
+    # not the same as a node deciding.
+    send_ping_parameters: false
+
+    frame_id: "base_link"
+
+    # NOTE: there is deliberately no ntp_url here. Cerulean REMOVED the
+    # Omniscan 3D's SET_NTP_INFO packet; the NTP server is configured on the
+    # device itself and defaults to an internet host. There is no internet in
+    # the field, so if that step is missed the sonar's clock is wrong and every
+    # mission is un-georeferenceable. The bridge cannot fix it — it measures
+    # clock_offset_ms and shouts. See docs/SETUP.md.
+
+    # PROVISIONAL (Q1): depth profile in Namibia unknown. Adjustable at runtime
+    # from the GUI via ~/set_ping_parameters — the range is meant to be tuned
+    # on site, not fixed at launch.
+    range_m: 30.0
+    # -1 is auto gain, which is Cerulean's recommendation. 0..10 is manual.
+    gain_index: -1
+    ping_rate_hz: 5.0
+    speed_of_sound: 1500.0
+    # Range resolution in steps; must be 200..1000 inclusive.
+    n_range_steps: 400
+
+    # The GUI is not a sonar analysis tool, so the point cloud is rate-limited
+    # for RViz and debugging. Health accounting still sees every ping.
+    max_publish_rate_hz: 20.0
+    drain_rate_hz: 100.0
+
+    use_vessel_attitude: true
+
+    # Mounting geometry is NOT here. It lives in mounting.yaml, which carries
+    # its own "has anybody measured this" flag and is read by the pre-flight
+    # check as well as by this node. Leave empty to fall back to the built-in
+    # defaults — which the pre-flight will then report as a warning, loudly and
+    # every time. See docs/open_questions.md Q2.
+    mounting_path: ""

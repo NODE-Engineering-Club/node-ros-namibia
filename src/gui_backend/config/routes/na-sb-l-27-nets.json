@@ -1,0 +1,33 @@
+{
+  "id": "na-sb-l-27-nets",
+  "format": "asket-mission",
+  "version": 1,
+  "name": "NA-SB-L-27_NETS",
+  "crs": "WGS84",
+  "cruise_speed_ms": 1.5,
+  "obstacle_policy": "stop",
+  "sensors": {},
+  "waypoints": [
+    {
+      "lat": -26.635404,
+      "lon": 15.102217
+    },
+    {
+      "lat": -26.635403,
+      "lon": 15.103262
+    },
+    {
+      "lat": -26.635728,
+      "lon": 15.103262
+    },
+    {
+      "lat": -26.635729,
+      "lon": 15.102217
+    },
+    {
+      "lat": -26.635404,
+      "lon": 15.102217
+    }
+  ],
+  "file_name": "Shearwater_Bay.kmz"
+}

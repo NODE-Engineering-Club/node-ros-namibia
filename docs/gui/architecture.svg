@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 620" width="940" height="620"
+     font-family="DejaVu Sans, Helvetica, Arial, sans-serif" role="img"
+     aria-label="ASKET mission GUI architecture: the React frontend talks only to gui_backend over HTTP and one WebSocket; gui_backend talks to ROS 2; ROS 2 talks to the hardware. The RC transmitter and hardware killswitch reach the Pico directly, bypassing all software.">
+  <title>ASKET mission GUI architecture</title>
+  <desc>Four software layers and the hardware, with the sovereign RC path shown bypassing every layer.</desc>
+
+  <rect x="0" y="0" width="940" height="620" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#44566b"/>
+    </marker>
+    <marker id="arr2" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 10 0 L 0 5 L 10 10 z" fill="#44566b"/>
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9f1239"/>
+    </marker>
+  </defs>
+
+  <!-- ===== zone: shore ===== -->
+  <rect x="24" y="34" width="330" height="92" rx="7" fill="#f4f8fb" stroke="#b9ccda" stroke-dasharray="5 3"/>
+  <text x="38" y="54" font-size="12" font-weight="600" fill="#55707f">SHORE — laptop, in a browser</text>
+  <rect x="44" y="62" width="290" height="50" rx="5" fill="#dceaf5" stroke="#5e89ab" stroke-width="1.5"/>
+  <text x="189" y="82" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17334a">React frontend</text>
+  <text x="189" y="100" font-size="11" text-anchor="middle" fill="#3c5a70">MapLibre GL · Vite · src/asket_gui/</text>
+
+  <!-- ===== zone: boat computer ===== -->
+  <rect x="24" y="152" width="330" height="222" rx="7" fill="#f4f8fb" stroke="#b9ccda" stroke-dasharray="5 3"/>
+  <text x="38" y="172" font-size="12" font-weight="600" fill="#55707f">BOAT — Jetson AGX Orin, in a container</text>
+
+  <rect x="44" y="182" width="290" height="50" rx="5" fill="#dceaf5" stroke="#5e89ab" stroke-width="1.5"/>
+  <text x="189" y="202" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17334a">gui_backend</text>
+  <text x="189" y="220" font-size="11" text-anchor="middle" fill="#3c5a70">FastAPI + WebSocket · port 8090</text>
+
+  <rect x="44" y="246" width="290" height="44" rx="5" fill="#e9f1f7" stroke="#7d9db5"/>
+  <text x="189" y="264" font-size="12.5" font-weight="600" text-anchor="middle" fill="#17334a">Source layer</text>
+  <text x="189" y="280" font-size="10.5" text-anchor="middle" fill="#3c5a70">RosSource (real) or SimSource (simulated)</text>
+
+  <rect x="44" y="304" width="290" height="50" rx="5" fill="#dceaf5" stroke="#5e89ab" stroke-width="1.5"/>
+  <text x="189" y="324" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17334a">ROS 2 Jazzy nodes</text>
+  <text x="189" y="342" font-size="10.5" text-anchor="middle" fill="#3c5a70">pico_bridge · mavros · omniscan_bridge · Nav2</text>
+
+  <!-- vertical links inside the stack -->
+  <line x1="189" y1="112" x2="189" y2="147" stroke="#44566b" stroke-width="2" marker-start="url(#arr2)"/>
+  <line x1="189" y1="177" x2="189" y2="182" stroke="#44566b" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="196" y="128" width="152" height="34" rx="3" fill="#ffffff" fill-opacity="0.92"/>
+  <text x="200" y="141" font-size="10.5" font-weight="600" fill="#17334a">HTTP + one WebSocket</text>
+  <text x="200" y="155" font-size="10.5" fill="#3c5a70">/ws — THE CONTRACT</text>
+
+  <line x1="189" y1="232" x2="189" y2="246" stroke="#44566b" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="189" y1="290" x2="189" y2="304" stroke="#44566b" stroke-width="2" marker-end="url(#arr)" marker-start="url(#arr2)"/>
+  <text x="198" y="301" font-size="10" fill="#3c5a70">topics · services</text>
+
+  <!-- ===== zone: hardware ===== -->
+  <rect x="420" y="152" width="496" height="222" rx="7" fill="#f7f6f3" stroke="#cfc8bb" stroke-dasharray="5 3"/>
+  <text x="434" y="172" font-size="12" font-weight="600" fill="#6d6453">HARDWARE</text>
+
+  <rect x="470" y="182" width="206" height="48" rx="5" fill="#fde9d2" stroke="#c2814a" stroke-width="1.5"/>
+  <text x="573" y="201" font-size="13" font-weight="700" text-anchor="middle" fill="#5a3410">Pico 2</text>
+  <text x="573" y="218" font-size="10.5" text-anchor="middle" fill="#6d4a22">motors · RC · lights · relay</text>
+
+  <rect x="690" y="182" width="206" height="48" rx="5" fill="#f1ece3" stroke="#a89b85"/>
+  <text x="793" y="201" font-size="12.5" font-weight="600" text-anchor="middle" fill="#4a4336">Pixhawk 4 + UM982</text>
+  <text x="793" y="218" font-size="10.5" text-anchor="middle" fill="#6b6354">position · heading · IMU</text>
+
+  <rect x="470" y="246" width="206" height="48" rx="5" fill="#f1ece3" stroke="#a89b85"/>
+  <text x="573" y="265" font-size="12.5" font-weight="600" text-anchor="middle" fill="#4a4336">Omniscan 3D sonar</text>
+  <text x="573" y="282" font-size="10.5" text-anchor="middle" fill="#6b6354">TCP 62312 · one client only</text>
+
+  <rect x="690" y="246" width="206" height="48" rx="5" fill="#f1ece3" stroke="#a89b85"/>
+  <text x="793" y="265" font-size="12.5" font-weight="600" text-anchor="middle" fill="#4a4336">BMS · camera</text>
+  <text x="793" y="282" font-size="10.5" text-anchor="middle" fill="#6b6354">battery · OAK-D-LR (no driver)</text>
+
+  <!-- ROS to hardware: one link, because the detail is in the text, not here -->
+  <path d="M 334 329 L 404 329 L 404 206 L 470 206" stroke="#44566b" stroke-width="2.2"
+        fill="none" marker-end="url(#arr)" marker-start="url(#arr2)"/>
+  <path d="M 404 270 L 470 270" stroke="#44566b" stroke-width="1.6" fill="none" marker-end="url(#arr)"/>
+  <path d="M 404 226 L 440 226 L 440 150 L 793 150 L 793 182" stroke="#44566b" stroke-width="1.3"
+        fill="none" marker-end="url(#arr)" stroke-dasharray="4 3"/>
+  <path d="M 404 290 L 452 290 L 452 318 L 793 318 L 793 294" stroke="#44566b" stroke-width="1.3"
+        fill="none" marker-end="url(#arr)" stroke-dasharray="4 3"/>
+  <rect x="340" y="334" width="150" height="17" rx="3" fill="#f7f6f3" fill-opacity="0.95"/>
+  <text x="344" y="347" font-size="9.5" fill="#55707f">USB serial · MAVROS · TCP 62312</text>
+
+  <!-- ===== the sovereign path ===== -->
+  <rect x="440" y="408" width="476" height="86" rx="7" fill="#fff1f3" stroke="#9f1239" stroke-width="2"/>
+  <text x="678" y="432" font-size="13" font-weight="700" text-anchor="middle" fill="#7f1d1d">RC transmitter MT12 + hardware killswitch</text>
+  <text x="678" y="453" font-size="11.5" text-anchor="middle" fill="#9f1239">SBUS straight to the Pico — cuts propulsion in firmware.</text>
+  <text x="678" y="471" font-size="11.5" font-weight="700" text-anchor="middle" fill="#9f1239">No Jetson, no ROS 2, no backend, no browser.</text>
+  <text x="678" y="487" font-size="10.5" text-anchor="middle" fill="#8b4049">Sovereign: nothing in the GUI may override, delay or interfere with it.</text>
+
+  <path d="M 573 408 L 573 350 L 683 350 L 683 230" stroke="#9f1239" stroke-width="4.5"
+        fill="none" marker-end="url(#arrRed)"/>
+  <rect x="588" y="332" width="92" height="18" rx="3" fill="#fff1f3"/>
+  <text x="592" y="345" font-size="10.5" font-weight="700" fill="#9f1239">Ch8 · SBUS</text>
+
+  <!-- ===== the reading of it ===== -->
+  <rect x="24" y="408" width="330" height="86" rx="7" fill="#f4f8fb" stroke="#b9ccda"/>
+  <text x="40" y="430" font-size="11.5" font-weight="700" fill="#17334a">Read the red box first.</text>
+  <text x="40" y="449" font-size="10.8" fill="#3c5a70">The frontend never talks to ROS 2, so the</text>
+  <text x="40" y="464" font-size="10.8" fill="#3c5a70">WebSocket contract is the only thing a</text>
+  <text x="40" y="479" font-size="10.8" fill="#3c5a70">redesign has to keep. Safety is elsewhere.</text>
+
+  <!-- ===== footnote ===== -->
+  <text x="24" y="530" font-size="10.5" font-weight="700" fill="#17334a">What this means for a redesign</text>
+  <text x="24" y="549" font-size="10.5" fill="#3c5a70">Keep the contract (section 2) and every colour, component and layout above it is yours to change.</text>
+  <text x="24" y="566" font-size="10.5" fill="#3c5a70">Nothing you write can be in the safety chain — and nothing you write can take the red path out of it.</text>
+  <text x="24" y="590" font-size="9.5" fill="#7d8f9c">docs/GUI_DEVELOPER_GUIDE.md · ASKET, NODE Engineering Club</text>
+</svg>
