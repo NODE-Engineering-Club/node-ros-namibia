@@ -21,7 +21,7 @@ from asket_common.heading import (
     evaluate_heading,
 )
 from asket_common.mode_arbitration import ESTOP_FEEDBACK_ENABLED
-from asket_common.survey import swath_half_width_m
+from asket_common.survey import Waypoint, swath_half_width_m
 from asket_sim.core.faults import FAULTS
 from asket_sim.core.pico import MODE_NAMES, MODE_VALUES
 from asket_sim.core.raw_stream import encode_sim_ping
@@ -45,7 +45,9 @@ from system_test.core.history import PreflightHistory
 
 from . import payloads, video_frame
 from .commands import (
+    CMD_ABORT_ROUTE,
     CMD_CLEAR_FAULT,
+    CMD_DEPLOY_ROUTE,
     CMD_CUT_PROPULSION,
     CMD_DELETE_MISSION,
     CMD_EXPORT_MISSION,
@@ -57,6 +59,7 @@ from .commands import (
     CMD_START_MISSION,
     CMD_STOP_MISSION,
 )
+from .route_store import RouteStore
 from .source import CommandOutcome, Sample
 from .streams import DETAIL_FULL, DETAIL_MINIMAL, DETAIL_REDUCED
 
@@ -109,6 +112,7 @@ class SimSource:
         max_step_s: float = 0.2,
         missions_root=None,
         mounting_path=None,
+        routes_root=None,
     ) -> None:
         self.world = world or SimWorld(WorldConfig())
         self.time_scale = time_scale
@@ -147,6 +151,17 @@ class SimSource:
             disk_usage=self._simulated_disk_usage,
         )
         self.missions_root = root
+        # The Repo's routes. A throwaway folder unless the caller names one
+        # (app.py does, so a simulator session keeps its uploads).
+        self.routes = RouteStore(routes_root if routes_root else root / "_routes")
+        # A stand-in for mission_manager's /mission/status, driven by the
+        # simulated hull actually steering through the deployed waypoints.
+        self._route = {
+            "state": "IDLE", "message": "Simulated mission manager ready",
+            "current_waypoint": 0, "total_waypoints": 0, "seq": 1,
+        }
+        self._route_reply: dict | None = None
+        self._route_active = False
         self.preflight = PreflightHistory(root / "system_test.jsonl")
         self.last_report = None
 
@@ -195,6 +210,89 @@ class SimSource:
         self._consume_sonar()
         self._accumulate_map_layers()
         self._record(now_s)
+        self._update_route()
+
+    # -- route following ----------------------------------------------------
+
+    def _publish_route(self, state: str, message: str) -> None:
+        vessel = self.world.vessel
+        self._route = {
+            "state": state,
+            "message": message,
+            "current_waypoint": (
+                int(vessel.wp_index) if self._route_active or state != "IDLE" else 0
+            ),
+            "total_waypoints": len(vessel.plan.waypoints) if self._route_deployed else 0,
+            "seq": self._route["seq"] + 1,
+        }
+
+    @property
+    def _route_deployed(self) -> bool:
+        return getattr(self, "_route_plan", None) is not None
+
+    def _update_route(self) -> None:
+        """Publish on change only, like mission_manager does."""
+        if not self._route_active:
+            return
+        vessel = self.world.vessel
+        if vessel.finished:
+            self._route_active = False
+            self._publish_route("SUCCEEDED", "Mission complete")
+        elif vessel.wp_index != self._route["current_waypoint"]:
+            self._publish_route(
+                "RUNNING", f"Waypoint {vessel.wp_index}/{len(vessel.plan.waypoints)} completed",
+            )
+
+    def _reply(self, command: str, success: bool, message: str) -> CommandOutcome:
+        seq = (self._route_reply or {}).get("seq", 0) + 1
+        self._route_reply = {"seq": seq, "command": command, "success": success, "message": message}
+        return CommandOutcome(True, "sent")
+
+    def _deploy_route(self, waypoints: list[dict]) -> CommandOutcome:
+        import copy
+
+        if self._route_active:
+            return self._reply(
+                CMD_DEPLOY_ROUTE, False, "Mission already running — call /mission/abort first",
+            )
+        origin = self.world.origin
+        points = [origin.to_enu(w["lat"], w["lon"]) for w in waypoints]
+        plan = copy.copy(self.world.plan)
+        plan.waypoints = [Waypoint(east_m=e, north_m=n) for e, n in points]
+        vessel = self.world.vessel
+        # A route kilometres from the simulated boat would take the hull hours
+        # to reach. The simulator, and only the simulator, starts it a short
+        # way off the first waypoint instead; the message says so.
+        moved = math.hypot(points[0][0] - vessel.east, points[0][1] - vessel.north) > 1000.0
+        if moved:
+            vessel.east, vessel.north = points[0][0], points[0][1] - 40.0
+            self._home = None    # new start, new "first fix"
+        vessel.plan = plan
+        vessel.wp_index = 0
+        vessel.finished = False
+        self._route_plan = plan
+        self._route_active = True
+        self._publish_route(
+            "RUNNING",
+            "Mission started" + (" (simulator: boat placed at the route start)" if moved else ""),
+        )
+        return self._reply(CMD_DEPLOY_ROUTE, True, f"{len(waypoints)} waypoints accepted")
+
+    def _sim_home(self, vessel) -> dict:
+        """The simulator's stand-in for ArduPilot's home: like the autopilot,
+        it is the first good fix, kept until the boat is moved by a deploy."""
+        home = getattr(self, "_home", None)
+        if home is None and math.isfinite(vessel.lat) and math.isfinite(vessel.lon):
+            home = self._home = (round(vessel.lat, 7), round(vessel.lon, 7))
+        return home or (None, None)
+
+    def _abort_route(self) -> CommandOutcome:
+        if not self._route_active:
+            return self._reply(CMD_ABORT_ROUTE, False, "No mission running")
+        self._route_active = False
+        self.world.vessel.finished = True    # coasts to a stop
+        self._publish_route("ABORTED", "Mission aborted (operator request)")
+        return self._reply(CMD_ABORT_ROUTE, True, "Mission aborted")
 
     def now_utc_ms(self) -> int:
         return self.world.utc_ms
@@ -382,7 +480,9 @@ class SimSource:
         utc = snap.utc_ms
 
         if stream == "vessel":
-            return Sample(stream, utc, payloads.vessel_payload(snap.vessel, detail))
+            payload = payloads.vessel_payload(snap.vessel, detail)
+            payload.update(payloads.home_fields(*self._sim_home(snap.vessel), detail))
+            return Sample(stream, utc, payload)
         if stream == "heading":
             return Sample(stream, utc, payloads.heading_payload(self._heading_estimate(), detail))
         if stream == "pico":
@@ -520,6 +620,14 @@ class SimSource:
             "missions": [m.to_dict() for m in list_missions(self.missions_root)],
             "destinations": [d.to_dict() for d in self._destinations()],
             "no_fast_path_message": NO_FAST_PATH_MESSAGE,
+            "route": self._route_payload(),
+        }
+
+    def _route_payload(self) -> dict:
+        return {
+            **self._route,
+            "reply": self._route_reply,
+            "deployed": self.routes.deployed_summary(),
         }
 
     def _destinations(self):
@@ -794,6 +902,12 @@ class SimSource:
                 True,
                 f"Sonar bridge re-read its configuration. [{prov.fingerprint}]",
             )
+
+        if name == CMD_DEPLOY_ROUTE:
+            return self._deploy_route(list(args.get("waypoints") or []))
+
+        if name == CMD_ABORT_ROUTE:
+            return self._abort_route()
 
         if name == CMD_INJECT_FAULT:
             try:

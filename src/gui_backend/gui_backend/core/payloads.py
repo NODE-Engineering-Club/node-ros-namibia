@@ -120,6 +120,16 @@ def vessel_payload(sample, detail: str = DETAIL_FULL) -> dict:
     return out
 
 
+def home_fields(lat, lon, detail: str = DETAIL_FULL) -> dict:
+    """The autopilot's home, added to the vessel payload by the sources at
+    full detail, for distance/bearing on the Navigate screen. None when no
+    home is set; never a stand-in point. Kept out of ``vessel_payload`` so the
+    shared mock's payload contract is unchanged (it has no home)."""
+    if detail != DETAIL_FULL:
+        return {}
+    return {"home_lat": _f(lat, 7), "home_lon": _f(lon, 7)}
+
+
 def _fix_quality(sample) -> str | None:
     """The adapters set it; the simulator's vessel carries only a MAVLink
     fix type, which is the same scale GPSRAW uses."""

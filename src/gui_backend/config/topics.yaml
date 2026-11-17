@@ -47,6 +47,14 @@ sources:
     topic: /mavros/gpsstatus/gps1/raw
     type: mavros_msgs/msg/GPSRAW
     optional: true
+  # ArduPilot's home (set at the first good fix, and again on arming). The
+  # Navigate screen shows distance and bearing from it. Absent until the
+  # autopilot has a home: the GUI says "no home" rather than measuring from
+  # somewhere made up. Same entry as on the Namibia_mission branch.
+  home:
+    topic: /mavros/home_position/home
+    type: mavros_msgs/msg/HomePosition
+    optional: true
   # The Camera panel: a compressed (JPEG) image, sent to the browser as it
   # comes on the full link profile and scaled down on the reduced one. For the
   # OAK-D-LR through depthai_ros_driver (njord.launch.py enable_oak:=true)
@@ -110,6 +118,15 @@ sources:
     topic: /mission/state
     type: asket_interfaces/msg/MissionState
     optional: true
+  # mission_manager's route progress: state and the index of the waypoint it
+  # is steering to (everything before it is passed). Published on change
+  # only, latched, hence `qos: latched`. Optional: absent when the navigation
+  # stack is not running.
+  route_status:
+    topic: /mission/status
+    type: njord_msgs/msg/MissionStatus
+    optional: true
+    qos: latched
   # Two 4S packs in parallel, combined by sensors/battery_aggregator. Optional:
   # absent unless the stack runs with enable_bms:=true.
   battery:
@@ -172,6 +189,11 @@ sonar_panel: health
 missions:
   root: /data/missions
 
+# Where the Repo keeps uploaded route files (one JSON per route). Empty: next
+# to the setup file (ASKET_SETUP_FILE), or ASKET_ROUTES_DIR when set.
+routes:
+  root: ""
+
 # Where commands go. Mode requests reach the Pico through pico_bridge, which
 # this repository does not modify, so the interface is named here.
 commands:
@@ -196,6 +218,14 @@ commands:
   delete_mission:
     service: /mission_recorder/delete_mission
     type: asket_interfaces/srv/DeleteMission
+  # Routes from the Repo: the waypoints of a stored route go to
+  # mission_manager, which drives them through Nav2. Not the recorder above.
+  deploy_route:
+    service: /mission/start
+    type: njord_msgs/srv/StartMission
+  abort_route:
+    service: /mission/abort
+    type: std_srvs/srv/Trigger
   run_system_test:
     service: /system_test/run
     type: asket_interfaces/srv/RunSystemTest

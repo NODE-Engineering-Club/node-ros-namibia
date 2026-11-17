@@ -100,6 +100,8 @@ def vessel_from_ros(fix, compass_hdg, gps_vel, imu, gps_raw=None, extra=None):
         else None,
         distance_travelled_m=(extra or {}).get("distance_travelled_m", 0.0),
         on_survey=(extra or {}).get("on_survey", False),
+        home_lat=(extra or {}).get("home_lat"),
+        home_lon=(extra or {}).get("home_lon"),
     )
 
 
@@ -333,6 +335,8 @@ def vessel_from_odometry(fix, odom_filtered, imu=None, extra=None, gps_raw=None)
         position_sigma_m=sigma_m,
         distance_travelled_m=(extra or {}).get("distance_travelled_m", 0.0),
         on_survey=(extra or {}).get("on_survey", False),
+        home_lat=(extra or {}).get("home_lat"),
+        home_lon=(extra or {}).get("home_lon"),
     )
 
 
@@ -625,4 +629,25 @@ def mission_from_ros(msg) -> dict:
         "estimated_remaining_s": round(remaining) if remaining > 0 else None,
         "trajectory_records": None,
         "error_message": str(msg.error_message),
+    }
+
+
+#: njord_msgs/MissionStatus.state, by name: mission_manager's route state.
+_ROUTE_STATES = {0: "IDLE", 1: "RUNNING", 2: "SUCCEEDED", 3: "FAILED", 4: "ABORTED"}
+
+
+def route_status_from_ros(msg) -> dict:
+    """``njord_msgs/MissionStatus`` (``/mission/status``) into the route fields.
+
+    ``current_waypoint`` is mission_manager's index of the waypoint it is
+    steering to, which is also the number already reached: waypoints before
+    it are passed. An unknown state number is reported as itself rather than
+    guessed into one of the five.
+    """
+    state = int(msg.state)
+    return {
+        "state": _ROUTE_STATES.get(state, f"UNKNOWN({state})"),
+        "message": str(msg.message),
+        "current_waypoint": int(msg.current_waypoint),
+        "total_waypoints": int(msg.total_waypoints),
     }

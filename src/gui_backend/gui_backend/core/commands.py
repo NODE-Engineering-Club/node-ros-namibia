@@ -58,6 +58,13 @@ CMD_CLEAR_FAULT = "clear_fault"
 CMD_SAVE_SETUP = "save_setup"
 CMD_APPLY_SETUP = "apply_setup"
 
+#: Send a stored route (route_store) to mission_manager's /mission/start, and
+#: stop it with /mission/abort. Not the same thing as start/stop_mission, which
+#: are the *recorder*: a route is where the boat goes, a recording is what it
+#: writes down on the way.
+CMD_DEPLOY_ROUTE = "deploy_route"
+CMD_ABORT_ROUTE = "abort_route"
+
 #: Commands that change what the vessel is doing. These get the two-step
 #: confirmation in the UI and the confirmation watch here.
 MODE_COMMANDS = {CMD_SET_MODE, CMD_CUT_PROPULSION}
@@ -80,6 +87,10 @@ class Command:
     confirm: Callable[[dict], bool] | None = field(default=None, repr=False)
     timeout_s: float = DEFAULT_TIMEOUT_S
     resolved_utc_ms: int | None = None
+    #: Returns a reason when the vessel has explicitly refused the command
+    #: (a service reply with success=false). Fails it at once, with the
+    #: vessel's own words, instead of a timeout that blames the link.
+    refuse: Callable[[dict], str | None] | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +122,7 @@ class CommandManager:
         confirm: Callable[[dict], bool] | None = None,
         timeout_s: float | None = None,
         command_id: str | None = None,
+        refuse: Callable[[dict], str | None] | None = None,
     ) -> Command:
         """Register a command as sent. Returns it in the ``pending`` state.
 
@@ -123,6 +135,7 @@ class CommandManager:
             issued_utc_ms=now_utc_ms,
             confirm=confirm,
             timeout_s=timeout_s if timeout_s is not None else self.timeout_s,
+            refuse=refuse,
         )
         if confirm is None:
             # Commands with nothing to observe (a profile change, a fault
@@ -200,6 +213,16 @@ class CommandManager:
         changed: list[Command] = []
         for cmd_id in list(self._pending):
             cmd = self._pending[cmd_id]
+
+            reason = cmd.refuse(observed_state) if cmd.refuse else None
+            if reason:
+                del self._pending[cmd_id]
+                cmd.status = STATUS_FAILED
+                cmd.detail = f"refused by the vessel: {reason}"
+                cmd.resolved_utc_ms = now_utc_ms
+                self._archive(cmd)
+                changed.append(cmd)
+                continue
 
             if cmd.confirm and cmd.confirm(observed_state):
                 del self._pending[cmd_id]
@@ -318,5 +341,56 @@ def ping_parameters_confirmed(range_m: float, gain: int, rate_hz: float, toleran
             and sonar.get("gain_setting") == gain
             and abs((sonar.get("commanded_ping_rate_hz") or -1) - rate_hz) < tolerance
         )
+
+    return check
+
+
+# -- routes ---------------------------------------------------------------
+#
+# Read ``state["mission"]["route"]``: mission_manager's /mission/status, plus a
+# count of status messages received (``seq``) and the last service reply. The
+# count is what makes these honest: a RUNNING left over from before the
+# command must not confirm it, only a status *published after* it.
+
+
+def _route(state: dict) -> dict:
+    return (state.get("mission") or {}).get("route") or {}
+
+
+def route_running(seq_before: int, total_waypoints: int):
+    """mission_manager reports RUNNING on a route of this length, newly."""
+
+    def check(state: dict) -> bool:
+        route = _route(state)
+        return (
+            (route.get("seq") or 0) > seq_before
+            and route.get("state") == "RUNNING"
+            and route.get("total_waypoints") == total_waypoints
+        )
+
+    return check
+
+
+def route_stopped(seq_before: int):
+    """mission_manager reports the route is no longer running, newly."""
+
+    def check(state: dict) -> bool:
+        route = _route(state)
+        return (route.get("seq") or 0) > seq_before and route.get("state") in (
+            "ABORTED", "IDLE", "FAILED", "SUCCEEDED",
+        )
+
+    return check
+
+
+def route_refused(reply_before: int, command: str):
+    """The service answered success=false: say so, in its words."""
+
+    def check(state: dict) -> str | None:
+        reply = _route(state).get("reply") or {}
+        if (reply.get("seq") or 0) > reply_before and reply.get("command") == command \
+                and reply.get("success") is False:
+            return str(reply.get("message") or "no reason given")
+        return None
 
     return check

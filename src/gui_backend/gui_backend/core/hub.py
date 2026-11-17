@@ -30,8 +30,10 @@ from dataclasses import dataclass
 
 from . import alarms as alarms_mod
 from .commands import (
+    CMD_ABORT_ROUTE,
     CMD_APPLY_SETUP,
     CMD_CUT_PROPULSION,
+    CMD_DEPLOY_ROUTE,
     CMD_SAVE_SETUP,
     CMD_SET_MODE,
     CMD_SET_PING_PARAMETERS,
@@ -45,8 +47,12 @@ from .commands import (
     mounting_reloaded,
     propulsion_cut_confirmed,
     recording_confirmed,
+    route_refused,
+    route_running,
+    route_stopped,
     software_authority_removed,
 )
+from .route_store import RouteError, RouteStore
 from . import setup_api, setup_gate, setup_store, video_frame
 from .link_profile import ProfileSelector
 from .shaper import LinkShaper
@@ -215,6 +221,9 @@ class Hub:
         self.selector = selector or ProfileSelector()
         self.commands = commands or CommandManager()
         self.thresholds = thresholds or alarms_mod.AlarmThresholds()
+        #: The Repo's route library. The source's own, when it has one, so the
+        #: deployment it reports in the mission stream is the one sent here.
+        self.routes: RouteStore = getattr(source, "routes", None) or RouteStore()
 
         self.clients: dict[str, ClientSession] = {}
         # One clock for the whole hub. tick() sets it; everything else reads it.
@@ -398,6 +407,12 @@ class Hub:
         if name == CMD_APPLY_SETUP:
             return self._apply_setup(args, now_utc, command_id)
 
+        if name == CMD_DEPLOY_ROUTE:
+            return self._deploy_route(args, now_utc, command_id)
+
+        if name == CMD_ABORT_ROUTE:
+            return self._abort_route(args, now_utc, command_id)
+
         if name == CMD_SET_PROFILE:
             profile = args.get("profile")
             self.set_profile(None if profile in (None, "auto") else profile)
@@ -445,6 +460,96 @@ class Hub:
             self.commands.fail(cmd, outcome.detail or "rejected", now_utc)
         elif cmd.status != STATUS_FAILED and confirm is not None:
             cmd.detail = outcome.detail or "sent, waiting for the vessel to confirm"
+        return cmd.to_dict()
+
+    # -- routes -------------------------------------------------------------
+
+    def _route_state(self) -> dict:
+        return (self.source.state().get("mission") or {}).get("route") or {}
+
+    def _refuse(self, name: str, args: dict, now_utc: int, command_id, detail: str) -> dict:
+        cmd = self.commands.begin(name, args, now_utc, command_id=command_id)
+        self.commands.fail(cmd, detail, now_utc)
+        return cmd.to_dict()
+
+    def _deploy_route(self, args: dict, now_utc: int, command_id: str | None) -> dict:
+        """Send a stored route to mission_manager.
+
+        The waypoints come from the route store, never from the request: what
+        is deployed is exactly the file the Repo shows, and a browser cannot
+        send a different list under a familiar name.
+
+        Confirmed only when /mission/status, published after this command,
+        says RUNNING on a route of this many waypoints. Refused at once when
+        the service answers success=false (e.g. a route already running).
+        """
+        route_id = str(args.get("route_id") or "")
+        shown = {"route_id": route_id}
+        try:
+            route = self.routes.get(route_id)
+        except RouteError as exc:
+            return self._refuse(CMD_DEPLOY_ROUTE, shown, now_utc, command_id, str(exc))
+        shown = {"route_id": route_id, "name": route.get("name"),
+                 "waypoint_count": len(route["waypoints"])}
+
+        current = self._route_state()
+        if current.get("state") == "RUNNING":
+            return self._refuse(
+                CMD_DEPLOY_ROUTE, shown, now_utc, command_id,
+                f"a route is already running (waypoint {current.get('current_waypoint')}"
+                f"/{current.get('total_waypoints')}). Abort it first.",
+            )
+
+        # Same rule as Autonomous: not over a red pre-flight. No force path
+        # here; the Navigate screen's mode buttons keep theirs.
+        sample = self.source.snapshot("diagnostics", DETAIL_FULL)
+        report = sample.payload if sample is not None else None
+        if report and report.get("go") is False:
+            return self._refuse(
+                CMD_DEPLOY_ROUTE, shown, now_utc, command_id,
+                f"the pre-flight is {report.get('summary') or 'NO-GO'}. "
+                "Fix it and run the pre-flight again.",
+            )
+
+        cmd = self.commands.issue(
+            CMD_DEPLOY_ROUTE, shown, now_utc,
+            confirm=route_running(current.get("seq") or 0, len(route["waypoints"])),
+            refuse=route_refused((current.get("reply") or {}).get("seq") or 0, CMD_DEPLOY_ROUTE),
+            # Nav2 and /fromLL are in the loop before RUNNING is published.
+            timeout_s=10.0,
+            command_id=command_id,
+        )
+        outcome = self.source.send_command(
+            CMD_DEPLOY_ROUTE, {"waypoints": route["waypoints"], "route": route},
+        )
+        if not outcome.accepted:
+            self.commands.fail(cmd, outcome.detail or "rejected", now_utc)
+            return cmd.to_dict()
+        try:
+            self.routes.record_deployment(route, now_utc)
+        except OSError as exc:
+            _log.warning("deployment record not written: %s", exc)
+        cmd.detail = outcome.detail or "sent, waiting for mission_manager to report RUNNING"
+        return cmd.to_dict()
+
+    def _abort_route(self, args: dict, now_utc: int, command_id: str | None) -> dict:
+        current = self._route_state()
+        if current.get("state") not in (None, "RUNNING"):
+            return self._refuse(
+                CMD_ABORT_ROUTE, args, now_utc, command_id, "no route is running",
+            )
+        cmd = self.commands.issue(
+            CMD_ABORT_ROUTE, args, now_utc,
+            confirm=route_stopped(current.get("seq") or 0),
+            refuse=route_refused((current.get("reply") or {}).get("seq") or 0, CMD_ABORT_ROUTE),
+            timeout_s=5.0,
+            command_id=command_id,
+        )
+        outcome = self.source.send_command(CMD_ABORT_ROUTE, {})
+        if not outcome.accepted:
+            self.commands.fail(cmd, outcome.detail or "rejected", now_utc)
+        else:
+            cmd.detail = outcome.detail or "sent, waiting for mission_manager to stop"
         return cmd.to_dict()
 
     def _nogo_gate(self, args: dict, now_utc: int, command_id: str | None) -> dict | None:

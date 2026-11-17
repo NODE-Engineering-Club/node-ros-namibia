@@ -18,6 +18,7 @@ import uvicorn
 from asket_sim.core.world import SimWorld, WorldConfig
 
 from .hub import Hub
+from .route_store import default_routes_dir, default_seed_dir
 from .server import create_app
 from .sim_source import SimSource
 
@@ -37,11 +38,14 @@ def build_app(
 ):
     cfg = WorldConfig(seed=seed)
     cfg.vessel.heading_source = heading_source
-    source = SimSource(SimWorld(cfg), time_scale=time_scale)
+    # Routes in the same folder the real backend uses, so a route uploaded
+    # while rehearsing on the simulator is still in the Repo afterwards.
+    source = SimSource(SimWorld(cfg), time_scale=time_scale, routes_root=default_routes_dir())
     if healthy:
         for step, detail in source.bring_up_healthy().items():
             print(f"  {step:<10} {detail}")
     hub = Hub(source)
+    hub.routes.seed(default_seed_dir())
     return create_app(
         hub,
         static_dir=static_dir or DEFAULT_STATIC,

@@ -41,6 +41,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import setup_api, setup_store
 from .hub import ClientSession, Hub
+from .route_store import RouteError
 from .shaper import LinkShaper
 from .tile_cache import TileCache, UpstreamTiles
 from .tiles import MBTiles, TileService
@@ -185,6 +186,72 @@ def create_app(
                 file_state=setup_store.describe(),
             )
         )
+
+    # -- routes: the Repo's library (core/route_store.py) ------------------
+    #
+    # Plain HTTP like /api/setup: uploading a file is not telemetry and must
+    # not depend on a link profile. Deploying is NOT here; it is a command
+    # over the WebSocket (deploy_route), with the two-step confirmation and
+    # the vessel's own confirmation like every other command.
+
+    def _route_error(exc: Exception, status: int = 400) -> JSONResponse:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=status)
+
+    @app.get("/api/routes")
+    async def routes_list() -> JSONResponse:
+        return JSONResponse({
+            "routes": hub.routes.list(),
+            "deployed": hub.routes.deployed_summary(),
+            "root": str(hub.routes.root),
+        })
+
+    @app.get("/api/routes/deployed")
+    async def routes_deployed() -> JSONResponse:
+        """What this server last sent to /mission/start, with its waypoints."""
+        return JSONResponse({"deployed": hub.routes.deployed()})
+
+    @app.get("/api/routes/{route_id}")
+    async def routes_get(route_id: str) -> JSONResponse:
+        try:
+            return JSONResponse(hub.routes.get(route_id))
+        except RouteError as exc:
+            return _route_error(exc, 404)
+
+    @app.post("/api/routes")
+    async def routes_upload(request: Request) -> JSONResponse:
+        try:
+            doc = await request.json()
+        except ValueError:
+            return _route_error(ValueError("the upload is not valid JSON"))
+        try:
+            route = hub.routes.save(doc)
+        except RouteError as exc:
+            return _route_error(exc)
+        except OSError as exc:
+            return _route_error(OSError(f"could not write the route file: {exc}"), 500)
+        return JSONResponse({"ok": True, "route": route})
+
+    @app.put("/api/routes/{route_id}")
+    async def routes_replace(route_id: str, request: Request) -> JSONResponse:
+        try:
+            doc = await request.json()
+        except ValueError:
+            return _route_error(ValueError("the upload is not valid JSON"))
+        try:
+            route = hub.routes.save(doc, route_id=route_id)
+        except RouteError as exc:
+            return _route_error(exc, 404 if "no route" in str(exc) else 400)
+        except OSError as exc:
+            return _route_error(OSError(f"could not write the route file: {exc}"), 500)
+        return JSONResponse({"ok": True, "route": route})
+
+    @app.delete("/api/routes/{route_id}")
+    async def routes_delete(route_id: str) -> JSONResponse:
+        try:
+            hub.routes.delete(route_id)
+        except RouteError as exc:
+            return _route_error(exc, 404)
+        return JSONResponse({"ok": True})
 
     @app.get("/api/tiles/info")
     async def tiles_info(request: Request) -> JSONResponse:
