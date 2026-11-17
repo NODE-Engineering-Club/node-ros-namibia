@@ -29,9 +29,29 @@ import {
  * in the tree, unused, to switch back to.
  */
 
+/** The route shown in Navigate, as GeoJSON: one line and numbered points
+ * carrying their status (lib/route.js waypointStatus). */
+function routeGeo(route) {
+  if (!route?.waypoints?.length) return { line: EMPTY, points: EMPTY };
+  const coords = route.waypoints.map((w) => [w.lon, w.lat]);
+  return {
+    line: coords.length > 1
+      ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }
+      : EMPTY,
+    points: {
+      type: 'FeatureCollection',
+      features: coords.map((c, i) => ({
+        type: 'Feature',
+        properties: { n: String(i + 1), status: route.statuses?.[i] || 'pending' },
+        geometry: { type: 'Point', coordinates: c },
+      })),
+    },
+  };
+}
+
 const fmtKm = (m) => (m >= 1000 ? `${(m / 1000).toFixed(m >= 10000 ? 0 : 1)} km` : `${Math.round(m)} m`);
 
-export function AreaMap({ v, connection }) {
+export function AreaMap({ v, connection, route = null }) {
   const container = useRef(null);
   const map = useRef(null);
   const marker = useRef(null);
@@ -111,6 +131,28 @@ export function AreaMap({ v, connection }) {
 
       m.on('load', () => {
         addAreaLayers(m, grid, { satellite: satRef.current, onSatError: setSatError });
+        // Route under the track: where the boat should go, then where it went.
+        m.addSource('route-line', { type: 'geojson', data: EMPTY });
+        m.addLayer({
+          id: 'route-line', type: 'line', source: 'route-line',
+          paint: { 'line-color': '#79c0ff', 'line-width': 2, 'line-dasharray': [2, 1.5], 'line-opacity': 0.9 },
+        });
+        m.addSource('route-points', { type: 'geojson', data: EMPTY });
+        m.addLayer({
+          id: 'route-points', type: 'circle', source: 'route-points',
+          paint: {
+            'circle-radius': ['match', ['get', 'status'], 'current', 9, 7],
+            'circle-color': ['match', ['get', 'status'],
+              'passed', '#3fb950', 'current', '#58a6ff', 'stopped', '#d29922', 'rgba(13,17,23,0.85)'],
+            'circle-stroke-color': ['match', ['get', 'status'], 'pending', '#8b949e', '#ffffff'],
+            'circle-stroke-width': ['match', ['get', 'status'], 'current', 2.5, 1.5],
+          },
+        });
+        m.addLayer({
+          id: 'route-labels', type: 'symbol', source: 'route-points',
+          layout: { 'text-field': ['get', 'n'], 'text-size': 10, 'text-allow-overlap': true },
+          paint: { 'text-color': '#ffffff' },
+        });
         m.addSource('track', { type: 'geojson', data: EMPTY });
         m.addLayer({
           id: 'track', type: 'line', source: 'track',
@@ -120,7 +162,13 @@ export function AreaMap({ v, connection }) {
       });
       map.current = m;
     }
+    // The box changes size without the window doing so (the Navigate column
+    // divider, a neighbour folded away): keep the canvas filling it.
+    const resize = typeof ResizeObserver === 'undefined' ? null
+      : new ResizeObserver(() => { try { map.current?.resize(); } catch { /* removed */ } });
+    resize?.observe(container.current);
     return () => {
+      resize?.disconnect();
       const m = map.current;
       try {
         if (m) camera.current = { center: m.getCenter().toArray(), zoom: m.getZoom(), bearing: m.getBearing() };
@@ -164,6 +212,27 @@ export function AreaMap({ v, connection }) {
     if (follow) m.easeTo({ center: [vessel.lon, vessel.lat], duration: 400 });
   }, [ready, vessel, track, hasFix, stale, follow]);
 
+  // -- route + waypoint status ------------------------------------------
+  const geo = routeGeo(route);
+  const routeKey = JSON.stringify(geo.points.features.map((f) => [f.geometry.coordinates, f.properties.status]));
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    m.getSource('route-line')?.setData(geo.line);
+    m.getSource('route-points')?.setData(geo.points);
+    // geo is derived from routeKey
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, routeKey]);
+
+  const fitRoute = () => {
+    const m = map.current;
+    if (!m || !route?.waypoints?.length) return;
+    setFollow(false);
+    const b = new maplibregl.LngLatBounds();
+    route.waypoints.forEach((w) => b.extend([w.lon, w.lat]));
+    m.fitBounds(b, { padding: 40, maxZoom: 18, duration: 500 });
+  };
+
   // -- satellite on / off ----------------------------------------------
   useEffect(() => {
     const m = map.current;
@@ -197,6 +266,9 @@ export function AreaMap({ v, connection }) {
           {follow ? 'Following vessel' : 'Follow vessel'}
         </button>
         <button type="button" className="btn small" onClick={fitGrid}>Fit grid</button>
+        {route?.waypoints?.length > 0 && (
+          <button type="button" className="btn small" onClick={fitRoute}>Fit route</button>
+        )}
         <button type="button" className={`btn small ${satellite ? 'primary' : ''}`} onClick={() => setSatellite((s) => !s)}>
           Satellite {satellite ? 'on' : 'off'}
         </button>

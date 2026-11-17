@@ -18,6 +18,27 @@ const STORAGE = /^disk\.space/;
 const SAFETY = /^(pico|rc|estop|e_stop|safety|relay|esc)/;
 const SENSORS = /^(lidar|sonar|camera|oak)/;
 
+/*
+ * Checks this cockpit does not list. They still run on the vessel and still
+ * count towards its GO / NO-GO (system_test decides that, not this page), so
+ * one that FAILS, or is what the verdict names as blocking, is shown anyway:
+ * a NO-GO is never left without its reason on screen.
+ */
+const HIDDEN = new Set([
+  'pico.link', 'pico.firmware_version', 'pico.estop_feedback', // Pico: only "status format" is listed
+  'heading.valid', 'heading.divergence',
+  'lidar.spin',
+  'sonar.clock',
+  'ros.nodes',
+  'nav.geofence',
+]);
+
+function isShown(item, report) {
+  if (!HIDDEN.has(item.id)) return true;
+  if (item.status === 'FAIL') return true;
+  return !report?.go && Boolean(report?.summary?.includes(item.name));
+}
+
 /**
  * "02 / Safety chain verified" or "02 / Verify the safety chain": the title
  * says which only when every check in the group passed; the body lists what
@@ -66,7 +87,7 @@ function ago(ms) {
 export function Preflight({ v, connection, onNavigate }) {
   const { report, state } = v;
   const verdict = preflightVerdict(v);
-  const items = report?.items || [];
+  const items = (report?.items || []).filter((i) => isShown(i, report));
   const storage = items.find((i) => STORAGE.test(i.id));
   const rest = items.filter((i) => i !== storage);
   const left = rest.filter((i) => LEFT.test(i.id));

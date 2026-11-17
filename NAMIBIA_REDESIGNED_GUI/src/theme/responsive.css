@@ -11,7 +11,9 @@
   .navigate { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
   /* Status and mode first: they answer "can I go" and "how do I stop". */
   .navigate .col.right { order: -1; grid-template-rows: none; }
-  .navigate .col.left { grid-template-rows: 320px 320px; }
+  .nav-gutter { display: none; }
+  .navigate .col.left > .panel { flex: none; height: 320px; }
+  .navigate .col.left > .panel.collapsed { height: auto; }
   .status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
   .checks, .alerts-layout, .source-row, .pf-summaries { grid-template-columns: minmax(0, 1fr); }
@@ -49,9 +51,9 @@
   .panel-header .aside { flex-wrap: wrap; justify-content: flex-end; }
   .stream-notes { padding: 6px 12px; }
 
-  .navigate { gap: 10px; }
+  .navigate { row-gap: 10px; }
   .navigate .col { gap: 10px; }
-  .navigate .col.left { grid-template-rows: 260px 260px; }
+  .navigate .col.left > .panel { height: 260px; }
   .navigate .row-bottom { grid-template-columns: minmax(0, 1fr); }
 
   .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px 12px !important; }

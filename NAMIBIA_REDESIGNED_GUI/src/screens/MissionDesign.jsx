@@ -2,17 +2,22 @@ import { useRef, useState } from 'react';
 
 import { isFitted } from '@asket/lib/fitted.js';
 
-import { GlassPanel, Pill } from '../components/ui.jsx';
+import { ConfirmAction, GlassPanel, Pill } from '../components/ui.jsx';
 import {
-  IconDown, IconDownload, IconFileJson, IconFocus, IconLock, IconPencil, IconPin, IconPlus, IconSave,
+  IconDown, IconDownload, IconFileJson, IconFocus, IconPencil, IconPin, IconPlus, IconSave,
   IconSend, IconTrash, IconUp, IconUpload,
 } from '../components/Icons.jsx';
 import { WorkspaceHeader } from '../components/Shell.jsx';
 import { PlannerMap } from '../slots/PlannerMap.jsx';
 import {
-  downloadMission, estimateS, fmtKm, fmtMin, legs, parseMission, routeLengthM, routeValid, validLat, validLon,
+  ROUTE_FILE_ACCEPT, ROUTE_FILE_TYPES, downloadMission, estimateS, fmtKm, fmtMin, legs, parseMission,
+  routeLengthM, routeValid, toExport, validLat, validLon,
 } from '../lib/missionFile.js';
 import { preflightVerdict } from '../lib/vessel.js';
+import { isRunning, routeOf } from '../lib/route.js';
+
+/** What the server would store for this mission: equal means "saved, unchanged". */
+const savedForm = (m) => JSON.stringify(toExport(m));
 
 const STATUS_TEXT = { PASS: 'Verified', WARN: 'Warning', FAIL: 'Failed', SKIPPED: 'Not checked' };
 const STATUS_LEVEL = { PASS: 'ok', WARN: 'warn', FAIL: 'alarm', SKIPPED: 'neutral' };
@@ -33,7 +38,7 @@ function HardwareRow({ label, item }) {
   );
 }
 
-export function MissionDesign({ v, connection, draft, setDraft, library }) {
+export function MissionDesign({ v, connection, draft, setDraft, library, onNavigate }) {
   const [selected, setSelected] = useState(0);
   const [addMode, setAddMode] = useState(false);
   const [fitKey, setFitKey] = useState(0);
@@ -52,17 +57,51 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
   const update = (patch) => setDraft({ ...draft, ...patch });
   const setWps = (next) => update({ waypoints: next });
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
+  const [saveError, setSaveError] = useState(null);
+  const [dropping, setDropping] = useState(false);
+  // The form of the draft last stored on the server, to tell "saved" from
+  // "edited since". Seeded from the library, so a route opened from Repo is
+  // deployable without saving it again.
+  const [savedKey, setSavedKey] = useState(null);
+  const onServer = library.mode === 'server';
+  const stored = library.missions.find((m) => m.id === draft.id && m.stored === 'server');
+  const unchanged = Boolean(stored) && (savedKey === savedForm(draft) || savedForm(stored) === savedForm(draft));
+
+  /*
+   * A dropped or chosen .json / .csv: parsed and checked here (bad files are
+   * rejected, not stored), previewed on the basemap, and stored in Repo on
+   * the GUI server as a new route, ready to deploy.
+   */
+  const loadFile = async (file) => {
     if (!file) return;
     const result = parseMission(await file.text(), file.name);
     setImportResult({ ...result, fileName: file.name });
-    if (result.mission) {
-      setDraft({ ...result.mission, id: draft.id });
-      setSelected(0);
-      setFitKey((k) => k + 1);
-    }
+    if (!result.mission) return;
+    setDraft(result.mission);
+    setSelected(0);
+    setFitKey((k) => k + 1);
+    const saved = await library.save(result.mission);
+    if (!saved.ok) { setSaveError(saved.error); return; }
+    setSaveError(null);
+    setSavedAt(Date.now());
+    const next = { ...result.mission, id: saved.mission.id };
+    setDraft(next);
+    setSavedKey(savedForm(next));
+  };
+  const onFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    loadFile(file);
+  };
+  const dropProps = {
+    onDragOver: (e) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); setDropping(true); } },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false); },
+    onDrop: (e) => {
+      if (!e.dataTransfer?.files?.length) return;
+      e.preventDefault();
+      setDropping(false);
+      loadFile(e.dataTransfer.files[0]);
+    },
   };
 
   const editWp = (i, key, raw) => {
@@ -84,7 +123,28 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
     setSelected(wps.length);
   };
 
-  const save = () => { library.save(draft); setSavedAt(Date.now()); };
+  // Saves to the GUI server's route library (or this browser in mock mode).
+  // The server gives the route its id; keep it so the next save replaces it.
+  const save = async () => {
+    const result = await library.save(draft);
+    if (!result.ok) { setSaveError(result.error); return; }
+    setSaveError(null);
+    setSavedAt(Date.now());
+    const next = result.mission?.id && result.mission.id !== draft.id ? { ...draft, id: result.mission.id } : draft;
+    if (next !== draft) setDraft(next);
+    setSavedKey(savedForm(next));
+  };
+
+  // Deploy: the stored copy goes to mission_manager (deploy_route, as from
+  // Repo and Navigate), then Navigate opens on it to follow the waypoints.
+  const route = routeOf(v);
+  const deployWhy = !onServer ? 'Mock mode: there is no GUI server or vessel to deploy to.'
+    : !valid ? 'Complete the route first.'
+      : !unchanged ? 'Save the mission first (deploy sends the saved copy).'
+        : isRunning(route) ? 'A route is running. Abort it in Navigate first.'
+          : !v.state.connected ? 'Not connected to the vessel.'
+            : !preflightGo ? 'Run the preflight: Deploy unlocks on GO.' : null;
+  const deploy = () => { library.setActive(draft.id); onNavigate('navigate'); };
   const state = !valid ? 'Draft · unsent' : 'Validated · unsent';
 
   const sensors = [
@@ -121,7 +181,7 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
         <Pill level={verdict.level}>{verdict.text}</Pill>
       </WorkspaceHeader>
       <div className="workspace-body">
-        <div className="design">
+        <div className={`design ${dropping ? 'dropping' : ''}`} {...dropProps}>
           <div className="design-top">
             <label className="name-field">
               <div className="name-label">Mission name</div>
@@ -143,24 +203,27 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
           </div>
 
           <div className="source-row">
-            <div className="glass source-card">
+            <div className={`glass source-card drop-card ${dropping ? 'selected' : ''}`}>
               <IconFileJson />
               <div className="text">
-                <strong>Import an existing .json mission</strong>
+                <strong>Drop a {ROUTE_FILE_TYPES} route here</strong>
                 {importResult?.mission && (
                   <>
                     <div className="hint">{importResult.fileName} · {importResult.mission.waypoints.length} GPS points loaded</div>
-                    <div className="ok-line">✓ Valid JSON · numeric lat/lon in range · WGS 84</div>
+                    <div className="ok-line">
+                      ✓ Valid · numeric lat/lon in range · WGS 84
+                      {unchanged && onServer && ' · saved to Repo'}
+                    </div>
                   </>
                 )}
                 {importResult?.errors?.length > 0 && (
                   <div className="err-line">✕ Rejected {importResult.fileName}: {importResult.errors.slice(0, 2).join(' ')}</div>
                 )}
                 {importResult?.warnings?.map((w) => <div key={w} className="hint">{w}</div>)}
-                {!importResult && <div className="hint">The basemap refits to the imported route.</div>}
+                {!importResult && <div className="hint">Or choose one. It previews on the basemap and is stored in Repo.</div>}
               </div>
-              <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={onFile} />
-              <button type="button" className="btn" onClick={() => fileRef.current?.click()}><IconUpload /> Import .json</button>
+              <input ref={fileRef} type="file" accept={ROUTE_FILE_ACCEPT} hidden onChange={onFile} />
+              <button type="button" className="btn" onClick={() => fileRef.current?.click()}><IconUpload /> Choose file</button>
             </div>
             <div className={`glass source-card ${addMode ? 'selected' : ''}`}>
               <IconPin />
@@ -187,6 +250,7 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
             )}
           >
             <div className="planner" style={{ position: 'relative' }}>
+              {dropping && <div className="drop-overlay">Drop to preview the route</div>}
               <PlannerMap
                 connection={connection}
                 waypoints={wps.filter((w) => validLat(w.lat) && validLon(w.lon))}
@@ -237,7 +301,7 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
               <HardwareRow label="Pico + propulsion / safety chain" item={itemFor(v.report, 'pico')} />
               <HardwareRow label="RC link + hardware killswitch" item={itemFor(v.report, 'rc')} />
               <HardwareRow label="GNSS fix" item={itemFor(v.report, 'gnss')} />
-              <HardwareRow label="Heading / IMU" item={itemFor(v.report, 'heading')} />
+              <HardwareRow label="IMU" item={itemFor(v.report, 'imu')} />
             </div>
             <div className="config-section">
               <span className="upper">Sensors to use</span>
@@ -301,20 +365,26 @@ export function MissionDesign({ v, connection, draft, setDraft, library }) {
 
           <div className="glass design-actions">
             <div className="msg">
-              <strong className={valid && preflightGo ? 'ok-text' : ''}>{valid ? (preflightGo ? 'Ready to go. Mission validated · not yet sent.' : 'Planning is available. Deployment is blocked.') : 'Draft — complete the route to validate it.'}</strong>
+              <strong className={deployWhy ? '' : 'ok-text'}>{deployWhy ? (valid ? deployWhy : 'Draft — complete the route to validate it.') : 'Ready to deploy.'}</strong>
               <div className="hint">
-                Saving, exporting or sending does not arm or launch the vessel.
-                {savedAt && ' · Saved to the mission library.'}
+                Deploying does not arm the vessel or change its mode.
+                {saveError
+                  ? <span className="warn-text"> · Not saved: {saveError}</span>
+                  : savedAt && (library.mode === 'server' ? ' · Saved to the Repo on the GUI server.' : ' · Saved in this browser.')}
               </div>
             </div>
             <button type="button" className="btn primary" onClick={save} disabled={!draft.name.trim()}><IconSave /> Save mission</button>
             <button type="button" className="btn" onClick={() => downloadMission(draft)} disabled={!valid}><IconDownload /> Export .json</button>
-            <button
-              type="button" className="btn" disabled
-              title="Route upload is not wired yet: gui_backend has no command to send waypoints to the vessel (see README)."
-            >
-              <IconLock /> Send to vessel · not wired
-            </button>
+            <ConfirmAction
+              connection={connection} state={v.state} command="deploy_route"
+              args={{ route_id: draft.id }}
+              label="Deploy" icon={<IconSend />} variant="go"
+              prompt={`Deploy ${draft.name} (${wps.length} waypoints) and open Navigate?`}
+              disabled={Boolean(deployWhy)}
+              title={deployWhy || 'Sends the saved route to mission_manager, then opens Navigate.'}
+              onSent={deploy}
+              failuresOnly resultFor={(latest) => latest.args?.route_id === draft.id}
+            />
           </div>
         </div>
       </div>

@@ -1,13 +1,38 @@
 /* ----------------------------------------------------------------- navigate */
 .navigate {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr);
+  /* Left share set by the divider (Navigate.jsx useSplit, --nav-left). */
+  grid-template-columns: minmax(0, var(--nav-left, 49%)) 12px minmax(0, 1fr);
   gap: 12px;
+  column-gap: 0;
   height: 100%;
   min-height: 860px;
 }
 .navigate .col { display: grid; gap: 12px; min-height: 0; }
-.navigate .col.left { grid-template-rows: minmax(220px, 1fr) minmax(220px, 1fr); }
+/* Map and camera share the column; a folded one gives its height to the other. */
+.navigate .col.left { display: flex; flex-direction: column; }
+.navigate .col.left > .panel { flex: 1 1 0; min-height: 220px; }
+.navigate .col.left > .panel.collapsed { flex: none; min-height: 0; }
+
+/* The column divider: a thin line, a wider grab area, brighter on hover/drag. */
+.nav-gutter {
+  position: relative; cursor: col-resize; touch-action: none; outline: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.nav-gutter > span {
+  width: 2px; height: 100%; border-radius: 2px; background: var(--border-soft);
+  transition: background 0.15s, width 0.15s;
+}
+.nav-gutter::after {
+  content: ''; position: absolute; top: 50%; left: 50%; width: 6px; height: 36px;
+  transform: translate(-50%, -50%); border-radius: 3px;
+  background: var(--border); border: 1px solid var(--border-soft);
+}
+.nav-gutter:hover > span, .nav-gutter:focus-visible > span, body.dragging-split .nav-gutter > span {
+  width: 3px; background: var(--info);
+}
+body.dragging-split { cursor: col-resize; user-select: none; }
+body.dragging-split .navigate iframe, body.dragging-split .navigate canvas { pointer-events: none; }
 .navigate .row-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: start; }
 .navigate .col.right { grid-template-rows: auto auto minmax(0, 1fr); }
 
@@ -37,6 +62,7 @@
   padding-left: 14px; border-left: 1px solid var(--divider); font-size: 13px;
 }
 .alerts-strip .spacer { flex: 1; }
+.home-range .home-coords { font-size: 11px; line-height: 1.35; }
 
 /* Mode commands folded into Status as one slim row:
    [Manual][Autonomous] [Cut propulsion], with the reused component's
@@ -92,9 +118,9 @@
    Tablet and phone (responsive.css) stack the boxes and scroll instead. */
 @media (min-width: 1101px) {
   .workspace-body.navigate-body { overflow: hidden; padding: 12px 16px; }
-  .navigate { height: 100%; min-height: 0; gap: 10px; }
+  .navigate { height: 100%; min-height: 0; row-gap: 10px; }
   .navigate .col { gap: 10px; }
-  .navigate .col.left { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .navigate .col.left > .panel { min-height: 0; }
   /* Maps and camera stay fixed; the right column scrolls when its boxes
      need more height than the window has. */
   .navigate .col.right {
@@ -106,6 +132,7 @@
      never less than 400 px (below that the column scrolls). */
   .navigate .col.right > * { flex: none; }
   .navigate .col.right > .mission-glass { flex: 1 0 400px; }
+  .navigate .col.right > .mission-glass.collapsed { flex: none; }
   .navigate .panel-header { height: 30px; }
 
   .navigate .status-grid .label { margin-bottom: 4px; }
@@ -256,6 +283,15 @@
 .source-card .text strong { font-size: 12px; font-weight: 600; }
 .source-card .text .hint { font-size: 10px; margin-top: 4px; }
 .source-card > svg { width: 26px; height: 26px; flex: none; color: var(--info); }
+/* Drop a route file anywhere on the Mission screen. */
+.drop-card { border-style: dashed; }
+.design.dropping .drop-card { border-color: var(--info); background: var(--info-tint, rgba(88, 166, 255, 0.12)); }
+.drop-overlay {
+  position: absolute; inset: 8px; z-index: 5; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--info); border-radius: var(--radius-sm);
+  background: rgba(13, 17, 23, 0.55); color: var(--text); font-size: 13px; font-weight: 600;
+}
 .source-card .ok-line { color: var(--ok); font-size: 9.5px; margin-top: 4px; }
 .source-card .err-line { color: var(--alarm); font-size: 10px; margin-top: 4px; }
 .source-card.selected, .source-card:nth-child(2) { border-color: rgba(121, 185, 205, 0.55); background: rgba(121, 185, 205, 0.06); }
@@ -366,3 +402,73 @@
 /* Inputs inside table rows (Mission Design waypoints) stay row-sized. */
 .table .input { height: 28px; }
 .design .table td { padding: 3px 10px; }
+
+/* --------------------------------------------------- route progress (live) */
+/* Navigate → Mission: which waypoint mission_manager is steering to. Only
+   drawn when /mission/status reports on the deployed route. */
+.mission-wps { padding: 6px 14px 10px; overflow: auto; min-height: 0; }
+.route-progress { display: grid; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--divider); }
+.route-progress-text { display: flex; align-items: baseline; gap: 10px; font-size: 12px; min-width: 0; }
+.route-progress-text .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.route-bar > span { display: block; height: 100%; background: var(--info); transition: width 0.4s ease; }
+.route-bar.ok > span { background: var(--ok); }
+.route-bar.warn > span { background: var(--warn); }
+.route-bar.alarm > span { background: var(--alarm); }
+
+.wp-status { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.wp-status.passed { color: var(--ok); }
+.wp-status.current { color: var(--info); font-weight: 700; }
+.wp-status.stopped { color: var(--warn); }
+.table tr.wp-passed td { opacity: 0.7; }
+.table tr.wp-passed .wp-num { background: var(--ok); border-color: var(--ok); color: #0d1117; }
+.table tr.wp-current td { background: rgba(88, 166, 255, 0.12); border-color: rgba(88, 166, 255, 0.5); }
+.table tr.wp-current .wp-num { background: var(--info); border-color: var(--info); color: #0d1117; }
+
+/* Camera bar: recording start / stop (mission_recorder). */
+.camera-controls .confirm { flex-direction: row; align-items: center; gap: 6px; }
+.camera-controls .btn.small { height: 24px; padding: 0 8px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.btn.rec { color: #ff7b72; border-color: rgba(248, 81, 73, 0.45); }
+.rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--alarm); display: inline-block; }
+
+/* The Status strip opens Alerts. */
+.alerts-strip.as-link {
+  width: 100%; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.alerts-strip.as-link:hover, .alerts-strip.as-link:focus-visible { filter: brightness(1.25); outline: none; }
+.alerts-strip.as-link > svg { width: 14px; height: 14px; color: var(--text-2); }
+.alerts-strip .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/*
+ * Right column of Navigate, reflowed by ITS OWN width (the divider sets it),
+ * not the window's. Each box steps to fewer columns at the width where its
+ * contents would otherwise clip or overlap, so nothing needs a horizontal
+ * scroll and nothing is hidden:
+ *   Status tiles 6 → 3 → 2 columns; telemetry 4 → 3 → 2 (compass last);
+ *   mode buttons under their label; waypoint coordinates on two lines.
+ */
+.navigate .col.right { container: navright / inline-size; }
+.navigate .mission-meta { flex-wrap: wrap; }
+.navigate .mission-footer .btn-row { flex-wrap: wrap; }
+
+@container navright (max-width: 660px) {
+  .status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 10px; }
+  .telemetry, .navigate .telemetry { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 96px; }
+  .telemetry .telemetry-link { grid-column: 1 / 3; padding-left: 0; border-left: 0; border-top: 1px solid var(--divider); padding-top: 6px; }
+  .telemetry .compass { grid-column: 3; grid-row: 1 / 3; align-self: center; }
+  .mission-stats { margin-left: 0; justify-content: flex-start; flex-wrap: wrap; }
+}
+@container navright (max-width: 560px) {
+  .wp-coord > span:not(.wp-sep) { display: block; }
+  .wp-coord .wp-sep { display: none; }
+}
+@container navright (max-width: 470px) {
+  .mode-bar { flex-direction: column; align-items: stretch; gap: 6px; }
+  .telemetry, .navigate .telemetry { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .telemetry .telemetry-link { grid-column: 1 / -1; }
+  .telemetry .compass { grid-column: 1 / -1; grid-row: auto; justify-self: center; }
+}
+@container navright (max-width: 400px) {
+  .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

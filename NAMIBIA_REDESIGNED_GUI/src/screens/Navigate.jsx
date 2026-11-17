@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+
 import { CONFIRM_PROMPTS, LINK_LABELS, MODE_LABELS, PROFILE_LABELS } from '@asket/lib/labels.js';
 import { streamAgeMs, streamPayload } from '@asket/lib/connection.js';
 import { staleness, thresholdsForRate } from '@asket/lib/staleness.js';
@@ -9,13 +11,16 @@ import { duration, endurance } from '@asket/lib/format.js';
 import { GlassPanel, Pill, ConfirmAction, StreamNotes } from '../components/ui.jsx';
 import { AsketEmbed } from '../components/Embed.jsx';
 import {
-  IconAnchor, IconCamera, IconFlag, IconPin, IconPlay, IconPulse, IconSend, IconStop, IconWave,
+  IconAnchor, IconCamera, IconChevronRight, IconFlag, IconPin, IconPulse, IconSend, IconStop, IconWave,
 } from '../components/Icons.jsx';
-import { WorkspaceHeader } from '../components/Shell.jsx';
 import { AreaMap } from '../slots/AreaMap.jsx';
 import { CameraSlot, CAMERA_PILL, cameraLevel } from '../slots/CameraSlot.jsx';
-import { distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } from '../lib/missionFile.js';
-import { preflightVerdict, worstAlarm } from '../lib/vessel.js';
+import { bearingDeg, distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } from '../lib/missionFile.js';
+import { worstAlarm } from '../lib/vessel.js';
+import { useDeployedRoute } from '../lib/missionStore.js';
+import {
+  WAYPOINT_LABEL, deployedIsLive, isRunning, routeOf, routePill, waypointStatus,
+} from '../lib/route.js';
 import { streamNotes } from '../lib/streamNotes.js';
 
 const n = (x, d = 1) => (Number.isFinite(x) ? x.toFixed(d) : '—');
@@ -33,9 +38,6 @@ const live = (v, stream) => ({
   ageMs: streamAgeMs(v.state, stream),
   rateHz: v.state.subscriptions[stream]?.rate_hz,
 });
-const notesFor = (v, connection, streams, state = v.state) => (
-  <StreamNotes notes={streamNotes(connection, state, streams)} />
-);
 const ageLevel = ({ ageMs, rateHz }) => staleness(ageMs, ...thresholdsForRate(rateHz));
 
 /**
@@ -80,7 +82,7 @@ const ARMED_CSS = ARMED_LABELS.map(([prompt, text]) => {
 
 const rcLine = (ok) => (ok === true ? 'RC link OK' : ok === false ? 'RC link LOST' : 'RC link: not sent');
 
-function StatusPanel({ v, connection }) {
+function StatusPanel({ v, connection, onNavigate }) {
   const { link, power, pico, vessel, alarms } = v;
   const connected = v.state.connected;
   const soc = power?.state_of_charge;
@@ -89,15 +91,19 @@ function StatusPanel({ v, connection }) {
   const level = worstAlarm(alarms);
   const profile = v.state.profile?.profile;
   return (
-    <GlassPanel title="Status" icon={<IconPulse />} flush={false} bodyClass="flush-body"
-      notes={notesFor(v, connection, ['link', 'power', 'pico', 'vessel'])}
+    <GlassPanel title="Status" icon={<IconPulse />} flush={false} bodyClass="flush-body" collapsible="nav-status"
       footer={(
-        <div className={`alerts-strip ${level === 'ok' ? 'clear' : level}`}>
+        <button
+          type="button" className={`alerts-strip as-link ${level === 'ok' ? 'clear' : level}`}
+          onClick={() => onNavigate('alerts')} title="Open Alerts"
+        >
           <strong>{level === 'ok' ? '✓ NO ALERTS' : '⚠ ALERTS'}</strong>
           <span className="muted">
             {alarms.length ? alarms.map((a) => a.message).join(' · ') : 'Nothing needs attention.'}
           </span>
-        </div>
+          <span className="spacer" />
+          <IconChevronRight />
+        </button>
       )}
     >
       <div className="status-grid" style={{ padding: 0 }}>
@@ -317,32 +323,40 @@ function sonarStrip(state) {
     : { level: 'warn', head: 'SONAR CONNECTED', text: 'Not collecting: pinging starts only with ~/start_pinging at the boat.' };
 }
 
-/** The shore link, reduced to the four values that matter on this screen. */
-function LinkRow({ v }) {
-  const { link } = v;
-  const connected = v.state.connected;
-  const age = live(v, 'link');
-  const shown = (x) => (age && ageLevel(age) !== 'missing' ? <Value {...age}>{x}</Value> : x);
-  const bearer = !connected ? 'Disconnected'
-    : !link ? 'no data'
-      : link.active_link === 'none' ? 'Lost'
-        : LINK_LABELS[link.active_link] ?? 'not sent';
-  const latency = !link ? '—' : Number.isFinite(link.rtt_ms) ? `${n(link.rtt_ms, 0)} ms` : 'not sent';
-  const signal = !link ? '—' : link.rssi_dbm != null
-    ? `${n(link.rssi_dbm, 0)} dBm${link.rssi_source === 'predicted' ? ' (from range)' : ''}`
-    : 'not sent';
-  const range = !link ? '—' : link.distance_m != null ? `${n(link.distance_m, 0)} m` : 'not sent';
+const fmtRange = (m) => (!Number.isFinite(m) ? '—' : m < 1000 ? `${m.toFixed(1)} m` : `${(m / 1000).toFixed(3)} km`);
+
+/**
+ * Distance and bearing from the autopilot's home (vessel.home_lat/lon, from
+ * /mavros/home_position/home) and the furthest point of the track so far, as
+ * on the Namibia_mission branch. The home comes from the boat, not from this
+ * browser; without one the block says so instead of measuring from a guess.
+ */
+function HomeRange({ v, pos }) {
+  const { vessel } = v;
+  const home = Number.isFinite(vessel?.home_lat) && Number.isFinite(vessel?.home_lon)
+    ? { lat: vessel.home_lat, lon: vessel.home_lon } : null;
+  const here = Number.isFinite(vessel?.lat) && Number.isFinite(vessel?.lon)
+    ? { lat: vessel.lat, lon: vessel.lon } : null;
+  const track = streamPayload(v.state, 'track')?.points || [];
+  const d = home && here ? distanceM(home, here) : NaN;
+  const brg = home && here ? bearingDeg(home, here) : NaN;
+  let max = Number.isFinite(d) ? d : NaN;
+  if (home) {
+    for (const [lon, lat] of track) {
+      const x = distanceM(home, { lat, lon });
+      if (Number.isFinite(x) && !(x <= max)) max = x;
+    }
+  }
+  const shown = (x) => (home ? <Value {...pos} showAge={false}>{x}</Value> : x);
   return (
-    <div className="telemetry-link">
+    <div className="telemetry-link home-range" title={home ? undefined : 'The autopilot sets home at its first good GPS fix.'}>
+      <div><div className="label">From home</div><div className="mono">{home ? shown(fmtRange(d)) : vessel ? 'no home yet' : '—'}</div></div>
+      <div><div className="label">Bearing</div><div className="mono">{shown(Number.isFinite(brg) ? `${Math.round(brg)}° ${dir(brg)}` : '—')}</div></div>
+      <div><div className="label">Furthest</div><div className="mono">{shown(fmtRange(max))}</div></div>
       <div>
-        <div className="label">Link</div>
-        <Pill level={!connected || link?.active_link === 'none' ? 'alarm' : !link ? 'neutral' : link.quality != null && link.quality < 0.4 ? 'warn' : 'ok'}>
-          {shown(bearer)}
-        </Pill>
+        <div className="label">Home</div>
+        <div className="mono home-coords">{home ? <>{coord(home.lat, 'N', 'S')}<br />{coord(home.lon, 'E', 'W')}</> : '—'}</div>
       </div>
-      <div><div className="label">Latency</div><div className="mono">{shown(latency)}</div></div>
-      <div><div className="label">Signal</div><div className="mono">{shown(signal)}</div></div>
-      <div><div className="label">Range</div><div className="mono">{shown(range)}</div></div>
     </div>
   );
 }
@@ -357,13 +371,7 @@ function TelemetryPanel({ v, connection, sonarState = v.state }) {
   const pos = live(v, 'vessel');
   const hdgAge = fromHeading ? live(v, 'heading') : pos;
   return (
-    <GlassPanel title="Vessel telemetry" icon={<IconAnchor />} bodyClass="flush-body"
-      notes={(
-        <>
-          {notesFor(v, connection, ['vessel', 'heading', 'link'])}
-          <StreamNotes notes={streamNotes(connection, sonarState, ['sonar'])} />
-        </>
-      )}
+    <GlassPanel title="Vessel telemetry" icon={<IconAnchor />} bodyClass="flush-body" collapsible="nav-telemetry"
       aside={<PanelAge {...live(v, 'vessel')} />}
       footer={(
         <div className={`alerts-strip ${sonar.level}`}>
@@ -395,33 +403,52 @@ function TelemetryPanel({ v, connection, sonarState = v.state }) {
             <div><div className="label">Pitch</div><div className="big" style={{ fontSize: 18 }}><Value {...pos} showAge={false}>{n(vessel?.pitch_deg, 1)}°</Value></div></div>
           </div>
         </div>
-        <LinkRow v={v} />
+        <HomeRange v={v} pos={pos} />
         <Compass heading={hdg} level={ageLevel(hdgAge)} />
       </div>
     </GlassPanel>
   );
 }
 
-function MissionPanel({ v, connection, active, onNavigate }) {
-  const { mission, power, vessel, state } = v;
-  const recording = mission?.state === 'RECORDING';
-  const name = active?.name || mission?.name || '';
-  const wps = active?.waypoints || [];
+/**
+ * The route being followed, live.
+ *
+ * Shows the DEPLOYED route (what this server sent to mission_manager, fetched
+ * from /api/routes/deployed) whenever mission_manager reports on it, and the
+ * operator's selection from Repo otherwise. Waypoint status comes only from
+ * /mission/status: passed = before `current_waypoint`, current = it.
+ */
+function MissionPanel({ v, connection, active, onNavigate, shown }) {
+  const { mission, power, state } = v;
+  const route = routeOf(v);
+  const running = isRunning(route);
+  const pill = routePill(route);
+  const { isLive, mission: m } = shown;
+  const wps = m?.waypoints || [];
   const legM = legs(wps);
   let cum = 0;
   const canFinish = power?.can_finish_survey;
   const powerAge = live(v, 'power');
-  const here = Number.isFinite(vessel?.lat) ? { lat: vessel.lat, lon: vessel.lon } : null;
+  const here = Number.isFinite(v.vessel?.lat) ? { lat: v.vessel.lat, lon: v.vessel.lon } : null;
+  const total = route?.total_waypoints;
+  const reached = route?.state === 'SUCCEEDED' ? total : route?.current_waypoint;
+  const pct = isLive && total ? Math.round((100 * (reached || 0)) / total) : 0;
+
+  const canDeploy = active?.stored === 'server';
+  const deployWhy = connection.isMock
+    ? 'Mock mode: there is no GUI server or vessel to deploy to.'
+    : !active ? 'Choose a route in Repo first.'
+      : !canDeploy ? 'This route is only in this browser. Upload it to the server in Repo.'
+        : running ? 'A route is running. Abort it first.'
+          : !v.state.connected ? 'Not connected to the vessel.'
+            : v.report?.go !== true ? 'Run the preflight: Deploy unlocks on GO.' : undefined;
 
   return (
-    <GlassPanel title="Mission" icon={<IconFlag />} className="mission-glass"
-      notes={notesFor(v, connection, ['mission', 'power'])}
+    <GlassPanel title="Mission" icon={<IconFlag />} className="mission-glass" collapsible="nav-mission"
       aside={(
         <>
           <PanelAge {...live(v, 'mission')} />
-          <Pill level={mission?.state === 'ERROR' ? 'alarm' : recording ? 'alarm' : 'neutral'}>
-            {!mission ? 'No data' : mission.state ?? 'state not sent'}
-          </Pill>
+          <Pill level={pill.level}>{pill.text}</Pill>
         </>
       )}
       bodyClass="flush-body"
@@ -429,32 +456,26 @@ function MissionPanel({ v, connection, active, onNavigate }) {
         <div className="mission-footer">
           <div className="btn-row">
             <ConfirmAction
-              connection={connection} state={state} command="start_mission"
-              args={{ name: (active?.name || 'mission').toLowerCase() }}
-              label="Start mission" icon={<IconPlay />} variant="go"
-              prompt="Start recording this mission?"
-              disabled={!state.connected || recording}
-              failuresOnly
+              connection={connection} state={state} command="deploy_route"
+              args={{ route_id: active?.id }}
+              label="Deploy route" icon={<IconSend />} variant="go"
+              prompt={`Send ${active?.name || 'this route'} (${active?.waypoints?.length || 0} waypoints) to the vessel?`}
+              disabled={Boolean(deployWhy)}
+              title={deployWhy || 'mission_manager starts steering to waypoint 1.'}
             />
             <ConfirmAction
-              connection={connection} state={state} command="stop_mission"
-              label="Abort" icon={<IconStop />} variant="danger"
-              prompt="Stop the mission recording?"
-              disabled={!recording}
-              failuresOnly
+              connection={connection} state={state} command="abort_route"
+              label="Abort route" icon={<IconStop />} variant="danger"
+              prompt="Stop following the route?"
+              disabled={!running}
+              title={running ? 'mission_manager cancels the current goal.' : 'No route is running.'}
             />
-            <button
-              type="button" className="btn info" disabled
-              title="Route upload is not wired yet: gui_backend has no command to send waypoints to the vessel (see README)."
-            >
-              <IconSend /> Send to vessel
-            </button>
           </div>
           <div className="mission-stats">
             <div>
-              <div className="label">Mission time</div>
+              <div className="label">Recording</div>
               <div className="stat">
-                <Value {...live(v, 'mission')}>{!mission ? 'no data' : recording ? duration(mission.elapsed_s) : 'not recording'}</Value>
+                <Value {...live(v, 'mission')}>{!mission?.state ? 'no data' : mission.state === 'RECORDING' ? duration(mission.elapsed_s) : 'off'}</Value>
               </div>
             </div>
             <div>
@@ -480,28 +501,39 @@ function MissionPanel({ v, connection, active, onNavigate }) {
     >
       <div className="mission-meta">
         <div>
-          <div className="upper faint">Mission name</div>
-          <div className="name">{name || <span className="muted">No mission selected</span>}</div>
+          <div className="upper faint">{isLive ? 'Deployed route' : 'Selected route'}</div>
+          <div className="name">{m?.name || <span className="muted">No route selected</span>}</div>
         </div>
-        {recording && mission?.name && <Pill level="neutral" dot={false}>Recording as {mission.name}</Pill>}
-        {active && <span className="hint">{wps.length} waypoints · {fmtKm(routeLengthM(wps))} · {fmtMin(estimateS(active))}</span>}
-        <button type="button" className="btn small" style={{ marginLeft: 'auto' }} onClick={() => onNavigate('repo')}>Choose mission</button>
+        {m && <span className="hint">{wps.length} waypoints · {fmtKm(routeLengthM(wps))}{!isLive && ` · ${fmtMin(estimateS(m))}`}</span>}
+        <button type="button" className="btn small" style={{ marginLeft: 'auto' }} onClick={() => onNavigate('repo')}>Choose route</button>
       </div>
-      <div style={{ padding: '6px 14px 10px', overflow: 'auto' }}>
+      {isLive && (
+        <div className="route-progress">
+          <div className="route-progress-text">
+            <strong>{route.state === 'SUCCEEDED' ? 'All waypoints passed' : `Waypoint ${Math.min((reached || 0) + 1, total)} of ${total}`}</strong>
+            <span className="hint">{reached || 0} passed · {route.message}</span>
+          </div>
+          <div className={`route-bar ${pill.level}`} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+            <span style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+      <div className="mission-wps">
         {wps.length ? (
           <table className="table">
             <thead>
-              <tr><th>#</th><th>Coordinates</th><th>Leg</th><th>ETA from start</th><th>From vessel</th></tr>
+              <tr><th>#</th><th>Status</th><th>Coordinates</th><th>Leg</th><th>From vessel</th></tr>
             </thead>
             <tbody>
               {wps.map((w, i) => {
                 cum += legM[i];
+                const st = isLive ? waypointStatus(route, i) : 'pending';
                 return (
-                  <tr key={i}>
+                  <tr key={i} className={`wp-${st}`}>
                     <td><span className="wp-num">{i + 1}</span></td>
-                    <td className="mono">{coord(w.lat, 'N', 'S')} · {coord(w.lon, 'E', 'W')}</td>
+                    <td><span className={`wp-status ${st}`}>{isLive ? WAYPOINT_LABEL[st] : '—'}</span></td>
+                    <td className="mono wp-coord"><span>{coord(w.lat, 'N', 'S')}</span><span className="wp-sep"> · </span><span>{coord(w.lon, 'E', 'W')}</span></td>
                     <td className="mono">{i === 0 ? 'Start' : `${Math.round(legM[i])} m`}</td>
-                    <td className="mono">{i === 0 ? '—' : `${Math.round(cum / (active.cruise_speed_ms || 1.5) / 60)} min`}</td>
                     <td className="mono">{here ? `${Math.round(distanceM(here, w))} m` : '—'}</td>
                   </tr>
                 );
@@ -509,33 +541,128 @@ function MissionPanel({ v, connection, active, onNavigate }) {
             </tbody>
           </table>
         ) : (
-          <div className="empty">Pick a saved mission in Repo, or design one in Mission.</div>
-        )}
-        {wps.length > 0 && (
-          <p className="hint" style={{ margin: '6px 0 0' }}>
-            Waypoint progress is not reported by the vessel yet, so no waypoint is marked passed or current.
-          </p>
+          <div className="empty">Pick a route in Repo, or import a .json there.</div>
         )}
       </div>
     </GlassPanel>
   );
 }
 
+/** Which route Navigate shows, and whether its status is live. */
+function useShownRoute(v, connection, active) {
+  const route = routeOf(v);
+  const deployed = useDeployedRoute(connection, route?.deployed);
+  const live = deployedIsLive(route, deployed);
+  const mission = live
+    ? { name: deployed.name, waypoints: deployed.waypoints, cruise_speed_ms: active?.cruise_speed_ms }
+    : active;
+  return {
+    isLive: live,
+    mission,
+    selectionDiffers: live && active && active.fingerprint !== deployed.fingerprint,
+    map: mission?.waypoints?.length
+      ? {
+        waypoints: mission.waypoints,
+        statuses: mission.waypoints.map((_, i) => (live ? waypointStatus(route, i) : 'pending')),
+      }
+      : null,
+  };
+}
+
+/** Recording (mission_recorder) start / stop, on the camera bar. */
+function RecControl({ v, connection }) {
+  const recording = v.mission?.state === 'RECORDING';
+  return recording ? (
+    <ConfirmAction
+      connection={connection} state={v.state} command="stop_mission"
+      label="Stop rec" icon={<IconStop />} variant="small danger"
+      prompt="Stop recording?" failuresOnly
+    />
+  ) : (
+    <ConfirmAction
+      connection={connection} state={v.state} command="start_mission"
+      args={{ name: 'mission' }}
+      label="Rec" icon={<span className="rec-dot" />} variant="small rec"
+      prompt="Start recording?" failuresOnly
+      disabled={!v.state.connected}
+      title="Starts mission_recorder (sonar, trajectory). Independent of the route."
+    />
+  );
+}
+
+const SPLIT_KEY = 'asket.redesign.navigate.split';
+const SPLIT_DEFAULT = 49;
+const SPLIT_MIN = 28;
+const SPLIT_MAX = 72;
+const clampSplit = (x) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, x));
+
+function readSplit() {
+  try {
+    const x = Number(localStorage.getItem(SPLIT_KEY));
+    return x ? clampSplit(x) : SPLIT_DEFAULT;
+  } catch { return SPLIT_DEFAULT; }
+}
+
+/**
+ * The divider between the map/camera column and the panels: drag it (or use
+ * the arrow keys on it) to give the camera and map more width; double-click
+ * puts it back. The width is the left column's share, remembered per browser.
+ */
+function useSplit(gridRef) {
+  const [split, setSplit] = useState(readSplit);
+  const save = (x) => { try { localStorage.setItem(SPLIT_KEY, String(Math.round(x * 10) / 10)); } catch { /* ignore */ } };
+  const set = (x) => { const c = clampSplit(x); setSplit(c); save(c); };
+  const onPointerDown = (e) => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    const rect = grid.getBoundingClientRect();
+    document.body.classList.add('dragging-split');
+    const move = (ev) => setSplit(clampSplit(((ev.clientX - rect.left) / rect.width) * 100));
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      document.body.classList.remove('dragging-split');
+      setSplit((x) => { save(x); return x; });
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); set(split - 2); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); set(split + 2); }
+    if (e.key === 'Home') { e.preventDefault(); set(SPLIT_DEFAULT); }
+  };
+  const gutter = (
+    <div
+      className="nav-gutter" role="separator" aria-orientation="vertical" tabIndex={0}
+      aria-valuemin={SPLIT_MIN} aria-valuemax={SPLIT_MAX} aria-valuenow={Math.round(split)}
+      aria-label="Resize map and camera column" title="Drag to resize · double-click to reset"
+      onPointerDown={onPointerDown} onKeyDown={onKeyDown} onDoubleClick={() => set(SPLIT_DEFAULT)}
+    >
+      <span />
+    </div>
+  );
+  return { style: { '--nav-left': `${split}%` }, gutter };
+}
+
 export function Navigate({ v, connection, active, onNavigate, sonarState = v.state }) {
   const cam = cameraLevel(v.state);
-  const verdict = preflightVerdict(v);
+  const shown = useShownRoute(v, connection, active);
   const vessel = v.vessel;
+  const gridRef = useRef(null);
+  const split = useSplit(gridRef);
   return (
     <>
-      <WorkspaceHeader title="Navigation">
-        <Pill level={verdict.level}>{verdict.text}</Pill>
-      </WorkspaceHeader>
       <div className="workspace-body navigate-body">
-        <div className="navigate">
+        <div className="navigate" ref={gridRef} style={split.style}>
           <div className="col left">
             <GlassPanel
-              title="GPS basemap" icon={<IconPin />} flush
-              notes={notesFor(v, connection, ['vessel', 'track'])}
+              title="GPS basemap" icon={<IconPin />} flush collapsible="nav-map"
               aside={(
                 <>
                 <PanelAge {...live(v, 'vessel')} />
@@ -551,21 +678,15 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
                 </>
               )}
             >
-              <AreaMap v={v} connection={connection} />
+              <AreaMap v={v} connection={connection} route={shown.map} />
             </GlassPanel>
             <GlassPanel
-              title="OAK camera" icon={<IconCamera />} flush
-              notes={(
-                <StreamNotes
-                  notes={streamNotes(connection, v.state, ['camera']).filter((x) => x.kind !== 'refused')}
-                />
-              )}
+              title="OAK camera" icon={<IconCamera />} flush collapsible="nav-camera"
               aside={<Pill level={CAMERA_PILL[cam.level]}>{cam.text}</Pill>}
               footer={(
                 <div className="camera-controls">
-                  <Pill level={v.mission?.state === 'RECORDING' ? 'alarm' : 'neutral'}>
-                    {v.mission?.state === 'RECORDING' ? 'REC' : 'Not recording'}
-                  </Pill>
+                  {v.mission?.state === 'RECORDING' && <Pill level="alarm">REC {duration(v.mission.elapsed_s)}</Pill>}
+                  <RecControl v={v} connection={connection} />
                   <span className="feed-legend">
                     <span className={cam.level === 'live' ? 'on' : ''}>LIVE</span>|
                     <span className={cam.level === 'lagged' ? 'on' : ''}>LAGGED</span>|
@@ -587,10 +708,11 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
             </div>
             */}
           </div>
+          {split.gutter}
           <div className="col right">
-            <StatusPanel v={v} connection={connection} />
+            <StatusPanel v={v} connection={connection} onNavigate={onNavigate} />
             <TelemetryPanel v={v} connection={connection} sonarState={sonarState} />
-            <MissionPanel v={v} connection={connection} active={active} onNavigate={onNavigate} />
+            <MissionPanel v={v} connection={connection} active={active} onNavigate={onNavigate} shown={shown} />
           </div>
         </div>
       </div>

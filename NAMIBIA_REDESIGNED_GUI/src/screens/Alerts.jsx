@@ -9,7 +9,11 @@ import {
   IconChevronRight, IconNavigate, IconPreflight, IconUnknown, IconWarn, IconX,
 } from '../components/Icons.jsx';
 import { WorkspaceHeader } from '../components/Shell.jsx';
-import { preflightVerdict } from '../lib/vessel.js';
+import { SUBSCRIPTIONS, preflightVerdict } from '../lib/vessel.js';
+import { streamNotes } from '../lib/streamNotes.js';
+
+/** Every stream the cockpit asks for, plus sonar (its panel reads it too). */
+const STREAMS = [...new Set([...SUBSCRIPTIONS.map((x) => x.name), 'sonar'])];
 
 /**
  * Current alerts — the backend's active alarm list (`alarms` message), the
@@ -25,7 +29,7 @@ function subsystem(alarm) {
   return String(alarm.key || '').split(/[._:]/)[0] || 'general';
 }
 
-export function Alerts({ v, onNavigate }) {
+export function Alerts({ v, connection, onNavigate }) {
   const { alarms, report } = v;
   const sound = useAlarmSound(alarms);
   const [query, setQuery] = useState('');
@@ -50,6 +54,9 @@ export function Alerts({ v, onNavigate }) {
     ? (report?.items || []).filter((i) => i.id.split('.')[0] === subsystem(selected) && i.status !== 'PASS')
     : [];
   const go = Boolean(report?.go);
+  // Streams the server reduced or refused, or whose source went silent.
+  // Shown here, not on the Navigate panels.
+  const notices = connection ? streamNotes(connection, v.state, STREAMS) : [];
 
   return (
     <>
@@ -182,6 +189,26 @@ export function Alerts({ v, onNavigate }) {
                 ) : <div className="empty">Select an alert.</div>}
               </GlassPanel>
             </div>
+          </>
+        )}
+
+        {notices.length > 0 && (
+          <>
+            <div style={{ height: 12 }} />
+            <GlassPanel title="Data streams" aside={<span className="hint">{notices.length} notice{notices.length === 1 ? '' : 's'}</span>}>
+              <table className="table">
+                <thead><tr><th>Stream</th><th>State</th><th>Why</th></tr></thead>
+                <tbody>
+                  {notices.map((n) => (
+                    <tr key={n.stream}>
+                      <td className="mono">{n.stream}</td>
+                      <td><Pill level={n.level}>{n.label}</Pill></td>
+                      <td className="muted">{n.reason || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </GlassPanel>
           </>
         )}
 
