@@ -23,7 +23,7 @@ stop_all() {
   # writes metadata.yaml (it runs in its own process group).
   pkill -INT -f "ros2 bag record" 2>/dev/null
   for _ in $(seq 15); do pgrep -f "ros2 bag record" >/dev/null || break; sleep 1; done
-  for pat in "ros2 bag record" in "ros2 launch" "/ws/install" "/workspace/install" "/opt/ros/jazzy/lib" "gui_backend_node" "mavros_node"; do
+  for pat in "ros2 bag record" "ros2 launch" "/ws/install" "/workspace/install" "/opt/ros/jazzy/lib" "gui_backend_node" "mavros_node"; do
     pkill -9 -f "$pat" 2>/dev/null
   done
   for _ in $(seq 10); do

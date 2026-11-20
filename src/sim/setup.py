@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'simulator = sim.simulator:main',
+            'sea_state_node = sim.sea_state_node:main',
         ],
     },
 )

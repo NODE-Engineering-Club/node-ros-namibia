@@ -1,0 +1,74 @@
+<?xml version="1.0" ?>
+<!--
+  Open sea off Luderitz, for the sea-state trials (sim/sea_state_node.py).
+  Use with:  ros2 launch bringup njord.launch.py use_sim:=true world:=openSeaWorld.sdf sea_state:=rough ...
+  (or scripts/sim_sea.sh, which does all of it).
+
+  * Datum = waypoint 1 of "Navigation mission/Navigation_towards_shore_(0 to 30).geojson",
+    so the boat spawns on the start of the route.
+  * Gravity is OFF and there is no ground plane: the hull is moved by
+    VelocityControl from sea_state_node, which computes heave/roll/pitch from
+    the waves itself. (IMU linear acceleration therefore carries no 1 g; the
+    EKF only uses its x acceleration and yaw rate.)
+  * No Sensors (rendering) system: no lidar or camera is fitted on the boat,
+    and rendering sensors are what stall Gazebo on the Jetson. GPS and IMU
+    need no rendering.
+-->
+<sdf version="1.10">
+    <world name="default">
+        <spherical_coordinates>
+            <surface_model>EARTH_WGS84</surface_model>
+            <world_frame_orientation>ENU</world_frame_orientation>
+            <latitude_deg>-26.636211201212554</latitude_deg>
+            <longitude_deg>15.103348697313484</longitude_deg>
+            <elevation>0</elevation>
+            <heading_deg>0</heading_deg>
+        </spherical_coordinates>
+        <gravity>0 0 0</gravity>
+        <physics name="5ms" type="ignored">
+            <max_step_size>0.005</max_step_size>
+            <real_time_factor>1.0</real_time_factor>
+        </physics>
+        <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+        <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+        <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+        <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+        <plugin filename="gz-sim-navsat-system" name="gz::sim::systems::NavSat"/>
+
+        <scene>
+            <ambient>0.5 0.55 0.6 1</ambient>
+            <background>0.62 0.7 0.78 1</background>
+            <sky/>
+        </scene>
+
+        <light type="directional" name="sun">
+            <cast_shadows>true</cast_shadows>
+            <pose>0 0 50 0 0 0</pose>
+            <diffuse>0.9 0.9 0.85 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+            <direction>-0.4 0.3 -0.9</direction>
+        </light>
+
+        <!-- Sea surface: visual only (the waves move the boat, not this plane). -->
+        <model name="sea_surface">
+            <static>true</static>
+            <link name="link">
+                <visual name="water">
+                    <pose>0 0 -0.05 0 0 0</pose>
+                    <geometry>
+                        <plane>
+                            <normal>0 0 1</normal>
+                            <size>2000 2000</size>
+                        </plane>
+                    </geometry>
+                    <material>
+                        <ambient>0.05 0.18 0.28 1</ambient>
+                        <diffuse>0.06 0.25 0.38 1</diffuse>
+                        <specular>0.6 0.7 0.8 1</specular>
+                    </material>
+                    <transparency>0.15</transparency>
+                </visual>
+            </link>
+        </model>
+    </world>
+</sdf>

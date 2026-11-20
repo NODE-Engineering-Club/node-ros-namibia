@@ -118,6 +118,12 @@ def generate_launch_description():
                               description="Start sam2_vision/sam2_depth_segmenter on the OAK frames."),
         DeclareLaunchArgument("sam2_model_dir",       default_value="/ws/models/sam2.1_hiera_tiny"),
         DeclareLaunchArgument("use_sim",         default_value="false"),
+        # Sea-state sim (sim/sea_state_node): thrust-limited hull in waves, wind
+        # and current instead of /cmd_vel applied as a velocity. Use with
+        # world:=openSeaWorld.sdf. off | calm | moderate | rough | extreme.
+        DeclareLaunchArgument("sea_state",       default_value="off",
+                              description="Sea-state sim with use_sim:=true: off, calm, moderate, rough, "
+                                          "extreme (sim/sea_state_node.py). Use world:=openSeaWorld.sdf."),
         DeclareLaunchArgument(
             "headless",
             default_value="true",
@@ -873,6 +879,17 @@ def generate_launch_description():
             arguments=["0", "0", "0", "0", "0", "0", "lidar", "asket/base_link/Lidar_sensor"],
             condition=IfCondition(LaunchConfiguration("use_sim")),
         ),
+        # Sim-only: same for the IMU ("asket/base_link/px4_sensor" vs URDF link
+        # "px4", identity joint). Without it robot_localization can't transform
+        # /imu_driver/imu_raw and silently drops every message: the EKF has no
+        # heading, Nav2 steers on a yaw 90-180 deg off and the boat circles.
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="static_imu_sensor_tf",
+            arguments=["0", "0", "0", "0", "0", "0", "px4", "asket/base_link/px4_sensor"],
+            condition=IfCondition(LaunchConfiguration("use_sim")),
+        ),
         # Sim-only: Gazebo publishes NavSatFix with the scoped sensor frame
         # "asket/base_link/GPS_sensor", while robot_state_publisher exposes
         # the URDF GPS link as "GPS". Publish the real URDF GPS offset under
@@ -896,7 +913,32 @@ def generate_launch_description():
             name="ros_gz_bridge",
             output="screen",
             parameters=[{"config_file": cfg + "/gz_bridge.yaml"}],
-            condition=IfCondition(LaunchConfiguration("use_sim")),
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("use_sim"), "' == 'true' and '",
+                LaunchConfiguration("sea_state"), "' == 'off'"
+            ])),
+        ),
+        Node(
+            package="ros_gz_bridge",
+            executable="parameter_bridge",
+            name="ros_gz_bridge",
+            output="screen",
+            parameters=[{"config_file": cfg + "/gz_bridge_sea.yaml"}],
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("use_sim"), "' == 'true' and '",
+                LaunchConfiguration("sea_state"), "' != 'off'"
+            ])),
+        ),
+        Node(
+            package="sim",
+            executable="sea_state_node",
+            name="sea_state",
+            output="screen",
+            parameters=[{"sea_state": LaunchConfiguration("sea_state"), "use_sim_time": True}],
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration("use_sim"), "' == 'true' and '",
+                LaunchConfiguration("sea_state"), "' != 'off'"
+            ])),
         ),
         # Gazebo simulation — server-only by default.
         #
