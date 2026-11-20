@@ -11,7 +11,12 @@
  *   { "waypoints": [[lat, lon], ...] }          — pairs are lat, lon
  *   [ { "lat", "lon" }, ... ]                    — a bare array
  *   GeoJSON LineString / FeatureCollection       — coordinates are lon, lat
+ *   CSV, one waypoint per row                    — see parseCsvPoints()
  */
+
+/** File types the import buttons and drop zones accept. */
+export const ROUTE_FILE_ACCEPT = '.json,.csv,application/json,text/csv';
+export const ROUTE_FILE_TYPES = '.json / .csv';
 
 export const DEFAULT_CRUISE_MS = 1.5;
 export const FORMAT = 'asket-mission';
@@ -64,17 +69,81 @@ function geojsonCoords(doc) {
   return null;
 }
 
+const LAT_HEAD = /^(lat|latitude|lat_deg|y)$/i;
+const LON_HEAD = /^(lon|lng|long|longitude|lon_deg|x)$/i;
+
 /**
+ * CSV: one waypoint per row, in route order. Comma, semicolon or tab
+ * separated. With a header row, the columns named lat/latitude and
+ * lon/lng/longitude are used, in any position (other columns are ignored);
+ * without one, the first two columns are latitude, longitude. Semicolon files
+ * may use a decimal comma. Blank lines and lines starting with # are skipped.
+ * Every row is checked; any bad row rejects the file, with its line number.
+ */
+function parseCsvPoints(text) {
+  const errors = [];
+  const rows = text.replace(/^\uFEFF/, '').split(/\r?\n/)
+    .map((line, i) => ({ line, n: i + 1 }))
+    .filter(({ line }) => line.trim() && !line.trim().startsWith('#'));
+  if (!rows.length) return { raw: null, errors: ['The CSV file is empty.'] };
+  const first = rows[0].line;
+  const delim = first.includes('\t') ? '\t' : first.includes(';') ? ';' : ',';
+  const split = (line) => line.split(delim).map((c) => c.trim().replace(/^"(.*)"$/, '$1'));
+  const num = (c) => {
+    const t = delim === ';' ? c.replace(',', '.') : c;
+    return t === '' ? NaN : Number(t);
+  };
+
+  let latCol = 0;
+  let lonCol = 1;
+  let body = rows;
+  const head = split(first);
+  if (head.some((c) => c !== '' && !Number.isFinite(num(c)))) {
+    latCol = head.findIndex((c) => LAT_HEAD.test(c));
+    lonCol = head.findIndex((c) => LON_HEAD.test(c));
+    if (latCol < 0 || lonCol < 0) {
+      return {
+        raw: null,
+        errors: [`CSV header needs a "lat" and a "lon" column (found: ${head.join(', ')}).`],
+      };
+    }
+    body = rows.slice(1);
+  }
+  const raw = [];
+  for (const { line, n } of body) {
+    const cells = split(line);
+    const lat = num(cells[latCol] ?? '');
+    const lon = num(cells[lonCol] ?? '');
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      errors.push(`Line ${n}: latitude and longitude must be numbers.`);
+    } else {
+      raw.push({ lat, lon });
+    }
+  }
+  return { raw, errors };
+}
+
+const isCsv = (text, fileName) => /\.csv$/i.test(fileName)
+  || (!/\.json$/i.test(fileName) && !/^\s*[[{]/.test(text));
+
+/**
+ * A .json or .csv route file into a mission.
  * @returns {{ mission: object|null, errors: string[], warnings: string[] }}
  */
 export function parseMission(text, fileName = '') {
   const errors = [];
   const warnings = [];
   let doc;
-  try {
-    doc = JSON.parse(text);
-  } catch (e) {
-    return { mission: null, errors: [`Not valid JSON: ${e.message}`], warnings };
+  if (isCsv(text, fileName)) {
+    const csv = parseCsvPoints(text);
+    if (!csv.raw || csv.errors.length) return { mission: null, errors: csv.errors, warnings };
+    doc = { waypoints: csv.raw };
+  } else {
+    try {
+      doc = JSON.parse(text);
+    } catch (e) {
+      return { mission: null, errors: [`Not valid JSON: ${e.message}`], warnings };
+    }
   }
 
   let raw = null;
@@ -95,7 +164,7 @@ export function parseMission(text, fileName = '') {
   if (errors.length) return { mission: null, errors, warnings };
 
   const base = newMission();
-  const name = (doc.name || fileName.replace(/\.json$/i, '') || base.name).toString().toUpperCase();
+  const name = (doc.name || fileName.replace(/\.(json|csv)$/i, '') || base.name).toString().toUpperCase();
   const speed = Number(doc.cruise_speed_ms);
   return {
     mission: {
@@ -105,7 +174,7 @@ export function parseMission(text, fileName = '') {
       obstacle_policy: doc.obstacle_policy === 'avoid' ? 'avoid' : 'stop',
       sensors: { ...base.sensors, ...(doc.sensors || {}) },
       waypoints,
-      source: 'json',
+      source: /\.csv$/i.test(fileName) ? 'csv' : 'json',
       file_name: fileName,
     },
     errors,

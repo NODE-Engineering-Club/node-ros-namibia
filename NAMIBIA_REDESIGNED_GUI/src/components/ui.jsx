@@ -6,16 +6,47 @@ import {
 } from './Icons.jsx';
 
 /** A frosted-glass panel: Figma ASKET/Glass/Surface + Border + Panel blur. */
+function readCollapsed(id) {
+  try { return localStorage.getItem(`asket.redesign.panel.${id}`) === 'collapsed'; } catch { return false; }
+}
+
+/**
+ * Whether a panel is folded to its header. Remembered per browser by `id`.
+ * Folding only hides: the body stays mounted (a map or camera keeps its
+ * state), and the header keeps its aside, so a pill like "No fix" or an age
+ * stays visible while the panel is folded.
+ */
+function useCollapsed(id) {
+  const [collapsed, set] = useState(() => (id ? readCollapsed(id) : false));
+  const toggle = () => set((c) => {
+    try { localStorage.setItem(`asket.redesign.panel.${id}`, c ? 'open' : 'collapsed'); } catch { /* ignore */ }
+    return !c;
+  });
+  return [collapsed, toggle];
+}
+
 export function GlassPanel({
   title, icon, aside, children, flush = false, className = '', bodyClass = '', footer, notes,
+  collapsible,
 }) {
+  const [collapsed, toggle] = useCollapsed(collapsible);
+  const folded = Boolean(collapsible) && collapsed;
   return (
-    <section className={`glass panel ${className}`}>
+    <section className={`glass panel ${className} ${folded ? 'collapsed' : ''}`}>
       {title && (
         <header className="panel-header">
           {icon}
           <span>{title}</span>
           {aside && <span className="aside">{aside}</span>}
+          {collapsible && (
+            <button
+              type="button" className={`panel-fold ${aside ? '' : 'alone'}`} onClick={toggle}
+              aria-expanded={!folded} aria-label={folded ? `Show ${title}` : `Hide ${title}`}
+              title={folded ? 'Show' : 'Hide'}
+            >
+              <IconChevron />
+            </button>
+          )}
         </header>
       )}
       {notes}
@@ -108,10 +139,12 @@ export function Select({ label, value, onChange, options, icon }) {
  *
  * `failuresOnly`: where the confirmed outcome is already shown elsewhere on
  * screen (e.g. the REC pill), only a failure is printed under the button.
+ * `resultFor(latest)`: when one command has a button per row (Repo's Deploy),
+ * print the result only under the row it was sent for.
  */
 export function ConfirmAction({
   connection, state, command, args = {}, label, prompt, icon, variant = '', disabled = false, title,
-  failuresOnly = false,
+  failuresOnly = false, resultFor, onSent,
 }) {
   const [asking, setAsking] = useState(false);
   const latest = latestCommand(state, command);
@@ -125,7 +158,7 @@ export function ConfirmAction({
           <button
             type="button"
             className={`btn small ${variant || 'primary'}`}
-            onClick={() => { setAsking(false); connection.command(command, args); }}
+            onClick={() => { setAsking(false); connection.command(command, args); onSent?.(); }}
           >
             Confirm
           </button>
@@ -148,7 +181,8 @@ export function ConfirmAction({
         {pending ? `${label}…` : label}
       </button>
       {latest && latest.status !== 'pending' && latest.detail
-        && (!failuresOnly || latest.status === 'failed') && (
+        && (!failuresOnly || latest.status === 'failed')
+        && (!resultFor || resultFor(latest)) && (
         <span className={`confirm-result ${latest.status}`}>{latest.detail}</span>
       )}
     </span>

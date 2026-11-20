@@ -24,6 +24,7 @@ from rclpy.node import Node
 from gui_backend.core.hub import Hub
 from gui_backend.core.link_profile import ProfileSelector, ProfileThresholds
 from gui_backend.core.ros_source import RosSource
+from gui_backend.core.route_store import default_seed_dir
 from gui_backend.core.server import create_app
 
 DEFAULT_STATIC = Path(__file__).resolve().parent / "static"
@@ -83,6 +84,10 @@ class GuiBackendNode(Node):
             tick_hz=float(self.get_parameter("tick_hz").value),
             selector=ProfileSelector(thresholds),
         )
+        # Shipped plot routes (config/routes) into Repo, each one once.
+        added = self.hub.routes.seed(default_seed_dir())
+        if added:
+            self.get_logger().info(f"Repo: added shipped routes {', '.join(added)}")
 
         self.pub_link = self.create_publisher(LinkStatus, "/gui/link_status", 10)
         self.create_timer(1.0, self._publish_link_status)

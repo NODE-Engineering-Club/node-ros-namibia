@@ -162,7 +162,7 @@ function loadDraft() {
 
 export function App({ connection }) {
   const v = useVessel(connection);
-  const library = useMissionLibrary();
+  const library = useMissionLibrary(connection);
   const [route, setRoute] = useState(routeFromHash);
   const [splash, setSplash] = useState(() => !sessionStorage.getItem('asket.redesign.splash'));
   const [draft, setDraftState] = useState(loadDraft);
@@ -207,9 +207,9 @@ export function App({ connection }) {
       <Navigate v={v} connection={connection} active={library.active} onNavigate={navigate} sonarState={sonarState} />
     ),
     preflight: <Preflight v={v} connection={connection} onNavigate={navigate} />,
-    mission: <MissionDesign v={v} connection={connection} draft={draft} setDraft={setDraft} library={library} />,
-    alerts: <Alerts v={v} onNavigate={navigate} />,
-    repo: <Repo v={v} library={library} onOpenInDesigner={openInDesigner} onLaunch={launch} />,
+    mission: <MissionDesign v={v} connection={connection} draft={draft} setDraft={setDraft} library={library} onNavigate={navigate} />,
+    alerts: <Alerts v={v} connection={connection} onNavigate={navigate} />,
+    repo: <Repo v={v} connection={connection} library={library} onOpenInDesigner={openInDesigner} onLaunch={launch} />,
   }[route];
 
   return (

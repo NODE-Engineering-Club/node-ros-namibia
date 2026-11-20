@@ -40,7 +40,9 @@ from .setup_values import SetupValues
 from omniscan_bridge.core.mounting import mounting_state_from_keyvalues
 
 from .commands import (
+    CMD_ABORT_ROUTE,
     CMD_CUT_PROPULSION,
+    CMD_DEPLOY_ROUTE,
     CMD_APPLY_SETUP,
     CMD_DELETE_MISSION,
     CMD_EXPORT_MISSION,
@@ -50,6 +52,7 @@ from .commands import (
     CMD_START_MISSION,
     CMD_STOP_MISSION,
 )
+from .route_store import RouteStore
 from .source import CommandOutcome, Sample
 from .streams import DETAIL_FULL
 
@@ -239,6 +242,12 @@ class RosSource:
         self._geofence = _GeofenceFile((config.get("geofence") or {}).get("file") or "")
         self._link = adapters.link_from_measurements("wifi", 1.0, 0.0, 800_000.0)
 
+        # The Repo's routes, and what mission_manager says about the one it is
+        # running. `_route_seq` counts /mission/status messages so a command
+        # is confirmed only by a status published after it.
+        self._route_seq = 0
+        self._route_reply: dict | None = None
+
         self._subscribe_all()
         self._prepare_commands()
 
@@ -252,6 +261,16 @@ class RosSource:
         if self.setup.answered(field_id) or config_value is None:
             return float(self.setup.get(field_id))
         return float(config_value)
+
+    @property
+    def routes(self) -> RouteStore:
+        """The Repo's route files (core/route_store.py). Created on first use."""
+        store = self.__dict__.get("_routes")
+        if store is None:
+            config = getattr(self, "config", None) or {}
+            store = RouteStore((config.get("routes") or {}).get("root") or None)
+            self.__dict__["_routes"] = store
+        return store
 
     @property
     def setup(self) -> SetupValues:
@@ -271,6 +290,17 @@ class RosSource:
 
         sensor_qos = QoSProfile(depth=5, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
+        # mission_manager publishes /mission/status only when it changes,
+        # RELIABLE + TRANSIENT_LOCAL. A best-effort volatile subscriber would
+        # never get the latched message and would show "no data" for a route
+        # that is running. `qos: latched` in topics.yaml asks for the match.
+        from rclpy.qos import QoSDurabilityPolicy
+        latched_qos = QoSProfile(
+            depth=1,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        )
+
         for name, spec in (self.config.get("sources") or {}).items():
             self.latest[name] = LatestMessage()
             try:
@@ -286,7 +316,7 @@ class RosSource:
                 msg_type,
                 spec["topic"],
                 self._make_callback(name),
-                sensor_qos,
+                latched_qos if spec.get("qos") == "latched" else sensor_qos,
             )
 
     def _make_callback(self, name: str):
@@ -301,6 +331,13 @@ class RosSource:
                 target.on_message(msg, stamp or self.now_utc_ms())
 
             return on_frame
+
+        if name == "route_status":
+            def on_route(msg) -> None:
+                self.latest[name] = LatestMessage(msg, time.monotonic())
+                self._route_seq = getattr(self, "_route_seq", 0) + 1
+
+            return on_route
 
         def callback(msg) -> None:
             self.latest[name] = LatestMessage(msg, time.monotonic())
@@ -357,9 +394,11 @@ class RosSource:
         if self.latest.get("gps_raw", LatestMessage()).age_s > 5.0:
             gps_raw = None
 
-        home = self._msg("home")
-        geo = getattr(home, "geo", None)
-        home_ok = geo is not None and math.isfinite(geo.latitude) and math.isfinite(geo.longitude) \
+        # ArduPilot's home (/mavros/home_position/home): set at its first good
+        # fix and again on arming. 0/0 or NaN is "no home", never a point.
+        geo = getattr(self._msg("home"), "geo", None)
+        home_ok = geo is not None and math.isfinite(geo.latitude) \
+            and math.isfinite(geo.longitude) \
             and not (geo.latitude == 0.0 and geo.longitude == 0.0)
 
         return adapters.vessel_from_odometry(
@@ -473,6 +512,9 @@ class RosSource:
                 # the one the stack was launched for.
                 payload["autopilot_detected"] = self._autopilot_detected()
                 payload["autopilot_expected"] = self.config.get("autopilot") or None
+            payload.update(payloads.home_fields(
+                getattr(record, "home_lat", None), getattr(record, "home_lon", None), detail,
+            ))
             return Sample(stream, record.utc_ms, payload)
 
         if stream == "heading":
@@ -633,8 +675,11 @@ class RosSource:
         recorder that is not running is not an idle one.
         """
         msg = self._msg("mission_state")
+        route = self._route_payload()
         if msg is None:
-            return None
+            # No recorder, but mission_manager may still be steering a route:
+            # that must not vanish with it.
+            return {"route": route} if route["state"] is not None else None
         from mission_recorder.core.export import NO_FAST_PATH_MESSAGE, detect_destinations
         from mission_recorder.core.mission import list_missions
 
@@ -650,6 +695,20 @@ class RosSource:
             "missions": missions,
             "destinations": destinations,
             "no_fast_path_message": NO_FAST_PATH_MESSAGE,
+            "route": route,
+        }
+
+    def _route_payload(self) -> dict:
+        msg = self._msg("route_status")
+        status = adapters.route_status_from_ros(msg) if msg is not None else {
+            # mission_manager has said nothing: not "idle", unknown.
+            "state": None, "message": "", "current_waypoint": None, "total_waypoints": None,
+        }
+        return {
+            **status,
+            "seq": getattr(self, "_route_seq", 0),
+            "reply": getattr(self, "_route_reply", None),
+            "deployed": self.routes.deployed_summary(),
         }
 
     def _mounting_state(self) -> dict | None:
@@ -764,6 +823,24 @@ class RosSource:
 
         if name == CMD_STOP_MISSION:
             return self._call_service("stop_mission", lambda req: None)
+
+        if name == CMD_DEPLOY_ROUTE:
+            from geographic_msgs.msg import GeoPoint
+
+            points = [
+                GeoPoint(latitude=float(w["lat"]), longitude=float(w["lon"]), altitude=0.0)
+                for w in (args.get("waypoints") or [])
+            ]
+            return self._call_service(
+                "deploy_route",
+                lambda req: setattr(req, "waypoints", points),
+                on_reply=self._route_replied(CMD_DEPLOY_ROUTE),
+            )
+
+        if name == CMD_ABORT_ROUTE:
+            return self._call_service(
+                "abort_route", lambda req: None, on_reply=self._route_replied(CMD_ABORT_ROUTE),
+            )
 
         # The recorder's services take the mission directory as `name`.
         if name == CMD_EXPORT_MISSION:
@@ -894,7 +971,24 @@ class RosSource:
         publisher.publish(String(data=word))
         return CommandOutcome(True, detail)
 
-    def _call_service(self, key: str, fill) -> CommandOutcome:
+    def _route_replied(self, command: str):
+        """Keep mission_manager's answer, so a refusal ("Mission already
+        running", "No mission running") fails the command in its own words."""
+
+        def done(future) -> None:
+            try:
+                res = future.result()
+                success, message = bool(res.success), str(res.message)
+            except Exception as exc:  # noqa: BLE001 - a failed call is an answer too
+                success, message = False, f"service call failed: {exc}"
+            seq = (getattr(self, "_route_reply", None) or {}).get("seq", 0) + 1
+            self._route_reply = {
+                "seq": seq, "command": command, "success": success, "message": message,
+            }
+
+        return done
+
+    def _call_service(self, key: str, fill, on_reply=None) -> CommandOutcome:
         """Send a service request without waiting for it.
 
         Blocking here would stall the hub and therefore every client. The
@@ -909,7 +1003,9 @@ class RosSource:
             return CommandOutcome(False, f"{key} service is not available")
         request = client.srv_type.Request()
         fill(request)
-        client.call_async(request)
+        future = client.call_async(request)
+        if on_reply is not None:
+            future.add_done_callback(on_reply)
         return CommandOutcome(True, "sent")
 
     def describe(self) -> dict:

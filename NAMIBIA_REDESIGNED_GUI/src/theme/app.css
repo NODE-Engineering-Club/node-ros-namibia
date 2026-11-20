@@ -148,6 +148,18 @@ body {
 .panel-header .aside .info-text { color: var(--info); font-size: 9.5px; font-weight: 500; letter-spacing: 0.02em; }
 .panel-header .aside { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .panel-body { padding: 12px; min-height: 0; overflow: auto; flex: 1; }
+/* Fold a panel to its header (GlassPanel collapsible). Hidden, not unmounted. */
+.panel.collapsed > :not(.panel-header) { display: none !important; }
+.panel.collapsed > .panel-header { border-bottom: 0; }
+.panel-fold {
+  flex: none; width: 22px; height: 22px; margin-right: -4px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 4px; background: transparent; color: var(--text-2); cursor: pointer;
+}
+.panel-fold.alone { margin-left: auto; }
+.panel-fold:hover, .panel-fold:focus-visible { background: var(--glass-raised); color: var(--text); outline: none; }
+.panel-fold svg { width: 14px; height: 14px; transition: transform 0.15s; }
+.panel.collapsed .panel-fold svg { transform: rotate(-90deg); }
 .panel-body.flush { padding: 0; position: relative; overflow: hidden; }
 .well { background: var(--glass-well); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
 .raised { background: var(--glass-raised); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
