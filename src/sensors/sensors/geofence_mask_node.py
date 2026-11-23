@@ -25,10 +25,13 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from mavros_msgs.msg import HomePosition
 from nav2_msgs.msg import CostmapFilterInfo
 from nav_msgs.msg import OccupancyGrid
+from std_msgs.msg import String
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
-from asket_common.geofence import GeofenceError, load_geofence, rasterize, to_map_frame
+from asket_common.geofence import (
+    GeofenceError, fence_token, load_geofence, rasterize, to_map_frame,
+)
 
 
 class GeofenceMaskNode(Node):
@@ -48,6 +51,10 @@ class GeofenceMaskNode(Node):
         self._pub_info = self.create_publisher(
             CostmapFilterInfo, self.get_parameter("filter_info_topic").value, latched)
         self._pub_diag = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        # Which polygon the published mask is: the GUI waits for this before
+        # sending a route, so a route never runs against the previous fence.
+        self._pub_active = self.create_publisher(String, "/geofence/active", latched)
+        self._mtime = None
 
         self._fence = None
         self._problem = ""
@@ -57,11 +64,14 @@ class GeofenceMaskNode(Node):
 
         self.create_subscription(HomePosition, "/mavros/home_position/home", self._on_home, latched)
         self.create_timer(1.0, self._publish_diagnostics)
+        self.create_timer(0.5, self._check_file)
 
     def _load(self):
         path = Path(self.get_parameter("geofence_file").value)
         try:
+            self._mtime = path.stat().st_mtime_ns
             self._fence = load_geofence(yaml.safe_load(path.read_text()))
+            self._problem = ""
             self.get_logger().info(
                 f"geofence '{self._fence.name}' loaded from {path} "
                 f"({len(self._fence.polygon)} corners); waiting for the home position")
@@ -74,10 +84,33 @@ class GeofenceMaskNode(Node):
                 f"{self._problem} — Nav2 has NO area limit. See "
                 f"src/bringup/config/geofence.example.yaml.")
 
+    def _check_file(self):
+        """A changed file replaces the fence; a broken one leaves the old in force."""
+        path = Path(self.get_parameter("geofence_file").value)
+        try:
+            mtime = path.stat().st_mtime_ns
+            if mtime == self._mtime:
+                return
+            self._mtime = mtime
+            fence = load_geofence(yaml.safe_load(path.read_text()))
+        except FileNotFoundError:
+            return
+        except (OSError, yaml.YAMLError, GeofenceError) as e:
+            self.get_logger().error(f"{path}: {e} — keeping the previous fence")
+            return
+        self._fence = fence
+        self._problem = ""
+        self.get_logger().info(f"geofence changed: '{fence.name}'")
+        if self._origin is not None:
+            self._apply()
+
     def _on_home(self, msg):
         if self._fence is None or self._origin is not None:
             return    # same rule as datum_sync: the first home anchors the map frame
         self._origin = (msg.geo.latitude, msg.geo.longitude)
+        self._apply()
+
+    def _apply(self):
         polygon = to_map_frame(self._fence, *self._origin)
         self._mask = rasterize(
             polygon,
@@ -112,6 +145,7 @@ class GeofenceMaskNode(Node):
         info.base = 0.0
         info.multiplier = 1.0
         self._pub_info.publish(info)
+        self._pub_active.publish(String(data=fence_token(self._fence.polygon)))
 
     def _publish_diagnostics(self):
         status = DiagnosticStatus()

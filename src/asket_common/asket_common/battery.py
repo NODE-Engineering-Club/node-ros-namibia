@@ -196,3 +196,52 @@ def combine_parallel_packs(
         imbalance_v=imbalance,
         warnings=warnings,
     )
+
+
+#: The BMS's CSV row, in order. Rows every 500 ms; ``#`` lines are not data.
+BMS_CSV_COLUMNS = (
+    "t_ms", "c1_mV", "c2_mV", "c3_mV", "c4_mV", "pack_mV", "temp_C", "ntc", "curr_mA",
+    "CHG", "DSG", "uvL", "ocdL", "scdL", "ot", "ov", "xrdy", "retries", "comms",
+)
+BMS_FAULT_FLAGS = ("uvL", "ocdL", "scdL", "ot", "ov", "xrdy")
+
+
+def parse_bms_csv(line: str) -> dict | None:
+    """One BMS CSV row as a dict, or ``None`` if the line is not a data row.
+
+    With ``comms=0`` the BMS chip is not answering and the firmware fills the
+    measurements with zeros, so they come back as unknown (``None`` / empty),
+    never as a 0 V pack. Current is signed: positive charging, negative
+    discharging, the same convention as ``sensor_msgs/BatteryState``.
+    """
+    if not isinstance(line, str):
+        return None
+    text = line.strip()
+    if not text or text.startswith("#") or text.startswith("t_ms"):
+        return None
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != len(BMS_CSV_COLUMNS):
+        return None
+    row = dict(zip(BMS_CSV_COLUMNS, parts))
+    try:
+        ints = {k: int(v) for k, v in row.items() if k != "temp_C"}
+        temp = float(row["temp_C"])
+    except ValueError:
+        return None
+    flags = ("CHG", "DSG", *BMS_FAULT_FLAGS, "comms")
+    if any(ints[k] not in (0, 1) for k in flags) or ints["ntc"] not in (0, 1, 2):
+        return None
+    comms = ints["comms"] == 1
+    return {
+        "t_ms": ints["t_ms"],
+        "comms": comms,
+        "cells_v": [ints[f"c{i}_mV"] / 1000.0 for i in range(1, 5)] if comms else [],
+        "pack_v": ints["pack_mV"] / 1000.0 if comms else None,
+        "current_a": ints["curr_mA"] / 1000.0 if comms else None,
+        "temp_c": temp if comms and ints["ntc"] == 0 and math.isfinite(temp) else None,
+        "ntc": ints["ntc"],
+        "chg": ints["CHG"] == 1,
+        "dsg": ints["DSG"] == 1,
+        "faults": [k for k in BMS_FAULT_FLAGS if ints[k] == 1],
+        "retries": ints["retries"],
+    }

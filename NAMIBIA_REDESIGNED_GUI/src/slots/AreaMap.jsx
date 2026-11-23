@@ -240,6 +240,19 @@ function AreaMapInner({ v, connection, route = null }) {
     m.fitBounds(b, { padding: 40, maxZoom: 18, duration: 500 });
   };
 
+  // A newly selected route is brought into view. Keyed on its geometry, so
+  // waypoint progress during a run never moves the map under the operator.
+  const routeShape = JSON.stringify(route?.waypoints?.map((w) => [w.lat, w.lon]) || []);
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || !route?.waypoints?.length || follow) return;
+    const b = new maplibregl.LngLatBounds();
+    route.waypoints.forEach((w) => b.extend([w.lon, w.lat]));
+    m.fitBounds(b, { padding: 40, maxZoom: 18, duration: 500 });
+    // route is derived from routeShape; follow is read, not a trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, routeShape]);
+
   // -- satellite on / off ----------------------------------------------
   useEffect(() => {
     const m = map.current;

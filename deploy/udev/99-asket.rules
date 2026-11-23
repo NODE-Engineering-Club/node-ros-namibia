@@ -33,3 +33,7 @@ SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="CHANGE_ME_BMS_PACK2_SERIAL", \
 # and the firmware on this board is still to be verified.
 SUBSYSTEM=="tty", ENV{ID_SERIAL_SHORT}=="CHANGE_ME_PIXHAWK_SERIAL", \
   ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="pixhawk", GROUP="dialout", MODE="0660"
+
+# Motherboard v2: the Pico is on the Jetson's 40-pin UART. The rootless ROS
+# container does not keep the host's dialout group, so it needs world access.
+KERNEL=="ttyTHS[013]", MODE="0666"

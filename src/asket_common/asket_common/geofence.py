@@ -39,6 +39,7 @@ File format (YAML)::
 from __future__ import annotations
 
 import math
+import hashlib
 from dataclasses import dataclass
 
 from .geo import LocalOrigin
@@ -234,3 +235,92 @@ def rasterize(polygon_enu: list[tuple[float, float]], resolution_m: float = 1.0,
         resolution_m=res, origin_x_m=min_x, origin_y_m=min_y,
         width=width, height=height, data=data, area_m2=polygon_area(polygon_enu),
     )
+
+
+# -- a fence that follows the mission ------------------------------------------
+
+#: Clear water kept around the route and the boat by an automatic fence.
+ROUTE_FENCE_MARGIN_M = 60.0
+#: The boat drives straight to waypoint 1 and sees no obstacles, so a start
+#: from further away than this is refused: drive closer in Manual first.
+MAX_APPROACH_M = 1000.0
+
+
+def fence_token(polygon) -> str:
+    """Identity of a polygon: how the GUI knows the mask node has applied it."""
+    canon = ";".join(f"{lat:.7f},{lon:.7f}" for lat, lon in polygon)
+    return hashlib.sha1(canon.encode()).hexdigest()[:12]
+
+
+def _convex_hull(points):
+    """Andrew's monotone chain. Anticlockwise, no repeated point."""
+    pts = sorted(set(points))
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and (
+                (out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])
+            ) <= 0:
+                out.pop()
+            out.append(p)
+        return out[:-1]
+
+    return half(pts) + half(reversed(pts))
+
+
+def route_fence_polygon(points, margin_m: float = ROUTE_FENCE_MARGIN_M):
+    """[(lat, lon), ...]: the hull of ``points`` with ``margin_m`` all round."""
+    origin = LocalOrigin(*points[0])
+    octagon = [(margin_m * math.cos(math.pi * k / 4), margin_m * math.sin(math.pi * k / 4))
+               for k in range(8)]
+    grown = []
+    for lat, lon in points:
+        east, north = origin.to_enu(lat, lon)
+        grown.extend((east + dx, north + dy) for dx, dy in octagon)
+    return [origin.to_geo(east, north) for east, north in _convex_hull(grown)]
+
+
+def plan_route_fence(current: dict | None, waypoints, boat, name: str = "mission"):
+    """The fence a mission needs: ``(document_to_write | None, token, problem)``.
+
+    ``current`` is the parsed geofence file. A file marked ``auto: true`` (or
+    none) follows the mission. A hand-written fence is the operator's limit
+    and is never replaced: a route leaving it is refused.
+    """
+    points = [(float(w["lat"]), float(w["lon"])) for w in waypoints]
+    if not points:
+        return None, None, "the route has no waypoints"
+    east, north = LocalOrigin(*boat).to_enu(*points[0])
+    distance = math.hypot(east, north)
+    if distance > MAX_APPROACH_M:
+        return None, None, (
+            f"the boat is {distance:.0f} m from waypoint 1 (limit {MAX_APPROACH_M:.0f} m). "
+            "Drive closer in Manual first.")
+    everything = [tuple(boat), *points]
+
+    section = current.get("geofence") if isinstance(current, dict) else None
+    if isinstance(section, dict) and not section.get("auto"):
+        try:
+            fence = load_geofence(current)
+        except GeofenceError as exc:
+            return None, None, f"the geofence file is not usable: {exc}"
+        outside = sum(signed_distance_m(fence.polygon, lat, lon) <= 0 for lat, lon in everything)
+        if outside:
+            return None, None, (
+                f"{outside} point(s) of this mission or the boat are outside the hand-written "
+                f"geofence '{fence.name}'. Edit it, or add 'auto: true' to let it follow missions.")
+        return None, fence_token(fence.polygon), None
+
+    polygon = route_fence_polygon(everything)
+    document = {"geofence": {
+        "name": f"Auto: {name} + {ROUTE_FENCE_MARGIN_M:.0f} m"[:80],
+        "auto": True,
+        "polygon": [[round(lat, 7), round(lon, 7)] for lat, lon in polygon],
+    }}
+    try:
+        fence = load_geofence(document)
+    except GeofenceError as exc:
+        return None, None, f"no fence can be drawn round this mission: {exc}"
+    return document, fence_token(fence.polygon), None

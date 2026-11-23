@@ -29,6 +29,7 @@ import time
 from dataclasses import dataclass
 
 from . import alarms as alarms_mod
+from .pico_state import MODE_AUTO_MIN
 from .commands import (
     CMD_ABORT_ROUTE,
     CMD_APPLY_SETUP,
@@ -39,6 +40,7 @@ from .commands import (
     CMD_SET_PING_PARAMETERS,
     CMD_SET_PROFILE,
     CMD_START_MISSION,
+    CMD_START_ROUTE,
     CMD_STOP_MISSION,
     CommandManager,
     STATUS_FAILED,
@@ -48,6 +50,7 @@ from .commands import (
     propulsion_cut_confirmed,
     recording_confirmed,
     route_refused,
+    start_confirmed,
     route_running,
     route_stopped,
     software_authority_removed,
@@ -446,6 +449,9 @@ class Hub:
         if name == CMD_DEPLOY_ROUTE:
             return self._deploy_route(args, now_utc, command_id)
 
+        if name == CMD_START_ROUTE:
+            return self._start_route(args, now_utc, command_id)
+
         if name == CMD_ABORT_ROUTE:
             return self._abort_route(args, now_utc, command_id)
 
@@ -568,6 +574,84 @@ class Hub:
         cmd.detail = outcome.detail or "sent, waiting for mission_manager to report RUNNING"
         return cmd.to_dict()
 
+    def _start_blocker(self) -> str | None:
+        """Why a route cannot start now, in words, from the vessel's own report."""
+        state = self.source.state()
+        pico = state.get("pico") or {}
+        sample = self.source.snapshot("diagnostics", DETAIL_FULL)
+        report = sample.payload if sample is not None else None
+        if not report or report.get("go") is not True:
+            summary = (report or {}).get("summary") or "not run"
+            return f"the pre-flight is {summary}. It must be GO."
+        if pico.get("rc_link_ok") is not True:
+            return "no RC link. The pilot must be able to take over."
+        if pico.get("link_live") is False:
+            return "the Pico is not hearing the Jetson."
+        channel = pico.get("rc_channel8_raw")
+        if channel is None or channel < MODE_AUTO_MIN:
+            return "the RC mode switch (CH3) is not in AUTO."
+        if pico.get("armed") is not True:
+            return pico.get("arming_block") or "the vessel is not armed."
+        if self._route_state().get("state") == "RUNNING":
+            return "a route is already running. Abort it first."
+        return None
+
+    def _start_route(self, args: dict, now_utc: int, command_id: str | None) -> dict:
+        """Autonomous, then the route, each step confirmed by the vessel.
+
+        The route goes out only once the Pico reports AUTONOMOUS (see
+        ``_advance_start``). If anything fails on the way, the mode request
+        is withdrawn, so a failed start never leaves the boat waiting in AUTO.
+        """
+        route_id = str(args.get("route_id") or "")
+        shown = {"route_id": route_id}
+        try:
+            route = self.routes.get(route_id)
+        except RouteError as exc:
+            return self._refuse(CMD_START_ROUTE, shown, now_utc, command_id, str(exc))
+        shown["name"] = route.get("name")
+        shown["waypoint_count"] = len(route["waypoints"])
+        blocker = self._start_blocker()
+        if blocker:
+            return self._refuse(CMD_START_ROUTE, shown, now_utc, command_id,
+                                f"Not started: {blocker}")
+        # The fence moves to this mission first. The simulator has no mask.
+        fence_token = None
+        apply_fence = getattr(self.source, "apply_route_fence", None)
+        if apply_fence is not None:
+            fence_token, problem = apply_fence(route)
+            if problem:
+                return self._refuse(CMD_START_ROUTE, shown, now_utc, command_id,
+                                    f"Not started: {problem}")
+        cmd = self.commands.issue(CMD_START_ROUTE, shown, now_utc,
+                                  confirm=start_confirmed(fence_token), timeout_s=10.0,
+                                  command_id=command_id)
+        outcome = self.source.send_command(CMD_SET_MODE, {"mode": "AUTONOMOUS"})
+        if not outcome.accepted:
+            self.commands.fail(cmd, outcome.detail or "rejected", now_utc)
+            return cmd.to_dict()
+        cmd.detail = "waiting for the Pico (AUTONOMOUS) and the mission geofence"
+        self._start_cmd_id = cmd.id
+        return cmd.to_dict()
+
+    def _advance_start(self, cmd, now_utc: int) -> None:
+        """React to the two steps of a start resolving."""
+        if cmd.id == getattr(self, "_start_cmd_id", None):
+            self._start_cmd_id = None
+            if cmd.status == STATUS_FAILED:
+                self.source.send_command(CMD_SET_MODE, {"mode": "MANUAL"})
+                return
+            result = self._deploy_route({"route_id": cmd.args.get("route_id")}, now_utc, None)
+            self.broadcast({"type": "command_result", "server_utc_ms": now_utc, **result})
+            if result.get("status") == STATUS_FAILED:
+                self.source.send_command(CMD_SET_MODE, {"mode": "MANUAL"})
+            else:
+                self._start_deploy_id = result.get("id")
+        elif cmd.id == getattr(self, "_start_deploy_id", None):
+            self._start_deploy_id = None
+            if cmd.status == STATUS_FAILED:
+                self.source.send_command(CMD_SET_MODE, {"mode": "MANUAL"})
+
     def _abort_route(self, args: dict, now_utc: int, command_id: str | None) -> dict:
         current = self._route_state()
         if current.get("state") not in (None, "RUNNING"):
@@ -582,6 +666,8 @@ class Hub:
             command_id=command_id,
         )
         outcome = self.source.send_command(CMD_ABORT_ROUTE, {})
+        # Stop asking for autonomy too: the pilot's sticks are live again.
+        self.source.send_command(CMD_SET_MODE, {"mode": "MANUAL"})
         if not outcome.accepted:
             self.commands.fail(cmd, outcome.detail or "rejected", now_utc)
         else:
@@ -902,6 +988,7 @@ class Hub:
             self.broadcast(
                 {"type": "command_result", "server_utc_ms": now_utc, **cmd.to_dict()}
             )
+            self._advance_start(cmd, now_utc)
 
     def _update_alarms(self, now_utc: int) -> None:
         current = alarms_mod.evaluate(self.source.alarm_state(), self.thresholds)

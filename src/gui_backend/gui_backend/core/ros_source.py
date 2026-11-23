@@ -550,12 +550,12 @@ class RosSource:
                     "vessel.battery.hotel_load_w", vessel_cfg.get("hotel_load_w")),
             )
             vessel = self._vessel_record()
-            return Sample(
-                stream, record.utc_ms,
-                payloads.power_payload(
-                    record, detail, speed_ms=vessel.sog_ms if vessel else None
-                ),
+            payload = payloads.power_payload(
+                record, detail, speed_ms=vessel.sog_ms if vessel else None
             )
+            if detail == DETAIL_FULL:
+                payload["packs"] = self._bms_packs()
+            return Sample(stream, record.utc_ms, payload)
 
         if stream == "sonar":
             msg = self._msg("sonar_status")
@@ -659,6 +659,7 @@ class RosSource:
             # recording" could never confirm and "Stop" confirmed at once.
             "mission": self._mission_payload() or {},
             "link_sample": self._link,
+            "geofence_active": getattr(self._msg("geofence_active"), "data", None),
             # What the sonar bridge says it is placing soundings by. The
             # command confirmation for `apply_setup` resolves against this, so
             # it belongs here and not only in the pre-flight's state — the
@@ -780,6 +781,67 @@ class RosSource:
         if len(fence) < 3 or lat is None or lon is None:
             return None
         return signed_distance_m([(p_lat, p_lon) for p_lon, p_lat in fence], lat, lon)
+
+    def apply_route_fence(self, route: dict):
+        """Make the fence fit this mission: ``(token, problem)``.
+
+        Written atomically; geofence_mask_node sees the new file and reports
+        the token on /geofence/active once Nav2's mask is the new one.
+        """
+        import os
+
+        import yaml
+
+        from asket_common.geofence import plan_route_fence
+
+        vessel = self._vessel_record()
+        lat, lon = getattr(vessel, "lat", None), getattr(vessel, "lon", None)
+        if lat is None or lon is None or not (math.isfinite(lat) and math.isfinite(lon)):
+            return None, "no GPS position, so the boat cannot be placed inside a fence."
+        path = (self.config.get("geofence") or {}).get("file") or ""
+        if not path:
+            return None, "no geofence file is configured."
+        try:
+            with open(path, encoding="utf-8") as handle:
+                current = yaml.safe_load(handle)
+        except FileNotFoundError:
+            current = None
+        except (OSError, yaml.YAMLError) as exc:
+            return None, f"the geofence file cannot be read: {exc}"
+        document, token, problem = plan_route_fence(
+            current, route["waypoints"], (lat, lon), str(route.get("name") or "mission"))
+        if problem:
+            return None, problem
+        if document is not None:
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                tmp = f"{path}.tmp"
+                with open(tmp, "w", encoding="utf-8") as handle:
+                    handle.write("# Written by the cockpit at Start: this mission and the boat,\n"
+                                 "# plus a margin. Not checked against the shore or moorings.\n")
+                    yaml.safe_dump(document, handle, sort_keys=False)
+                os.replace(tmp, path)
+            except OSError as exc:
+                return None, f"the geofence file cannot be written: {exc}"
+            self._geofence = _GeofenceFile(path)   # redraw on the map at once
+        return token, None
+
+    def _bms_packs(self) -> list[dict]:
+        """Each BMS's latest row. A silent pack is flagged, never shown as live."""
+        from asket_common.battery import pack_state_of_charge, parse_bms_csv
+
+        packs = []
+        for number in (1, 2):
+            name = f"bms_pack{number}"
+            msg = self._msg(name)
+            row = parse_bms_csv(str(msg.data)) if msg is not None else None
+            if row is None:
+                continue
+            age_s = self.latest[name].age_s
+            soc = pack_state_of_charge(row["cells_v"], expected_cells=4) if row["comms"] else None
+            packs.append({**row, "name": f"Pack {number}", "soc": soc,
+                          "age_s": round(age_s, 1), "stale": age_s > 3.0})
+        return packs
 
     def _pico_state_facts(self) -> dict:
         """What the pre-flight needs to judge the STATE parser.

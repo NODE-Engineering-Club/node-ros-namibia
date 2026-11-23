@@ -34,7 +34,7 @@
 body.dragging-split { cursor: col-resize; user-select: none; }
 body.dragging-split .navigate iframe, body.dragging-split .navigate canvas { pointer-events: none; }
 .navigate .row-bottom { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; align-items: start; }
-.navigate .col.right { grid-template-rows: auto auto minmax(0, 1fr); }
+.navigate .col.right { grid-template-rows: auto auto auto minmax(0, 1fr); }
 
 .status-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 12px 14px; }
 .status-tile .label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); margin-bottom: 6px; }
@@ -489,3 +489,11 @@ body.dragging-split .navigate iframe, body.dragging-split .navigate canvas { poi
 @container navright (max-width: 400px) {
   .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ------------------------------------------------- mission picker, BMS packs */
+.mission-presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.bms-packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.bms-pack.stale { opacity: .55; }
+.bms-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.bms-stats { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 13px; }
+.bms-cells { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }

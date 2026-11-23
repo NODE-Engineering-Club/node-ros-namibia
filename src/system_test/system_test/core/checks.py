@@ -203,7 +203,7 @@ def _pico_link(state: dict, t: Thresholds) -> CheckResult:
 #: ``firmware/pico-node_v5/``; a test asserts all three agree. A Pico still on
 #: pico-node_v4 fails this check: v4 stays armed when SBUS goes silent in
 #: AUTONOMOUS (docs/HARDWARE_DECISIONS.md).
-EXPECTED_FIRMWARE_VERSION = 5
+EXPECTED_FIRMWARE_VERSION = 6   # firmware/pico-motherboard_v2
 
 
 @check("pico.firmware_version", "Pico firmware version", critical=True)
@@ -232,7 +232,7 @@ def _firmware_version(state: dict, t: Thresholds) -> CheckResult:
             "pico.firmware_version", "Pico firmware version", FAIL,
             f"The Pico is running firmware v{int(reported)}; this software "
             f"reads v{EXPECTED_FIRMWARE_VERSION}",
-            "Flash firmware/pico-node_v5/ to the Pico, or check out the "
+            "Flash firmware/pico-motherboard_v2/ to the Pico, or check out the "
             "Jetson software that matches what is flashed. Do not fly on a "
             "mismatch: the fields will be read against the wrong layout and "
             "the vessel panel will be confidently wrong.",

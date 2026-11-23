@@ -34,7 +34,7 @@ FIRMWARE_MODE = {MODE_ESTOP: 1, MODE_MANUAL: 2, MODE_AUTONOMOUS: 3}
 #: ``FW_VERSION`` in ``firmware/pico-node_v5/pico-node_v5.ino``; a test asserts
 #: it matches what ``gui_backend`` is willing to parse, so the three cannot
 #: drift apart silently.
-FIRMWARE_VERSION = 5
+FIRMWARE_VERSION = 6
 
 #: Raw SBUS counts, as the firmware reports them: 11 bits clamped to this
 #: range, 991 at centre. **Not** percentages.

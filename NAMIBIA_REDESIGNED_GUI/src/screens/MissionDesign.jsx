@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { isFitted } from '@asket/lib/fitted.js';
 
@@ -14,7 +14,7 @@ import {
   routeLengthM, routeValid, toExport, validLat, validLon,
 } from '../lib/missionFile.js';
 import { preflightVerdict } from '../lib/vessel.js';
-import { isRunning, routeOf } from '../lib/route.js';
+import { routeOf, startBlock } from '../lib/route.js';
 
 /** What the server would store for this mission: equal means "saved, unchanged". */
 const savedForm = (m) => JSON.stringify(toExport(m));
@@ -47,6 +47,8 @@ export function MissionDesign({ v, connection, draft, setDraft, library, onNavig
   const fileRef = useRef(null);
 
   const wps = draft.waypoints;
+  // A different mission opened here: bring it into view on the map.
+  useEffect(() => { setSelected(0); setFitKey((k) => k + 1); }, [draft.id]);
   const legM = legs(wps);
   const valid = routeValid(draft);
   const verdict = preflightVerdict(v);
@@ -87,6 +89,7 @@ export function MissionDesign({ v, connection, draft, setDraft, library, onNavig
     const next = { ...result.mission, id: saved.mission.id };
     setDraft(next);
     setSavedKey(savedForm(next));
+    library.setActive(next.id);   // saved = selected, on every map
   };
   const onFile = (e) => {
     const file = e.target.files?.[0];
@@ -133,17 +136,17 @@ export function MissionDesign({ v, connection, draft, setDraft, library, onNavig
     const next = result.mission?.id && result.mission.id !== draft.id ? { ...draft, id: result.mission.id } : draft;
     if (next !== draft) setDraft(next);
     setSavedKey(savedForm(next));
+    library.setActive(next.id);   // saved = selected, on every map
   };
 
   // Deploy: the stored copy goes to mission_manager (deploy_route, as from
   // Repo and Navigate), then Navigate opens on it to follow the waypoints.
   const route = routeOf(v);
-  const deployWhy = !onServer ? 'Mock mode: there is no GUI server or vessel to deploy to.'
+  const deployWhy = !onServer ? 'Mock mode: there is no GUI server or vessel to start.'
     : !valid ? 'Complete the route first.'
-      : !unchanged ? 'Save the mission first (deploy sends the saved copy).'
-        : isRunning(route) ? 'A route is running. Abort it in Navigate first.'
-          : !v.state.connected ? 'Not connected to the vessel.'
-            : !preflightGo ? 'Run the preflight: Deploy unlocks on GO.' : null;
+      : !unchanged ? 'Save the mission first (Start uses the saved copy).'
+        : startBlock(v, connection);
+  const otherSelected = library.active && library.active.id !== draft.id ? library.active : null;
   const deploy = () => { library.setActive(draft.id); onNavigate('navigate'); };
   const state = !valid ? 'Draft · unsent' : 'Validated · unsent';
 
@@ -365,23 +368,24 @@ export function MissionDesign({ v, connection, draft, setDraft, library, onNavig
 
           <div className="glass design-actions">
             <div className="msg">
-              <strong className={deployWhy ? '' : 'ok-text'}>{deployWhy ? (valid ? deployWhy : 'Draft — complete the route to validate it.') : 'Ready to deploy.'}</strong>
+              <strong className={deployWhy ? '' : 'ok-text'}>{deployWhy ? (valid ? deployWhy : 'Draft — complete the route to validate it.') : 'Ready to start.'}</strong>
               <div className="hint">
-                Deploying does not arm the vessel or change its mode.
+                Start asks for Autonomous. It needs CH3 in AUTO and never arms the vessel.
                 {saveError
                   ? <span className="warn-text"> · Not saved: {saveError}</span>
                   : savedAt && (library.mode === 'server' ? ' · Saved to the Repo on the GUI server.' : ' · Saved in this browser.')}
               </div>
             </div>
+            {otherSelected && <button type="button" className="btn" onClick={() => setDraft(otherSelected)}>Load {otherSelected.name}</button>}
             <button type="button" className="btn primary" onClick={save} disabled={!draft.name.trim()}><IconSave /> Save mission</button>
             <button type="button" className="btn" onClick={() => downloadMission(draft)} disabled={!valid}><IconDownload /> Export .json</button>
             <ConfirmAction
-              connection={connection} state={v.state} command="deploy_route"
+              connection={connection} state={v.state} command="start_route"
               args={{ route_id: draft.id }}
-              label="Deploy" icon={<IconSend />} variant="go"
-              prompt={`Deploy ${draft.name} (${wps.length} waypoints) and open Navigate?`}
+              label="Start mission" icon={<IconSend />} variant="go"
+              prompt={`Start ${draft.name} (${wps.length} waypoints)? The boat will drive itself.`}
               disabled={Boolean(deployWhy)}
-              title={deployWhy || 'Sends the saved route to mission_manager, then opens Navigate.'}
+              title={deployWhy || 'Requests Autonomous, sends the saved route once the Pico confirms, then opens Navigate.'}
               onSent={deploy}
               failuresOnly resultFor={(latest) => latest.args?.route_id === draft.id}
             />

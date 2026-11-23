@@ -1,5 +1,10 @@
 # Pico firmware
 
+> **Motherboard v2: `pico-motherboard_v2/`** is the firmware for the new board
+> (CRSF RC, Jetson on UART0). It prints no `ver=` field; the Jetson recognises
+> it by its STATE fields and calls it version 6. The notes below describe the
+> older boards.
+
 > **Current firmware: `pico-node_v5/`** (hw-alignment Phase B c). The stack
 > expects it: `pico_bridge` forwards motor commands and `MODE AUTO` only to a
 > Pico that reports `ver=5` (anything else gets `PING` and `MODE MANUAL`

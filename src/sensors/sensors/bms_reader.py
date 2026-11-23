@@ -9,24 +9,12 @@ Foxglove's Diagnostics panel — a colored OK/ERROR summary plus every field
 as key/value, ERROR if a fault flag trips or DSG drops), and a raw string
 with everything the BMS reports verbatim.
 
-Expected report, one block every period (no blank line between blocks —
-each starts with its own "--- BQ76920 [t=... ms] ---" header line):
-    --- BQ76920 [t=41254 ms] ---
-    Cells: 3.999  3.987  3.986  4.000  V
-    Sum:   3.999  7.986  11.972  15.972  V (running sum, last~=Pack)
-    Pack:  15.98 V
-    Temp:  -76.4 C (ext NTC)
-    Curr:  0.02 A
-    FETs:  CHG=ON DSG=ON   [OUTPUT LIVE]
-    Flags: OV=0 UV=0 OCD=0 SCD=0 XREADY=0
-
-"Sum" is redundant with "Cells" (a running total) and isn't republished as
-a separate field, but is included in the raw text. "Flags" (fault bits)
-has no home in sensor_msgs/BatteryState either, so it's raw-text-only too
-— a non-zero flag is a real fault condition worth having in the log even
-without a dedicated topic for it. The block is flushed on "Flags:", the
-last field the firmware sends each cycle — flushing on "FETs:" (the
-previous field) would silently drop Flags off of every published block.
+Expected report: one CSV row every 500 ms (asket_common.battery.parse_bms_csv
+holds the column list). The header and lines starting with # are skipped. The
+raw topic carries the CSV row verbatim, which is what the cockpit's per-pack
+view reads. With comms=0 the BMS chip is not answering: that is reported on
+/diagnostics and the raw topic, and no BatteryState is published, because its
+zeros are not measurements.
 
 State of charge: the BMS reports none, so ``percentage`` is estimated from
 the weakest cell's voltage with a LiPo curve (asket_common.battery). It was
@@ -39,8 +27,6 @@ file starts two (``pack1``, ``pack2``) on their own ports and topics, and
 ``battery_aggregator`` combines them into /battery/state. The defaults
 below keep the single-BMS behaviour of a bare ``ros2 run``.
 """
-import re
-
 import rclpy
 import serial
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
@@ -48,17 +34,10 @@ from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import String
 
-from asket_common.battery import pack_state_of_charge
+from asket_common.battery import pack_state_of_charge, parse_bms_csv
 
 SERIAL_PORT = "/dev/ttyACM3"
 BAUD_RATE = 115200
-
-_CELLS_RE = re.compile(r"Cells:\s*([\d.\s-]+?)\s*V")
-_PACK_RE = re.compile(r"Pack:\s*(-?[\d.]+)\s*V")
-_TEMP_RE = re.compile(r"Temp:\s*(-?[\d.]+)\s*C")
-_CURR_RE = re.compile(r"Curr:\s*(-?[\d.]+)\s*A")
-_FETS_RE = re.compile(r"FETs:\s*CHG=(ON|OFF)\s*DSG=(ON|OFF)")
-_FLAGS_RE = re.compile(r"Flags:\s*OV=(\d)\s*UV=(\d)\s*OCD=(\d)\s*SCD=(\d)\s*XREADY=(\d)")
 
 
 class BmsReader(Node):
@@ -92,7 +71,6 @@ class BmsReader(Node):
             self._ser = None
 
         self._rx = b""
-        self._block_lines = []
 
         self._state_pub = self.create_publisher(
             BatteryState, self.get_parameter("state_topic").value, 10)
@@ -116,115 +94,67 @@ class BmsReader(Node):
         while b"\n" in self._rx:
             raw, self._rx = self._rx.split(b"\n", 1)
             line = raw.decode(errors="replace").strip()
-            if not line:
-                if self._block_lines:
-                    self._publish_block(self._block_lines)
-                    self._block_lines = []
+            if not line or line.startswith("#") or line.startswith("t_ms"):
                 continue
-            # A new block's header line means the previous block (if we
-            # never saw its Flags: line, e.g. after a dropped byte) is done.
-            if line.startswith("---") and self._block_lines:
-                self._publish_block(self._block_lines)
-                self._block_lines = []
-            self._block_lines.append(line)
-            # Flags is always the last field in a block — flush as soon as
-            # it arrives instead of waiting for a blank-line separator that
-            # doesn't actually appear between blocks on this firmware.
-            if line.startswith("Flags:"):
-                self._publish_block(self._block_lines)
-                self._block_lines = []
+            row = parse_bms_csv(line)
+            if row is None:
+                self.get_logger().warn(f"Unparsed BMS line: {line!r}", throttle_duration_sec=5.0)
+                continue
+            self._publish_row(row, line)
 
-    def _publish_block(self, lines):
-        text = " | ".join(lines)
+    def _publish_row(self, row, line):
+        self._raw_pub.publish(String(data=line))
+        soc = None
+        if row["comms"]:
+            soc = pack_state_of_charge(row["cells_v"], expected_cells=self._cell_count)
+            self._publish_state(row, soc)
+        self._publish_diagnostics(row, soc)
 
-        cells = []
-        m = _CELLS_RE.search(text)
-        if m:
-            cells = [float(v) for v in m.group(1).split()]
-
-        pack_v = None
-        m = _PACK_RE.search(text)
-        if m:
-            pack_v = float(m.group(1))
-
-        temp_c = None
-        m = _TEMP_RE.search(text)
-        if m:
-            temp_c = float(m.group(1))
-
-        curr_a = None
-        m = _CURR_RE.search(text)
-        if m:
-            curr_a = float(m.group(1))
-
-        chg_on = dsg_on = None
-        m = _FETS_RE.search(text)
-        if m:
-            chg_on = m.group(1) == "ON"
-            dsg_on = m.group(2) == "ON"
-
-        flags = {}
-        m = _FLAGS_RE.search(text)
-        if m:
-            flags = dict(zip(("OV", "UV", "OCD", "SCD", "XREADY"), (v == "1" for v in m.groups())))
-
-        if not cells and pack_v is None:
-            # Nothing recognizable in this block — don't publish a blank
-            # BatteryState that would look like a real (zeroed-out) reading.
-            self.get_logger().warn(f"Unparsed BMS block: {text!r}", throttle_duration_sec=5.0)
-            return
-
+    def _publish_state(self, row, soc):
         state = BatteryState()
         state.header.stamp = self.get_clock().now().to_msg()
-        state.voltage = pack_v if pack_v is not None else float("nan")
-        state.current = curr_a if curr_a is not None else float("nan")
-        state.temperature = temp_c if temp_c is not None else float("nan")
-        state.cell_voltage = cells
+        state.voltage = row["pack_v"]
+        state.current = row["current_a"]
+        state.temperature = row["temp_c"] if row["temp_c"] is not None else float("nan")
+        state.cell_voltage = row["cells_v"]
         state.present = True
         state.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LIPO
-        soc = pack_state_of_charge(cells, expected_cells=self._cell_count)
         # 0..1 per sensor_msgs/BatteryState. NaN = unknown, never 0.
         state.percentage = soc if soc is not None else float("nan")
         state.design_capacity = self._design_ah
         state.charge = soc * self._design_ah if soc is not None else float("nan")
         state.location = self._pack_name
-        if chg_on is None:
-            state.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_UNKNOWN
-        elif chg_on:
+        # From the measured current: a closed CHG FET does not mean charging.
+        if row["current_a"] > 0.1:
             state.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_CHARGING
-        elif dsg_on:
+        elif row["current_a"] < -0.1:
             state.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_DISCHARGING
         else:
             state.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_NOT_CHARGING
         self._state_pub.publish(state)
 
-        raw = String()
-        raw.data = text
-        self._raw_pub.publish(raw)
-
-        self._publish_diagnostics(cells, pack_v, temp_c, curr_a, chg_on, dsg_on, flags, soc)
-
-    def _publish_diagnostics(self, cells, pack_v, temp_c, curr_a, chg_on, dsg_on, flags, soc):
-        fault = any(flags.values()) or dsg_on is False
+    def _publish_diagnostics(self, row, soc):
+        fault = not row["comms"] or bool(row["faults"]) or not row["dsg"]
         status = DiagnosticStatus()
         status.name = f"bms: BQ76920 {self._pack_name}".strip()
         status.hardware_id = "bq76920"
         status.level = DiagnosticStatus.ERROR if fault else DiagnosticStatus.OK
-        status.message = "Fault" if fault else "OK"
+        status.message = ("BMS not answering" if not row["comms"]
+                          else "Fault" if fault else "OK")
 
         def kv(key, value):
             status.values.append(KeyValue(key=key, value=str(value)))
 
-        kv("Pack (V)", f"{pack_v:.2f}" if pack_v is not None else "?")
+        kv("Pack (V)", f"{row['pack_v']:.2f}" if row["pack_v"] is not None else "?")
         kv("SoC est. (%)", f"{soc * 100:.0f}" if soc is not None else "?")
-        for i, v in enumerate(cells, start=1):
+        for i, v in enumerate(row["cells_v"], start=1):
             kv(f"Cell {i} (V)", f"{v:.3f}")
-        kv("Temp (C)", f"{temp_c:.1f}" if temp_c is not None else "?")
-        kv("Current (A)", f"{curr_a:.2f}" if curr_a is not None else "?")
-        kv("CHG", "ON" if chg_on else "OFF" if chg_on is not None else "?")
-        kv("DSG", "ON" if dsg_on else "OFF" if dsg_on is not None else "?")
-        for name, tripped in flags.items():
-            kv(f"Flag {name}", "TRIPPED" if tripped else "ok")
+        kv("Temp (C)", f"{row['temp_c']:.1f}" if row["temp_c"] is not None else "?")
+        kv("Current (A)", f"{row['current_a']:.2f}" if row["current_a"] is not None else "?")
+        kv("CHG", "ON" if row["chg"] else "OFF")
+        kv("DSG", "ON" if row["dsg"] else "OFF")
+        kv("Faults", ", ".join(row["faults"]) or "none")
+        kv("Retries", row["retries"])
 
         arr = DiagnosticArray()
         arr.header.stamp = self.get_clock().now().to_msg()

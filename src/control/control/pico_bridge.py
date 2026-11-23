@@ -12,7 +12,7 @@ Fait 4 choses (un seul noeud car un seul owner de /dev/pico) :
   4. Lit les lignes "STATE ..." du Pico (250 ms) -> /pico/status,
      et COMPTE celles qu'il rejette (voir plus bas : c'est le point).
 
-Protocole firmware : pico-node_v5. USB CDC 115200, lignes '\\n'.
+Protocole firmware : pico-motherboard_v2. UART0 115200 (port : pico_port), lignes '\\n'.
   "L,R" norm -1..1 -> 1500 + v*500 us  (norm si |v|<=1.5 -> on clamp a +-1)
   Moteurs appliques cote Pico SEULEMENT si arme + AUTONOMOUS + 2s apres relais.
 
@@ -179,7 +179,7 @@ class PicoBridge(Node):
         if word == "AUTO":
             self.get_logger().warn(
                 f"MODE AUTO refuse : Pico {self._gate.describe()}. "
-                f"Flasher firmware/pico-node_v{self._gate.expected}/.")
+                f"Flasher firmware/pico-motherboard_v2/.")
         else:
             self.get_logger().warn(f"mode_request inconnu : {msg.data!r}")
 
@@ -250,7 +250,7 @@ class PicoBridge(Node):
             self.get_logger().error(
                 f"Pico firmware : {self._gate.describe()}. Consignes moteur et "
                 f"MODE AUTO NON transmis (PING seulement). Flasher "
-                f"firmware/pico-node_v{self._gate.expected}/ (firmware/README.md).")
+                f"firmware/pico-motherboard_v2/ (firmware/README.md).")
 
     def _check_version(self):
         """Crie une fois si le Pico parle sans jamais annoncer sa version."""
@@ -262,7 +262,7 @@ class PicoBridge(Node):
         self.get_logger().error(
             f"Le Pico emet ({self._lines_kept + self._lines_rejected} lignes) sans "
             f"annoncer de version : aucun mouvement ne sera transmis. Firmware "
-            f"attendu : pico-node_v{self._gate.expected}.")
+            f"attendu : pico-motherboard_v2.")
 
     def _check_format(self):
         """Crie une fois si le Pico parle et qu'on ne comprend rien.
@@ -281,7 +281,7 @@ class PicoBridge(Node):
             f"Le Pico emet ({self._lines_rejected} lignes) mais AUCUNE ne "
             f"commence par 'STATE' : /pico/status ne publiera rien. "
             f"Exemple : {self._rejected_sample!r}. "
-            f"Firmware attendu : pico-node_v{self._gate.expected}. Un firmware "
+            f"Firmware attendu : pico-motherboard_v2. Un firmware "
             f"plus ancien (v3) emet '[STAT] Mode:...' et n'est pas supporte."
         )
 

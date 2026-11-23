@@ -28,10 +28,13 @@ from __future__ import annotations
 
 import re
 
-#: The firmware this stack drives. Pinned to ``FW_VERSION`` in
-#: ``firmware/pico-node_v5/pico-node_v5.ino`` and to the GUI parser and the
-#: pre-flight by ``test_pico_link.py``.
-EXPECTED_FIRMWARE_VERSION = 5
+#: The firmware this stack drives: ``firmware/pico-motherboard_v2/``. That
+#: firmware prints no ``ver=`` field, so it is recognised by the fields only it
+#: sends (:data:`_V2_FIELDS`) and given the number 6 here. Pinned to the GUI
+#: parser and the pre-flight by ``test_pico_link.py``.
+MOTHERBOARD_V2_VERSION = 6
+EXPECTED_FIRMWARE_VERSION = MOTHERBOARD_V2_VERSION
+_V2_FIELDS = re.compile(r"^STATE\s+mode=\d+\s+armed=\d+\s+relay=\d+\s+pwr=\d+\s")
 
 _STATE_VER = re.compile(r"^STATE\s+ver=(\d+)(?:\s|$)")
 _BANNER_VER = re.compile(r"^\[VER\]\s+\S+\s+(\d+)\s*$")
@@ -47,7 +50,11 @@ def version_of(line: str) -> int | None:
         return None
     text = line.strip()
     match = _STATE_VER.match(text) or _BANNER_VER.match(text)
-    return int(match.group(1)) if match else None
+    if match:
+        return int(match.group(1))
+    if _V2_FIELDS.match(text) and " vrail=" in text:
+        return MOTHERBOARD_V2_VERSION
+    return None
 
 
 class FirmwareGate:

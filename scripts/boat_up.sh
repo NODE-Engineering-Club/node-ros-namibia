@@ -80,11 +80,60 @@ fi
 SONAR_BRIDGE=false
 [ "${SONAR:-sonarview}" = bridge ] && SONAR_BRIDGE=true
 
+# The fence follows each mission at Start (asket_common.geofence). The pre-flight
+# needs one to exist first, so an empty data folder starts with the shipped routes'.
+[ -f /data/setup/geofence.yaml ] || python3 -c '
+import glob, json, os, yaml
+from asket_common.geofence import route_fence_polygon
+pts = [(w["lat"], w["lon"]) for f in glob.glob("/workspace/src/gui_backend/config/routes/nav-*.json")
+       for w in json.load(open(f))["waypoints"]]
+os.makedirs("/data/setup", exist_ok=True)
+yaml.safe_dump({"geofence": {"name": "Auto: Navigation missions + 60 m", "auto": True,
+    "polygon": [[round(a, 7), round(b, 7)] for a, b in route_fence_polygon(pts)]}},
+    open("/data/setup/geofence.yaml", "w"), sort_keys=False)
+'
+
+# Pixhawk: the Pico left USB on motherboard v2, so its ttyACM number can move.
+if [ -z "${FCU_URL:-}" ]; then
+  for t in /sys/class/tty/ttyACM*; do
+    v=$(cat "$t/device/../idVendor" 2>/dev/null)
+    case "$v" in 1209|26ac) FCU_URL="/dev/$(basename "$t"):57600"; break ;; esac
+  done
+fi
+
+# Pico (motherboard v2) on the Jetson's 40-pin UART: find the port that is
+# actually printing its STATE lines. PICO_PORT overrides.
+if [ -z "${PICO_PORT:-}" ]; then
+  PICO_PORT=$(timeout 8 python3 -c '
+import serial
+for port in ("/dev/ttyTHS0", "/dev/ttyTHS1", "/dev/ttyTHS3"):
+    try:
+        with serial.Serial(port, 115200, timeout=1.2) as s:
+            if b"STATE mode=" in s.read(700):
+                print(port)
+                break
+    except (OSError, serial.SerialException):
+        pass
+' 2>/dev/null)
+fi
+# Autonomy needs the Pico. Without it the stack comes up as before (no Nav2).
+MISSION=false
+[ -n "$PICO_PORT" ] && MISSION=true
+
+# BMS: on when its port exists. BMS_PORT / BMS2_PORT / BMS_BAUD override.
+BMS_PORT="${BMS_PORT:-/dev/bms_pack1}"; BMS2_PORT="${BMS2_PORT:-/dev/bms_pack2}"
+BMS=false; BMS2=false
+[ -e "$BMS_PORT" ] && BMS=true
+[ -e "$BMS2_PORT" ] && BMS2=true
+
 nohup ros2 launch bringup njord.launch.py \
   fcu_url:="${FCU_URL:-/dev/ttyACM1:57600}" \
+  ${PICO_PORT:+pico_port:=$PICO_PORT} \
+  enable_bms:=$BMS enable_bms2:=$BMS2 bms_port:="$BMS_PORT" bms2_port:="$BMS2_PORT" bms_baud:="${BMS_BAUD:-115200}" \
   enable_gui:=true gui_static_dir:=/workspace/NAMIBIA_REDESIGNED_GUI/dist \
   enable_gui_cloud_mirror:=true enable_blackbox:=true enable_sonar:=$SONAR_BRIDGE enable_oak_rgbd:=$OAK ${OAK_IP:+oak_device_ip:=$OAK_IP} enable_segmentation:=$SEG \
-  enable_nav2:=false enable_perception:=false enable_vision:=false \
-  enable_boat_bt:=false enable_mission:=false \
+  enable_nav2:=$MISSION enable_perception:=false enable_vision:=false \
+  enable_boat_bt:=false enable_mission:=$MISSION \
   ${EXTRA_ARGS:-} > /workspace/boat_data/boat_up.log 2>&1 &
+echo "pico=${PICO_PORT:-NOT FOUND} missions=$MISSION bms=$BMS/$BMS2"
 echo "launched (sonar=${SONAR:-sonarview}, oak=$OAK${OAK_IP:+ at $OAK_IP}, on-camera detection, sam2=$SEG). Log: boat_data/boat_up.log  Cockpit: http://$(hostname).local:8090"

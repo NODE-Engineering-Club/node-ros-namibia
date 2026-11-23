@@ -16,6 +16,22 @@ const ROUTE_TEXT = {
   FAILED: 'Route failed', IDLE: 'No route running',
 };
 
+/**
+ * Why a mission cannot start right now, or null. A hint for the buttons: the
+ * backend re-checks all of it from the vessel's own report (hub _start_blocker).
+ */
+export function startBlock(v, connection) {
+  const pico = v.pico;
+  if (connection.isMock || v.isCloud) return 'Missions start only from the cockpit on the boat network.';
+  if (isRunning(routeOf(v))) return 'A mission is running. Abort it first.';
+  if (!v.state.connected) return 'Not connected to the vessel.';
+  if (v.report?.go !== true) return 'Run the preflight: Start unlocks on GO.';
+  if (pico?.rc_link_ok !== true) return 'No RC link.';
+  if (!(pico?.rc_channel8_raw >= 1400)) return 'Put the RC mode switch (CH3) in AUTO.';
+  if (pico?.armed !== true) return pico?.arming_block || 'The vessel is not armed.';
+  return null;
+}
+
 export function routeOf(v) {
   return v.mission?.route || null;
 }

@@ -143,6 +143,21 @@ sources:
     topic: /battery/state
     type: sensor_msgs/msg/BatteryState
     optional: true
+  # Which fence polygon Nav2's mask currently is (sensors/geofence_mask_node).
+  geofence_active:
+    topic: /geofence/active
+    type: std_msgs/msg/String
+    optional: true
+    qos: latched
+  # Each BMS's CSV row, verbatim: the cockpit's per-pack cells, FETs and faults.
+  bms_pack1:
+    topic: /battery/pack1/status_raw
+    type: std_msgs/msg/String
+    optional: true
+  bms_pack2:
+    topic: /battery/pack2/status_raw
+    type: std_msgs/msg/String
+    optional: true
   # The pre-flight report, as system_test_node publishes it.
   #
   # This used to point at /diagnostics (diagnostic_msgs/DiagnosticArray), which

@@ -20,7 +20,7 @@ from system_test.core.checks import (
 HEALTHY = dict(
     pico_age_s=0.1, rc_link_ok=True,
     # Raw SBUS counts, 172..1811. The firmware's thresholds are on this scale.
-    rc_channel8_raw=1811, rc_channel7_raw=1811, pico_firmware_version=5,
+    rc_channel8_raw=1811, rc_channel7_raw=1811, pico_firmware_version=6,
     num_sats=14, gnss_fix_type=3, hdop=0.8,
     heading_valid=True, heading_source="gnss_compass", heading_accuracy_deg=0.2,
     heading_divergence_deg=2.0, heading_divergence_meaningful=True,
@@ -222,7 +222,7 @@ def test_a_firmware_version_mismatch_grounds_the_vessel():
     result = item(report, "pico.firmware_version")
     assert result.status == FAIL
     assert "v3" in result.message
-    assert "pico-node_v5" in result.remedy
+    assert "pico-motherboard_v2" in result.remedy
     assert not report.go
 
 

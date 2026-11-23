@@ -64,6 +64,10 @@ CMD_APPLY_SETUP = "apply_setup"
 #: writes down on the way.
 CMD_DEPLOY_ROUTE = "deploy_route"
 CMD_ABORT_ROUTE = "abort_route"
+#: Deploy_route with the mode request in front of it: ask the Pico for
+#: AUTONOMOUS, wait until it reports it, then send the route. The RC mode switch
+#: still decides: with it out of AUTO the Pico never confirms and nothing starts.
+CMD_START_ROUTE = "start_route"
 
 #: Commands that change what the vessel is doing. These get the two-step
 #: confirmation in the UI and the confirmation watch here.
@@ -265,6 +269,18 @@ class CommandManager:
 def mode_confirmed(mode_name: str):
     def check(state: dict) -> bool:
         return (state.get("pico") or {}).get("mode") == mode_name
+
+    return check
+
+
+def start_confirmed(fence_token: str | None):
+    """The Pico is AUTONOMOUS and Nav2's mask is this mission's fence."""
+    autonomous = mode_confirmed("AUTONOMOUS")
+
+    def check(state: dict) -> bool:
+        return autonomous(state) and (
+            fence_token is None or state.get("geofence_active") == fence_token
+        )
 
     return check
 

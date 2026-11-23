@@ -49,7 +49,10 @@ Paste a few lines into ``test_pico_state.py``, check them against
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+
+from asket_common.pico_link import version_of
 
 #: The firmware protocol version this parser understands. Must match
 #: ``FW_VERSION`` in ``firmware/pico-node_v5/pico-node_v5.ino``.
@@ -57,7 +60,7 @@ from dataclasses import dataclass, field
 #: 5 since hw-alignment Phase B: v5 adds ``rclatch`` and ``txdrop`` at the end
 #: of the line. A v4 Pico is reported as a version mismatch and fails the
 #: pre-flight; that is the point of the number.
-PROTOCOL_VERSION = 5
+PROTOCOL_VERSION = 6   # firmware/pico-motherboard_v2 (recognised by its fields)
 
 #: Set to True only when a real line off real hardware has been captured and
 #: checked against this parser. Reading the firmware source is not the same as
@@ -103,6 +106,10 @@ CH8_ESTOP_MAX = 700
 #: Above this on channel 7, the firmware arms. The firmware's ``ARM_THRESHOLD``.
 CH7_ARM_MIN = 1000
 
+#: Motherboard v2: at or above this on the mode channel (CH3, reported as
+#: ``ch8``) the switch permits autonomy. The firmware's ``MODE_MID_MAX``.
+MODE_AUTO_MIN = 1400
+
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
 
@@ -128,15 +135,42 @@ _FIELDS = {
     # v5
     "rclatch": "rc_lost_latched",
     "txdrop": "serial_tx_dropped",
+    # motherboard v2 (keys are matched in lower case)
+    "pwr": "power_stage",
+    "esc": "esc_bus_live",
+    "vrail": "bus_voltage",
+    "v12": "rail_12v",
+    "sag": "bus_sag",
+    "pwml": "pwm_left_us",
+    "pwmr": "pwm_right_us",
+    "pwmlim": "pwm_limit_us",
+    "rc": "rc_link_live",
+    "dtrc": "rc_age_ms",
+    "maxgap": "rc_max_gap_ms",
+    "lq": "rc_link_quality",
+    "rssi": "rc_rssi_dbm",
+    "rcok": "sbus_frames_ok",
+    "rcbad": "sbus_frames_bad",
+    "jet": "jetson_power_on",
+    "pg": "jetson_power_good",
+    "leak": "leak",
+    "tenc": "enclosure_temp_c",
+    "rh": "enclosure_rh",
+    "warn": "warning_bits",
 }
 
 _BOOL_FIELDS = {
     "armed", "relay_closed", "mode_requested_auto", "link_live",
     "estop_latched", "sbus_failsafe", "sbus_frame_lost", "rc_lost_latched",
+    "esc_bus_live", "bus_sag", "rc_link_live", "jetson_power_on",
+    "jetson_power_good", "leak",
 }
+_FLOAT_FIELDS = {"bus_voltage", "rail_12v", "enclosure_temp_c", "enclosure_rh"}
 _INT_FIELDS = {
     "firmware_version", "rc_throttle_raw", "rc_yaw_raw", "rc_channel7_raw",
     "rc_channel8_raw", "sbus_frames_ok", "sbus_frames_bad", "serial_tx_dropped",
+    "power_stage", "pwm_left_us", "pwm_right_us", "pwm_limit_us", "rc_age_ms",
+    "rc_max_gap_ms", "rc_link_quality", "rc_rssi_dbm", "warning_bits",
 }
 
 #: A line is only called parsed when these are present. One understood field is
@@ -196,6 +230,28 @@ class PicoState:
     #: means some STATE lines never reached the Jetson.
     serial_tx_dropped: int | None = None
 
+    # Motherboard v2. ``rc_channel8_raw`` carries its mode switch (CH3), and
+    # it has no arm channel: the mode switch arms.
+    power_stage: int | None = None
+    esc_bus_live: bool | None = None
+    bus_voltage: float | None = None
+    rail_12v: float | None = None
+    bus_sag: bool | None = None
+    pwm_left_us: int | None = None
+    pwm_right_us: int | None = None
+    pwm_limit_us: int | None = None
+    rc_link_live: bool | None = None
+    rc_age_ms: int | None = None
+    rc_max_gap_ms: int | None = None
+    rc_link_quality: int | None = None
+    rc_rssi_dbm: int | None = None
+    jetson_power_on: bool | None = None
+    jetson_power_good: bool | None = None
+    leak: bool | None = None
+    enclosure_temp_c: float | None = None
+    enclosure_rh: float | None = None
+    warning_bits: int | None = None
+
     #: Keys seen in the line that this parser does not recognise. Reported
     #: rather than dropped: an unknown key is usually the field that matters.
     unknown_keys: list[str] = field(default_factory=list)
@@ -220,6 +276,8 @@ class PicoState:
         dead transmitter shows up in ``mode`` within half a second. Read the
         two together, and read both against the age of the sample.
         """
+        if self.rc_link_live is not None:   # motherboard v2 reports it directly
+            return self.rc_link_live
         if self.sbus_failsafe is None:
             return None
         return not self.sbus_failsafe
@@ -250,6 +308,10 @@ class PicoState:
         latched e-stop is holding the vessel down, and telling them apart is
         the whole of ``arming_block_reason()``.
         """
+        if self.power_stage is not None:    # motherboard v2: the mode switch arms
+            if self.rc_channel8_raw is None:
+                return None
+            return self.rc_channel8_raw >= CH8_ESTOP_MAX
         if self.rc_channel7_raw is None:
             return None
         return self.rc_channel7_raw > CH7_ARM_MIN
@@ -291,6 +353,10 @@ def parse_state_line(line: str) -> PicoState:
             continue
         _assign(state, name, value.strip())
 
+    if state.firmware_version is None:
+        state.firmware_version = version_of(line)
+    if state.power_stage is not None:
+        state.rc_channel7_raw = None    # printed as 0: this board has no arm channel
     if state.firmware_version is not None:
         state.version_mismatch = state.firmware_version != PROTOCOL_VERSION
 
@@ -324,6 +390,16 @@ def _assign(state: PicoState, name: str, value: str) -> None:
             setattr(state, name, False)
         else:
             state.unknown_keys.append(f"{name}={value}")
+        return
+
+    if name in _FLOAT_FIELDS:
+        try:
+            number = float(value)
+        except ValueError:
+            state.unknown_keys.append(f"{name}={value}")
+            return
+        # "nan" is the firmware saying it has no reading: unknown, not a fault.
+        setattr(state, name, number if math.isfinite(number) else None)
         return
 
     if name in _INT_FIELDS:

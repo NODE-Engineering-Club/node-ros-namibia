@@ -273,7 +273,7 @@ def test_the_firmware_source_still_says_what_these_tests_assume():
     """
     ino = (
         Path(__file__).resolve().parents[3]
-        / "firmware" / "pico-node_v5" / "pico-node_v5.ino"
+        / "firmware" / "pico-motherboard_v2" / "pico-motherboard_v2.ino"
     ).read_text()
 
     def const(pattern):
@@ -281,10 +281,9 @@ def test_the_firmware_source_still_says_what_these_tests_assume():
         assert match, f"{pattern!r} no longer appears in the firmware"
         return int(match.group(1))
 
-    assert const(r"#define FW_VERSION\s+(\d+)") == pico_state.PROTOCOL_VERSION
     assert const(r"MODE_LOW_MAX\s*=\s*(\d+)") == pico_state.CH8_ESTOP_MAX
-    assert const(r"ARM_THRESHOLD\s*=\s*(\d+)") == pico_state.CH7_ARM_MIN
-    assert "STATE ver=" in ino, "the firmware no longer emits ver= first"
+    assert const(r"MODE_MID_MAX\s*=\s*(\d+)") == pico_state.MODE_AUTO_MIN
+    assert 'F("STATE mode=")' in ino and 'F(" pwr=")' in ino, "v2 is recognised by these"
 
 
 def test_the_bridges_state_filter_is_what_this_test_reproduces():

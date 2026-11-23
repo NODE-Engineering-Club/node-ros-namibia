@@ -14,7 +14,7 @@ import {
   routeLengthM, routeValid,
 } from '../lib/missionFile.js';
 import { preflightVerdict } from '../lib/vessel.js';
-import { isRunning, routeOf, routePill } from '../lib/route.js';
+import { isRunning, routeOf, routePill, startBlock } from '../lib/route.js';
 
 /**
  * Repo — two libraries, labelled apart:
@@ -50,10 +50,7 @@ export function Repo({ v, connection, library, onOpenInDesigner, onLaunch }) {
   const deployedId = route?.deployed?.route_id;
   const onServer = library.mode === 'server';
   const [busy, setBusy] = useState(false);
-  const deployBlock = !onServer ? 'Mock mode: no GUI server or vessel to deploy to.'
-    : running ? 'A route is running. Abort it in Navigate first.'
-      : !v.state.connected ? 'Not connected to the vessel'
-        : !ready ? 'Complete preflight to deploy' : null;
+  const deployBlock = !onServer ? 'Mock mode: no GUI server or vessel to start.' : startBlock(v, connection);
 
   const list = library.missions
     .filter((m) => m.name.toLowerCase().includes(query.toLowerCase()))
@@ -110,8 +107,8 @@ export function Repo({ v, connection, library, onOpenInDesigner, onLaunch }) {
           </>
         )}
         {ready
-          ? <Banner inline level="ok" title="Preflight complete." detail="Deploy sends the route to the vessel's mission manager. It does not arm or change mode: the boat drives it only in Autonomous with the arm switch up." />
-          : <Banner inline level="warn" title="Review before deploying." detail="Saved routes do not confirm current vessel readiness. Run the preflight; Deploy unlocks on GO." />}
+          ? <Banner inline level="ok" title="Preflight complete." detail="Start asks for Autonomous, then sends the route. It needs the RC mode switch (CH3) in AUTO and never arms the vessel." />
+          : <Banner inline level="warn" title="Review before starting." detail="Saved routes do not confirm current vessel readiness. Run the preflight; Start unlocks on GO." />}
         <div style={{ height: 12 }} />
 
         <section className="glass panel repo-library">
@@ -131,7 +128,7 @@ export function Repo({ v, connection, library, onOpenInDesigner, onLaunch }) {
               </thead>
               <tbody>
                 {list.map((m) => (
-                  <tr key={m.id} className={picked?.id === m.id ? 'selected' : ''} onClick={() => setPickedId(m.id)}>
+                  <tr key={m.id} className={picked?.id === m.id ? 'selected' : ''} onClick={() => { setPickedId(m.id); library.setActive(m.id); }}>
                     <td><CoursePreview waypoints={m.waypoints} /></td>
                     <td>
                       <div className="repo-name">
@@ -150,12 +147,13 @@ export function Repo({ v, connection, library, onOpenInDesigner, onLaunch }) {
                     <td>{m.saved_utc_ms ? new Date(m.saved_utc_ms).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}<div className="hint">{m.stored === 'server' ? 'On the GUI server' : 'This browser'}</div></td>
                     <td className="ready-col" onClick={(e) => e.stopPropagation()}>
                       <ConfirmAction
-                        connection={connection} state={v.state} command="deploy_route"
+                        connection={connection} state={v.state} command="start_route"
                         args={{ route_id: m.id }}
-                        label="Deploy" icon={<IconSend />} variant={`small ${ready ? 'go' : 'warn'}`}
-                        prompt={`Deploy ${m.name}?`}
+                        label="Start" icon={<IconSend />} variant={`small ${ready ? 'go' : 'warn'}`}
+                        prompt={`Start ${m.name}? The boat will drive itself.`}
+                        onSent={() => onLaunch(m)}
                         disabled={Boolean(deployBlock) || !routeValid(m) || m.stored !== 'server'}
-                        title={deployBlock || `Sends ${m.waypoints.length} waypoints to mission_manager.`}
+                        title={deployBlock || `Requests Autonomous, then sends ${m.waypoints.length} waypoints.`}
                         resultFor={(latest) => latest.args?.route_id === m.id}
                       />
                       {deployBlock && <div className="launch-note">{deployBlock}</div>}
@@ -166,7 +164,7 @@ export function Repo({ v, connection, library, onOpenInDesigner, onLaunch }) {
             </table>
           )}
           <div className="panel-foot hint">
-            Showing {list.length} of {library.missions.length} saved missions · ○ Start / ■ End · schematic courses, not for navigation · deploying does not arm ASKET or change its mode.
+            Showing {list.length} of {library.missions.length} saved missions · ○ Start / ■ End · schematic courses, not for navigation · click a mission to select it on every map.
           </div>
         </section>
 

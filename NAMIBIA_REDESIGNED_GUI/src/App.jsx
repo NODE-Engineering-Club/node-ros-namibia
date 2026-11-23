@@ -12,6 +12,7 @@ import { Preflight } from './screens/Preflight.jsx';
 import { Repo } from './screens/Repo.jsx';
 import { newMission } from './lib/missionFile.js';
 import { useMissionLibrary } from './lib/missionStore.js';
+import { toExport } from './lib/missionFile.js';
 import { SUBSCRIPTIONS, useVessel } from './lib/vessel.js';
 import { setBackendDown, setFrozen, setSonarView, sonarViewState } from './lib/mockRig.js';
 
@@ -172,6 +173,19 @@ export function App({ connection }) {
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* ignore */ }
   };
 
+  // The selected mission is the one open in Mission design, so every map shows
+  // it. Unsaved edits are never replaced: Mission design offers to load it.
+  const activeId = library.active?.id;
+  useEffect(() => {
+    const selected = library.active;
+    if (!selected || selected.id === draft.id) return;
+    const stored = library.missions.find((m) => m.id === draft.id);
+    const same = stored && JSON.stringify(toExport(stored)) === JSON.stringify(toExport(draft));
+    if (!draft.waypoints?.length || same) setDraft(selected);
+    // Only a change of selection may swap the draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
   // Same subscription rule as src/asket_gui: a sensor the boat does not carry
   // is never asked for, and is withdrawn once `hello` says it is absent.
   const lidarFitted = isFitted(v.state, 'lidar');
@@ -204,7 +218,7 @@ export function App({ connection }) {
 
   const screen = {
     navigate: (
-      <Navigate v={v} connection={connection} active={library.active} onNavigate={navigate} sonarState={sonarState} />
+      <Navigate v={v} connection={connection} active={library.active} library={library} onNavigate={navigate} sonarState={sonarState} />
     ),
     preflight: <Preflight v={v} connection={connection} onNavigate={navigate} />,
     mission: <MissionDesign v={v} connection={connection} draft={draft} setDraft={setDraft} library={library} onNavigate={navigate} />,

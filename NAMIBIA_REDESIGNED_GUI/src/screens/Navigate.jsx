@@ -11,6 +11,7 @@ import { duration, endurance } from '@asket/lib/format.js';
 import { GlassPanel, Pill, ConfirmAction, StreamNotes } from '../components/ui.jsx';
 import { AsketEmbed } from '../components/Embed.jsx';
 import {
+  IconWarn,
   IconAnchor, IconCamera, IconChevronRight, IconFlag, IconPin, IconPulse, IconSend, IconStop, IconWave,
 } from '../components/Icons.jsx';
 import { AreaMap } from '../slots/AreaMap.jsx';
@@ -19,7 +20,7 @@ import { bearingDeg, distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } f
 import { worstAlarm } from '../lib/vessel.js';
 import { useDeployedRoute } from '../lib/missionStore.js';
 import {
-  WAYPOINT_LABEL, deployedIsLive, isRunning, routeOf, routePill, waypointStatus,
+  WAYPOINT_LABEL, deployedIsLive, isRunning, routeOf, routePill, startBlock, waypointStatus,
 } from '../lib/route.js';
 import { streamNotes } from '../lib/streamNotes.js';
 
@@ -418,7 +419,49 @@ function TelemetryPanel({ v, connection, sonarState = v.state }) {
  * operator's selection from Repo otherwise. Waypoint status comes only from
  * /mission/status: passed = before `current_waypoint`, current = it.
  */
-function MissionPanel({ v, connection, active, onNavigate, shown }) {
+function BatteryPanel({ v }) {
+  const packs = v.power?.packs || [];
+  const age = live(v, 'power');
+  const faulted = packs.some((p) => !p.comms || p.faults?.length || !p.dsg);
+  return (
+    <GlassPanel title="Battery packs" icon={<IconWarn />} collapsible="nav-battery"
+      aside={<><PanelAge {...age} /><Pill level={!packs.length ? 'neutral' : faulted ? 'alarm' : 'ok'}>{!packs.length ? 'no data' : faulted ? 'Fault' : 'OK'}</Pill></>}>
+      {!packs.length ? <span className="muted">No BMS reporting.</span> : (
+        <div className="bms-packs">
+          {packs.map((p) => {
+            const low = p.cells_v?.length ? Math.min(...p.cells_v) : null;
+            const high = p.cells_v?.length ? Math.max(...p.cells_v) : null;
+            return (
+              <div key={p.name} className={`bms-pack${p.stale ? ' stale' : ''}`}>
+                <div className="bms-head">
+                  <strong>{p.name}</strong>
+                  {p.stale ? <Pill level="warn">{`silent ${n(p.age_s, 0)} s`}</Pill>
+                    : !p.comms ? <Pill level="alarm">BMS not answering</Pill>
+                      : p.faults?.length ? <Pill level="alarm">{p.faults.join(' ')}</Pill>
+                        : !p.dsg ? <Pill level="alarm">Output off</Pill> : <Pill level="ok">Output on</Pill>}
+                </div>
+                <div className="bms-stats">
+                  <span><b>{p.pack_v != null ? `${n(p.pack_v, 2)} V` : 'n/a'}</b>{p.soc != null ? ` · ${Math.round(p.soc * 100)}%` : ''}</span>
+                  <span>{p.current_a != null ? `${n(p.current_a, 2)} A` : 'n/a'}</span>
+                  <span>{p.temp_c != null ? `${n(p.temp_c, 1)} °C` : p.ntc === 1 ? 'NTC open' : p.ntc === 2 ? 'NTC short' : 'n/a'}</span>
+                  <span>CHG {p.chg ? 'on' : 'off'} · DSG {p.dsg ? 'on' : 'off'}{p.retries ? ` · retries ${p.retries}` : ''}</span>
+                </div>
+                {p.cells_v?.length > 0 && (
+                  <div className="bms-cells">
+                    {p.cells_v.map((c, i) => <span key={i} title={`Cell ${i + 1}`}>{c.toFixed(3)}</span>)}
+                    <span className="hint">Δ {Math.round((high - low) * 1000)} mV</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </GlassPanel>
+  );
+}
+
+function MissionPanel({ v, connection, active, library, onNavigate, shown }) {
   const { mission, power, state } = v;
   const route = routeOf(v);
   const running = isRunning(route);
@@ -434,14 +477,11 @@ function MissionPanel({ v, connection, active, onNavigate, shown }) {
   const reached = route?.state === 'SUCCEEDED' ? total : route?.current_waypoint;
   const pct = isLive && total ? Math.round((100 * (reached || 0)) / total) : 0;
 
-  const canDeploy = active?.stored === 'server';
-  const deployWhy = connection.isMock
-    ? 'Mock mode: there is no GUI server or vessel to deploy to.'
-    : !active ? 'Choose a route in Repo first.'
-      : !canDeploy ? 'This route is only in this browser. Upload it to the server in Repo.'
-        : running ? 'A route is running. Abort it first.'
-          : !v.state.connected ? 'Not connected to the vessel.'
-            : v.report?.go !== true ? 'Run the preflight: Deploy unlocks on GO.' : undefined;
+  const canStart = active?.stored === 'server';
+  const presets = (library?.missions || []).filter((r) => r.id.startsWith('nav-') || r.id === active?.id);
+  const startWhy = !active ? 'Choose a mission first.'
+    : !canStart ? 'This route is only in this browser. Upload it to the server in Repo.'
+      : startBlock(v, connection) || undefined;
 
   return (
     <GlassPanel title="Mission" icon={<IconFlag />} className="mission-glass" collapsible="nav-mission"
@@ -456,21 +496,22 @@ function MissionPanel({ v, connection, active, onNavigate, shown }) {
         <div className="mission-footer">
           <div className="btn-row">
             <ConfirmAction
-              connection={connection} state={state} command="deploy_route"
+              connection={connection} state={state} command="start_route"
               args={{ route_id: active?.id }}
-              label="Deploy route" icon={<IconSend />} variant="go"
-              prompt={`Send ${active?.name || 'this route'} (${active?.waypoints?.length || 0} waypoints) to the vessel?`}
-              disabled={Boolean(deployWhy)}
-              title={deployWhy || 'mission_manager starts steering to waypoint 1.'}
+              label="Start mission" icon={<IconSend />} variant="go"
+              prompt={`Start ${active?.name || 'this mission'} (${active?.waypoints?.length || 0} waypoints)? The boat will drive itself.`}
+              disabled={Boolean(startWhy)}
+              title={startWhy || 'Requests Autonomous, then sends the route once the Pico confirms.'}
             />
             <ConfirmAction
               connection={connection} state={state} command="abort_route"
-              label="Abort route" icon={<IconStop />} variant="danger"
-              prompt="Stop following the route?"
+              label="Abort mission" icon={<IconStop />} variant="danger"
+              prompt="Stop the mission and return to manual?"
               disabled={!running}
-              title={running ? 'mission_manager cancels the current goal.' : 'No route is running.'}
+              title={running ? 'Cancels the route and drops to Manual: the RC sticks are live.' : 'No route is running.'}
             />
           </div>
+          {startWhy && !running && <div className="launch-note">{startWhy}</div>}
           <div className="mission-stats">
             <div>
               <div className="label">Recording</div>
@@ -499,6 +540,15 @@ function MissionPanel({ v, connection, active, onNavigate, shown }) {
         </div>
       )}
     >
+      {presets.length > 0 && !running && (
+        <div className="mission-presets" role="group" aria-label="Choose a mission">
+          {presets.map((r) => (
+            <button key={r.id} type="button" aria-pressed={active?.id === r.id}
+              className={`btn small${active?.id === r.id ? ' primary' : ''}`}
+              onClick={() => library.setActive(r.id)}>{r.name}</button>
+          ))}
+        </div>
+      )}
       <div className="mission-meta">
         <div>
           <div className="upper faint">{isLive ? 'Deployed route' : 'Selected route'}</div>
@@ -552,7 +602,9 @@ function MissionPanel({ v, connection, active, onNavigate, shown }) {
 function useShownRoute(v, connection, active) {
   const route = routeOf(v);
   const deployed = useDeployedRoute(connection, route?.deployed);
-  const live = deployedIsLive(route, deployed);
+  // A finished or aborted route stays on screen only until another is selected.
+  const live = deployedIsLive(route, deployed)
+    && (isRunning(route) || !active || active.fingerprint === deployed.fingerprint);
   const mission = live
     ? { name: deployed.name, waypoints: deployed.waypoints, cruise_speed_ms: active?.cruise_speed_ms }
     : active;
@@ -650,7 +702,7 @@ function useSplit(gridRef) {
   return { style: { '--nav-left': `${split}%` }, gutter };
 }
 
-export function Navigate({ v, connection, active, onNavigate, sonarState = v.state }) {
+export function Navigate({ v, connection, active, library, onNavigate, sonarState = v.state }) {
   // Live feed or the segmented view (objects, masks, distances). The cloud cockpit has no
   // segmented stream (it mirrors snapshots only), so it stays on live.
   const [cameraView, setCameraView] = useState('live');
@@ -724,7 +776,8 @@ export function Navigate({ v, connection, active, onNavigate, sonarState = v.sta
           <div className="col right">
             <StatusPanel v={v} connection={connection} onNavigate={onNavigate} />
             <TelemetryPanel v={v} connection={connection} sonarState={sonarState} />
-            <MissionPanel v={v} connection={connection} active={active} onNavigate={onNavigate} shown={shown} />
+            <BatteryPanel v={v} />
+            <MissionPanel v={v} connection={connection} active={active} library={library} onNavigate={onNavigate} shown={shown} />
           </div>
         </div>
       </div>

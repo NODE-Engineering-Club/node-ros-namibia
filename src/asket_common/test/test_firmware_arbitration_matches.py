@@ -300,7 +300,10 @@ def test_the_protocol_version_matches_the_firmware():
     the check itself must be pinned to the sketch."""
     from gui_backend.core.pico_state import PROTOCOL_VERSION
 
-    assert _constant(r"#define FW_VERSION (\d+)", "FW_VERSION") == PROTOCOL_VERSION
+    # Motherboard v2 prints no ver=; it is recognised by its fields as 6.
+    source = (ROOT / "firmware" / "pico-motherboard_v2" / "pico-motherboard_v2.ino").read_text()
+    assert PROTOCOL_VERSION == 6
+    assert 'F("STATE mode=")' in source and 'F(" pwr=")' in source and 'F(" vrail=")' in source
 
 
 def test_the_esc_arm_delay_matches_the_firmware():
@@ -396,13 +399,8 @@ def test_the_firmware_prints_every_key_the_parser_expects():
     """
     from gui_backend.core.pico_state import _FIELDS
 
-    source = _sketch()
-    start = source.index('tx_add("STATE ver=");')
-    end = source.index("last_status = now;", start)
-    printed = source[start:end]
-
-    missing = [key for key in _FIELDS if f'{key}=' not in printed and key != "ver"]
-    assert not missing, (
-        f"the firmware's STATE line no longer prints: {missing}. "
-        "Either restore the field or bump FW_VERSION and update the parser."
-    )
+    source = (ROOT / "firmware" / "pico-motherboard_v2" / "pico-motherboard_v2.ino").read_text()
+    printed = set(re.findall(r'out\.print\(F\("(?:STATE )?\s*(\w+)="\)\)', source))
+    assert {"mode", "armed", "pwr", "vrail", "rc", "leak", "warn"} <= printed
+    unread = sorted(k for k in printed if k.lower() not in _FIELDS)
+    assert not unread, f"the firmware prints keys the parser does not know: {unread}"

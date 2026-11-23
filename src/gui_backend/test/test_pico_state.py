@@ -26,7 +26,7 @@ from gui_backend.core.pico_state import (
 #: Copied from the firmware's own loop(), in field order. Every test that needs
 #: a well-formed line starts from this one.
 V5_LINE = (
-    "STATE ver=5 mode=3 armed=1 relay=1 wantauto=1 link=1 estoplatch=0 "
+    "STATE ver=6 mode=3 armed=1 relay=1 wantauto=1 link=1 estoplatch=0 "
     "thr=991 yaw=991 ch7=1811 ch8=1811 "
     "sbusok=2400 sbusbad=0 sbusfs=0 sbuslost=0 rclatch=0 txdrop=0"
 )
@@ -59,16 +59,16 @@ def test_the_format_is_still_marked_unverified():
     "STATEMENT mode=AUTO",
     "\x00\xff binary noise",
     "STATE " + "x" * 10000,
-    "STATE ver=5 mode= armed=",
+    "STATE ver=6 mode= armed=",
     "STATE=1",
-    "STATE ver=5 mode=3 armed=1 " + "=" * 500,
+    "STATE ver=6 mode=3 armed=1 " + "=" * 500,
 ])
 def test_nothing_a_serial_link_can_produce_makes_it_raise(line):
     state = parse_state_line(line)
     assert isinstance(state.parsed, bool)
 
 
-@pytest.mark.parametrize("value", [None, 42, b"STATE ver=5 mode=3 armed=1", object()])
+@pytest.mark.parametrize("value", [None, 42, b"STATE ver=6 mode=3 armed=1", object()])
 def test_a_non_string_is_not_a_line(value):
     assert parse_state_line(value).parsed is False
 
@@ -173,8 +173,8 @@ def test_channel_8_absent_is_unknown_not_safe():
 
 
 def test_a_future_firmware_is_a_mismatch_not_a_guess():
-    state = parse_state_line(_line(ver="6"))
-    assert state.firmware_version == 6
+    state = parse_state_line(_line(ver="7"))
+    assert state.firmware_version == 7
     assert state.version_mismatch is True
 
 
@@ -191,7 +191,7 @@ def test_version_is_the_first_field_so_it_survives_truncation():
     """A line cut short by a serial glitch still carries its version, which is
     what lets the check layer say 'wrong firmware' instead of 'unreadable'."""
     truncated = V5_LINE[:20]
-    assert truncated.startswith("STATE ver=5 ")
+    assert truncated.startswith("STATE ver=6 ")
     assert parse_state_line(truncated).firmware_version == PROTOCOL_VERSION
 
 
@@ -201,13 +201,13 @@ def test_version_is_the_first_field_so_it_survives_truncation():
 def test_one_understood_field_is_not_enough():
     """``armed=1`` alone used to mark a line parsed. A line whose mode was
     misread then reported success, and the operator saw a confident panel."""
-    state = parse_state_line("STATE ver=5 armed=1")
+    state = parse_state_line("STATE ver=6 armed=1")
     assert state.armed is True
     assert state.parsed is False
 
 
 def test_mode_and_armed_together_are_enough():
-    assert parse_state_line("STATE ver=5 mode=2 armed=0").parsed is True
+    assert parse_state_line("STATE ver=6 mode=2 armed=0").parsed is True
 
 
 def test_state_alone_carries_nothing():

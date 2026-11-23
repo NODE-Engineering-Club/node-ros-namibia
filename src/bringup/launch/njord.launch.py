@@ -8,6 +8,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (EnvironmentVariable, LaunchConfiguration,
                                   PathJoinSubstitution, PythonExpression)
 from launch_ros.actions import Node, SetParameter
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions import ParameterFile
 from nav2_common.launch import RewrittenYaml
@@ -181,6 +182,8 @@ def generate_launch_description():
                               description="BMS readers (one per pack) + battery_aggregator -> /battery/state"),
         # Stable names from deploy/udev/99-asket.rules (the BMS boards sit
         # behind a USB hub, so ttyACMn numbers are not stable).
+        DeclareLaunchArgument("bms_baud",             default_value="115200",
+                              description="Baud rate of the BMS serial link(s)."),
         DeclareLaunchArgument("bms_port",             default_value="/dev/bms_pack1",
                               description="Serial port of the pack 1 BMS (MCP2221)"),
         # false while only one BMS is wired (team decision, Phase B). With one
@@ -675,6 +678,7 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration("enable_bms")),
             parameters=[{
                 "port": LaunchConfiguration("bms_port"),
+                "baud": ParameterValue(LaunchConfiguration("bms_baud"), value_type=int),
                 "pack_name": "pack1",
                 "state_topic": "/battery/pack1",
                 "raw_topic": "/battery/pack1/status_raw",
@@ -690,6 +694,7 @@ def generate_launch_description():
             ])),
             parameters=[{
                 "port": LaunchConfiguration("bms2_port"),
+                "baud": ParameterValue(LaunchConfiguration("bms_baud"), value_type=int),
                 "pack_name": "pack2",
                 "state_topic": "/battery/pack2",
                 "raw_topic": "/battery/pack2/status_raw",

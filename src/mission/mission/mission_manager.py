@@ -6,7 +6,7 @@ import os
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Quaternion
+from geometry_msgs.msg import Point, PoseStamped, Quaternion
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path as NavPath
@@ -18,6 +18,9 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from robot_localization.srv import FromLL
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformException, TransformListener
+
+from mission.geo_utils import step_towards
 
 
 class MissionManager(Node):
@@ -63,6 +66,14 @@ class MissionManager(Node):
         self._final_hold_duration_sec = float(
             self.get_parameter("final_hold_duration_sec").value
         )
+
+        # Longest single Nav2 goal. Must stay inside the global costmap's
+        # rolling window (150 m square, so 75 m from the boat).
+        self.declare_parameter("max_goal_distance_m", 50.0)
+        self._max_goal_m = float(self.get_parameter("max_goal_distance_m").value)
+        self._intermediate_goal = False
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, self)
 
         self._nav = ActionClient(self, NavigateToPose, "navigate_to_pose")
         # Preview-only: computes a path without executing it, so the GUI can
@@ -435,9 +446,24 @@ class MissionManager(Node):
         )
 
         self._send_nav_goal(
-            pt,
+            self._next_step(pt),
             is_bypass=False,
         )
+
+    def _next_step(self, waypoint):
+        """The waypoint, or a point on the way to it if it is too far for Nav2."""
+        self._intermediate_goal = False
+        try:
+            tf = self._tf_buffer.lookup_transform("map", "base_link", rclpy.time.Time())
+        except TransformException as e:
+            self.get_logger().warning(f"no map->base_link, sending the waypoint as is: {e}")
+            return waypoint
+        here = tf.transform.translation
+        x, y, self._intermediate_goal = step_towards(
+            here.x, here.y, waypoint.x, waypoint.y, self._max_goal_m)
+        if not self._intermediate_goal:
+            return waypoint
+        return Point(x=x, y=y, z=waypoint.z)
 
     # -------------------------------------------------------------------------
     # Temporary bypass navigation
@@ -647,6 +673,12 @@ class MissionManager(Node):
 
                 # Do not increment the normal mission waypoint index.
                 # On the next tick, the original waypoint is sent again.
+                return
+
+            if self._intermediate_goal:
+                # A step of a long leg: same waypoint, next tick sends the next step.
+                self._intermediate_goal = False
+                self._waypoint_attempt_idx = -1
                 return
 
             self._idx += 1
