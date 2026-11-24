@@ -14,11 +14,17 @@ the Jetson's.
 
 Orientation comes from the sonar's OWN gravity vector (ATTITUDE_REPORT up_vec),
 not from config/mounting.yaml, which is unmeasured. Heading comes from the
-autopilot compass. The two things this script cannot know are:
-  --mount-yaw  device x-axis relative to the bow, degrees clockwise (default 0)
-  --flip-angle mirror the beam angle sign (decides which fan edge is "up")
-By default the angle sign is picked automatically: the one that puts fewer
-strong returns above the water surface.
+autopilot compass. Two mounting facts are not recorded anywhere, so by default
+the script measures them from the data itself:
+  --flip-angle  which way the beam angle runs (which fan edge is "up").
+                auto: in most pings the seabed is one straight line in the
+                fan; pick the sign that makes that line level with gravity.
+  --mount-yaw   device x-axis relative to the bow, degrees clockwise.
+                auto: pick the yaw where repeated passes over the same ground
+                agree best on depth (needs the boat to cross its own track).
+Getting either wrong turns each ping's flat seabed into a tilted or misplaced
+streak, and the overlaid pings blur into an unreadable cloud (2026-11-24:
+the old "fewest points above the surface" rule picked the wrong sign).
 
 Outputs, per recording, in --out:
   <name>_cloud.ply     binary PLY, x=east y=north z=up (m, from home), intensity,
@@ -27,6 +33,12 @@ Outputs, per recording, in --out:
   <name>_seabed.csv.gz lat, lon, depth_m, power, ping, utc_ms (for GIS)
   <name>_track.csv     GPS track during the recording
   <name>_preview.png   plan view + depth profile, for a quick look
+  <name>_water.ply     everything that is NOT seabed: echoes that stand out from
+                       the background at their range (objects, fish, ropes ...)
+  <name>_objects.csv   candidate objects: compact echo clusters that stay at one
+                       place on the ground over many pings (lat, lon, depth ...)
+  <name>_objects.ply   the points of those clusters only
+  <name>_objects.png   numbered objects on the map + water-column echogram
   report.json          numbers behind the quality summary
 
 Usage (on the Jetson host):
@@ -63,8 +75,20 @@ M_PER_DEG = 111320.0
 
 def read_svlz(path):
     """Yield (message_id, payload) for every checksum-valid frame."""
+    # Read incrementally so a recording cut off mid-write (power off before
+    # SonarView closed the file) still yields every complete frame.
+    chunks = []
     with gzip.open(path, "rb") as fh:
-        d = fh.read()
+        try:
+            while True:
+                c = fh.read(1 << 20)
+                if not c:
+                    break
+                chunks.append(c)
+        except EOFError:
+            print("  recording truncated (not closed cleanly); "
+                  "using the frames before the cut", file=sys.stderr)
+    d = b"".join(chunks)
     i, n, bad = 0, len(d), 0
     while i < n - 8:
         if d[i:i + 2] != b"BR":
@@ -222,6 +246,275 @@ def seabed_filter(P, window=25, band_m=1.0, max_iqr_m=2.0, min_depth_m=1.0):
     return P[keep], np.c_[t, -bed, ok]
 
 
+# ------------------------------------------------------- mount from data ---
+
+def pick_angle_sign(pings, n_sample=800, seed=0):
+    """Fit the dominant straight line (the seabed) in each sampled ping and
+    measure how far its normal is from gravity for both angle signs. Returns
+    (sign, {sign: median tilt deg}, pings used)."""
+    rng = np.random.default_rng(seed)
+    idx = np.linspace(0, len(pings) - 1, min(n_sample, len(pings))).astype(int)
+    tilt = {1: [], -1: []}
+    for i in idx:
+        ps, at = pings[i]
+        if at is None:
+            continue
+        A = np.array([(p.angle_rad, p.tof_s * ps.speed_of_sound / 2) for p in ps.points
+                      if p.power >= ps.pwr_threshold_high and p.tof_s > 0])
+        if len(A) < 40:
+            continue
+        X = np.c_[A[:, 1] * np.sin(A[:, 0]), -A[:, 1] * np.cos(A[:, 0])]
+        best_n, best = 0, None
+        for _ in range(60):
+            j = rng.choice(len(X), 2, replace=False)
+            d = X[j[1]] - X[j[0]]
+            L = math.hypot(*d)
+            if L < 0.5:
+                continue
+            nrm = np.array([-d[1], d[0]]) / L
+            c = nrm @ X[j[0]]
+            k = int(np.sum(np.abs(X @ nrm - c) < 0.15))
+            if k > best_n:
+                best_n, best = k, (nrm if c >= 0 else -nrm)
+        if best is None or best_n < 0.5 * len(X):
+            continue
+        down = -np.array([at.up_y, at.up_z])
+        down /= np.linalg.norm(down) or 1.0
+        for sgn in (1, -1):
+            nv = np.array([sgn * best[0], best[1]])
+            tilt[sgn].append(math.degrees(math.acos(np.clip(nv @ down, -1, 1))))
+    if not tilt[1]:
+        return 1, {}, 0
+    med = {s: round(float(np.median(v)), 1) for s, v in tilt.items()}
+    return min(med, key=med.get), med, len(tilt[1])
+
+
+def crossover_disagreement(P, cell_m=1.0, window_s=30.0):
+    """Median spread of seabed depth between different passes (30 s windows)
+    over the same 1 m cell, and how many cells were seen on 2+ passes."""
+    bed, _ = seabed_filter(P[P[:, 2] <= 0])
+    if len(bed) < 100:
+        return np.inf, 0
+    c = np.floor(bed[:, :2] / cell_m).astype(np.int64)
+    c -= c.min(0)
+    cell = c[:, 0] * (c[:, 1].max() + 1) + c[:, 1]
+    win = (bed[:, 5] / 1000 / window_s).astype(np.int64)
+    key = np.c_[cell, win - win.min()]
+    u, inv, cnt = np.unique(key, axis=0, return_inverse=True, return_counts=True)
+    inv = inv.ravel()
+    med = np.array([np.median(bed[inv == k, 2]) for k in range(len(u))]) if len(u) < 20000 else None
+    if med is None:
+        return np.inf, 0
+    ok = cnt >= 5
+    u, med = u[ok], med[ok]
+    cells, ci = np.unique(u[:, 0], return_inverse=True)
+    spread = np.array([np.ptp(med[ci == k]) for k in range(len(cells))])
+    n_pass = np.bincount(ci)
+    multi = spread[n_pass >= 2]
+    return (float(np.median(multi)) if len(multi) else np.inf), int(len(multi))
+
+
+def pick_mount_yaw(pings, fix, hdg, sign, mount_depth, step=4):
+    """Search the mount yaw that makes overlapping passes agree. Uses every
+    step-th ping to keep it quick. Returns (yaw, disagreement m, cells, table)."""
+    sub = pings[::step]
+    table = {}
+
+    def score(yaw):
+        if yaw not in table:
+            table[yaw] = crossover_disagreement(georeference(sub, fix, hdg, sign, yaw, mount_depth, True))
+        return table[yaw][0]
+
+    best = min(range(0, 360, 30), key=score)
+    best = min([(best + d) % 360 for d in (-20, -10, 0, 10, 20)], key=score)
+    best = min([(best + d) % 360 for d in (-5, 0, 5)], key=score)
+    return best, table[best][0], table[best][1], {k: round(v[0], 3) for k, v in sorted(table.items())}
+
+
+# ---------------------------------------------------------- water column ---
+
+def anomaly_score(P, t_bin_s=20.0, r_bin_m=0.25):
+    """Robust z-score of each return's log power against the other returns at
+    the same range in the same ~20 s window. The Omniscan returns something at
+    almost every range, so raw power alone lights up the whole water column;
+    an object is what is LOUDER than its range neighbours."""
+    lp = np.log10(np.maximum(P[:, 3], 1))
+    tb = ((P[:, 5] - P[:, 5].min()) / 1000 / t_bin_s).astype(np.int64)
+    rb = np.clip((P[:, 6] / r_bin_m).astype(np.int64), 0, 999)
+    key = tb * 1000 + rb
+    o = np.argsort(key, kind="stable")
+    ks = key[o]
+    s = np.r_[0, np.flatnonzero(np.diff(ks)) + 1]
+    e = np.r_[s[1:], len(ks)]
+    z = np.zeros(len(P))
+    for a, b in zip(s, e):
+        v = lp[o[a:b]]
+        m = np.median(v)
+        z[o[a:b]] = (v - m) / max(np.median(np.abs(v - m)) * 1.48, 0.05)
+    return z
+
+
+def water_column(P, bed_tab, z_min=3.0, min_range_m=1.2, bed_band_m=1.0):
+    """Anomalous returns that are not seabed. Pings where the whole column is
+    anomalous (interference, the boat turning hard) are dropped."""
+    if not len(P):
+        return P, np.zeros(0)
+    z = anomaly_score(P)
+    u, inv = np.unique(P[:, 4], return_inverse=True)
+    frac = np.bincount(inv, weights=(z > 2)) / np.bincount(inv)
+    keep = (z > z_min) & (frac[inv] <= 0.25) & (P[:, 2] < 0) & (P[:, 6] > min_range_m)
+    if len(bed_tab):
+        bed = dict(zip(bed_tab[:, 0], bed_tab[:, 1]))
+        b = np.array([bed.get(t, np.nan) for t in P[:, 5]])
+        with np.errstate(invalid="ignore"):
+            keep &= ~(np.abs(-P[:, 2] - b) <= bed_band_m)
+    return P[keep], z[keep]
+
+
+def find_objects(W, voxel_m=0.4, min_pings_per_voxel=3, min_pings=8, max_size_m=5.0):
+    """Cluster water-column returns on the ground. A real object stays in the
+    same place while the boat moves past it (an arch on the echogram); noise
+    and fish do not. Returns (object table rows, point mask, label per point)."""
+    from scipy import ndimage
+    if not len(W):
+        return [], np.zeros(0, bool), np.zeros(0, int)
+    k = np.floor(W[:, :3] / voxel_m).astype(np.int64)
+    k -= k.min(0)
+    shape = tuple(k.max(0) + 1)
+    lin = np.ravel_multi_index(k.T, shape)
+    vp = np.unique(np.c_[lin, W[:, 4]], axis=0)
+    cnt = np.bincount(vp[:, 0].astype(np.int64), minlength=int(np.prod(shape)))
+    lab, n = ndimage.label((cnt >= min_pings_per_voxel).reshape(shape), structure=np.ones((3, 3, 3)))
+    pl = lab.ravel()[lin]
+    rows, mask, ids = [], np.zeros(len(W), bool), np.zeros(len(W), int)
+    for c in range(1, n + 1):
+        sel = pl == c
+        X = W[sel]
+        pings = np.unique(X[:, 4])
+        size = np.ptp(X[:, :3], 0)
+        if len(pings) < min_pings or max(size[0], size[1]) > max_size_m:
+            continue
+        ts = np.unique(X[:, 5]) / 1000
+        passes = 1 + int(np.sum(np.diff(ts) > 15))
+        top, bottom = -np.percentile(X[:, 2], 90), -np.percentile(X[:, 2], 10)
+        rows.append({"east": float(np.median(X[:, 0])), "north": float(np.median(X[:, 1])),
+                     "depth_m": float(-np.median(X[:, 2])), "top_m": float(top), "bottom_m": float(bottom),
+                     "size_m": float(max(size[0], size[1])), "pings": int(len(pings)), "passes": passes,
+                     "t0": float(ts[0]), "t1": float(ts[-1]), "range_m": float(np.median(X[:, 6])),
+                     "points": int(sel.sum())})
+        mask |= sel
+    order = sorted(range(len(rows)), key=lambda i: (-rows[i]["passes"], -rows[i]["pings"]))
+    rows = [rows[i] for i in order]
+    # relabel the points 1..N in table order
+    for new, r in enumerate(rows, 1):
+        r["id"] = new
+    return rows, mask, pl
+
+
+def tag_objects(rows, bed, radius_m=5.0):
+    """Compare each object with the seabed measured within radius_m. Echoes
+    from BELOW the seabed cannot be real objects: they are the seabed echo
+    bouncing a second time (boat hull / surface -> bottom)."""
+    for r in rows:
+        r["seabed_m"] = None
+        if len(bed):
+            d = np.hypot(bed[:, 0] - r["east"], bed[:, 1] - r["north"])
+            near = bed[d <= radius_m]
+            if len(near) >= 20:
+                r["seabed_m"] = float(-np.median(near[:, 2]))
+        sb = r["seabed_m"]
+        if sb is not None and r["top_m"] > sb + 0.5:
+            r["note"] = "below seabed: echo, not an object"
+        elif r["top_m"] <= 1.5:
+            r["note"] = "at the surface"
+        elif sb is not None and r["bottom_m"] >= sb - 1.0:
+            r["note"] = "on the seabed"
+        elif sb is not None:
+            r["note"] = "in the water column"
+        else:
+            r["note"] = "no seabed measured nearby"
+    good = [r for r in rows if not r["note"].startswith("below")]
+    bad = [r for r in rows if r["note"].startswith("below")]
+    rows[:] = good + bad
+    for i, r in enumerate(rows, 1):
+        r["id"] = i
+    return rows
+
+
+def write_objects_csv(path, rows):
+    utc = lambda s: datetime.fromtimestamp(s, timezone.utc).strftime("%H:%M:%S")
+    with open(path, "w") as fh:
+        fh.write("id,lat,lon,east_m,north_m,depth_m,top_m,bottom_m,size_m,pings,passes,"
+                 "first_seen_utc,last_seen_utc,slant_range_m,seabed_nearby_m,note\n")
+        for r in rows:
+            lat = HOME_LAT + r["north"] / M_PER_DEG
+            lon = HOME_LON + r["east"] / (M_PER_DEG * math.cos(math.radians(HOME_LAT)))
+            fh.write(f"{r['id']},{lat:.7f},{lon:.7f},{r['east']:.1f},{r['north']:.1f},{r['depth_m']:.1f},"
+                     f"{r['top_m']:.1f},{r['bottom_m']:.1f},{r['size_m']:.1f},{r['pings']},{r['passes']},"
+                     f"{utc(r['t0'])},{utc(r['t1'])},{r['range_m']:.1f},"
+                     f"{'' if r['seabed_m'] is None else round(r['seabed_m'], 1)},{r['note']}\n")
+
+
+def write_objects_preview(path, Pall, zall, W, rows, bed, track, title):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(18, 12))
+    g = fig.add_gridspec(2, 2, height_ratios=[1.4, 1], width_ratios=[1.2, 1])
+    ax = fig.add_subplot(g[0, 0])
+    if len(bed):
+        sb = bed[:: max(1, len(bed) // 50000)]
+        ax.scatter(sb[:, 0], sb[:, 1], s=0.3, c="0.75", label="seabed")
+    sw = W[:: max(1, len(W) // 100000)]
+    sc = ax.scatter(sw[:, 0], sw[:, 1], c=-sw[:, 2], s=0.4, cmap="viridis_r", vmin=0,
+                    vmax=max(np.percentile(-sw[:, 2], 98), 1) if len(sw) else 10, alpha=0.5)
+    ax.plot(track[:, 0], track[:, 1], "r-", lw=0.8, label="GPS track")
+    ax.plot(0, 0, "k^", label="home")
+    for r in [r for r in rows if not r["note"].startswith("below")]:
+        ax.add_patch(plt.Circle((r["east"], r["north"]), max(r["size_m"] / 2, 0.8), fill=False,
+                                ec="k", lw=1.5 if r["passes"] > 1 else 0.8))
+        ax.annotate(str(r["id"]), (r["east"], r["north"]), xytext=(4, 4), textcoords="offset points",
+                    fontsize=9, weight="bold" if r["passes"] > 1 else "normal")
+    ax.set_aspect("equal")
+    ax.set_xlabel("east of home (m)")
+    ax.set_ylabel("north of home (m)")
+    ax.legend(loc="best", fontsize=8)
+    ax.set_title("circles: candidate objects (bold: seen on 2+ passes)", fontsize=10)
+    fig.colorbar(sc, ax=ax, label="depth below surface (m)")
+
+    ax = fig.add_subplot(g[0, 1])
+    ax.axis("off")
+    lines = ["id  depth   size  pings passes  seen (UTC)     seabed  note"]
+    for r in rows[:40]:
+        utc = lambda s: datetime.fromtimestamp(s, timezone.utc).strftime("%H:%M:%S")
+        lines.append(f"{r['id']:>2}  {r['depth_m']:4.1f} m {r['size_m']:4.1f} m {r['pings']:5d} {r['passes']:5d}   "
+                     f"{utc(r['t0'])}-{utc(r['t1'])[3:]}  "
+                     f"{'  -  ' if r['seabed_m'] is None else format(r['seabed_m'], '4.1f') + ' m'}  {r['note']}")
+    if len(rows) > 40:
+        lines.append(f"... {len(rows) - 40} more in the CSV")
+    ax.text(-0.05, 1, "\n".join(lines), family="monospace", fontsize=7.5, va="top")
+
+    ax = fig.add_subplot(g[1, :])
+    t0 = Pall[:, 5].min() / 1000
+    t = Pall[:, 5] / 1000 - t0
+    H, _, _ = np.histogram2d(t, -Pall[:, 2], bins=(1200, 180), range=((0, t.max()), (0, 18)),
+                             weights=np.maximum(zall, 0) ** 2)
+    N, _, _ = np.histogram2d(t, -Pall[:, 2], bins=(1200, 180), range=((0, t.max()), (0, 18)))
+    ax.imshow((H / np.maximum(N, 1)).T, aspect="auto", origin="upper", extent=(0, t.max(), 18, 0),
+              cmap="magma", vmin=0, vmax=6)
+    for r in [r for r in rows if not r["note"].startswith("below")]:
+        ax.annotate(str(r["id"]), ((r["t0"] + r["t1"]) / 2 - t0, r["depth_m"]), color="cyan", fontsize=8,
+                    ha="center", va="center")
+    ax.set_xlabel("time into recording (s)")
+    ax.set_ylabel("depth below surface (m)")
+    ax.set_title("echogram: how much each echo stands out from its range neighbours (arches = something the boat drove past)")
+    fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.savefig(path, dpi=100)
+    plt.close(fig)
+
+
 # --------------------------------------------------------------- outputs ---
 
 def depth_colours(z):
@@ -298,7 +591,8 @@ def main():
     ap.add_argument("--data", default=os.path.join(REPO, "boat_data"))
     ap.add_argument("--date", default=None, help="only recordings from this day, YYYY-MM-DD")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--mount-yaw", type=float, default=0.0)
+    ap.add_argument("--mount-yaw", default="auto",
+                    help="degrees clockwise from the bow, or 'auto' (from pass-to-pass agreement)")
     ap.add_argument("--mount-depth", type=float, default=0.3, help="transducer below waterline, m")
     ap.add_argument("--min-depth", type=float, default=1.0, help="seabed layer: ignore returns shallower than this, m")
     ap.add_argument("--flip-angle", choices=["auto", "no", "yes"], default="auto")
@@ -324,18 +618,22 @@ def main():
             print("  no GPS overlaps this recording; skipped")
             continue
 
-        def run(sign):
-            return georeference(pings, fix, hdg, sign, a.mount_yaw, a.mount_depth, not a.all_points)
-
         if a.flip_angle == "auto":
-            cand = {s: run(s) for s in (1, -1)}
-            above = {s: float(np.mean(P[:, 2] > 0)) if len(P) else 1.0 for s, P in cand.items()}
-            sign = min(above, key=above.get)
-            P = cand[sign]
+            sign, seabed_tilt, n_fit = pick_angle_sign(pings)
+            print(f"  angle sign {sign}: seabed line tilt vs level {seabed_tilt} deg ({n_fit} pings)")
         else:
-            sign = -1 if a.flip_angle == "yes" else 1
-            P = run(sign)
-            above = {sign: float(np.mean(P[:, 2] > 0))}
+            sign, seabed_tilt = (-1 if a.flip_angle == "yes" else 1), {}
+        if a.mount_yaw == "auto":
+            print("  mount yaw: searching for best pass-to-pass agreement")
+            yaw, yaw_dis, yaw_cells, yaw_table = pick_mount_yaw(pings, fix, hdg, sign, a.mount_depth)
+            print(f"  mount yaw {yaw} deg: passes agree to {yaw_dis:.2f} m over {yaw_cells} cells")
+            if yaw_cells < 300:
+                print("  (too little overlap between passes to trust it; using 0)")
+                yaw = 0
+        else:
+            yaw, yaw_dis, yaw_cells, yaw_table = float(a.mount_yaw), None, None, {}
+        P = georeference(pings, fix, hdg, sign, yaw, a.mount_depth, not a.all_points)
+        above = {sign: float(np.mean(P[:, 2] > 0)) if len(P) else 0.0}
         under = P[P[:, 2] <= 0]
 
         m = (fix[:, 0] >= t0) & (fix[:, 0] <= t1)
@@ -359,6 +657,22 @@ def main():
             write_preview(os.path.join(out, f"{name}_seabed_preview.png"), bed, track,
                           f"{name}  {utc(t0)}-{utc(t1)} UTC  seabed: {len(bed):,} points")
 
+        print("  water column: scoring every return")
+        Pall = georeference(pings, fix, hdg, sign, yaw, a.mount_depth, False)
+        Pall = Pall[np.argsort(Pall[:, 5], kind="stable")]
+        zall = anomaly_score(Pall)
+        W, _ = water_column(Pall, bed_tab)
+        objs, omask, _ = find_objects(W)
+        tag_objects(objs, bed)
+        if len(W):
+            write_ply(os.path.join(out, f"{name}_water.ply"), W)
+        if omask.any():
+            write_ply(os.path.join(out, f"{name}_objects.ply"), W[omask])
+        write_objects_csv(os.path.join(out, f"{name}_objects.csv"), objs)
+        write_objects_preview(os.path.join(out, f"{name}_objects.png"), Pall, zall, W, objs, bed, track,
+                              f"{name}  {utc(t0)}-{utc(t1)} UTC  water column: {len(W):,} points, "
+                              f"{len(objs)} candidate objects")
+
         att = [x for _, x in pings if x is not None]
         dep = -bed[:, 2]
         rec = {
@@ -366,8 +680,13 @@ def main():
             "points_total": int(sum(len(ps.points) for ps, _ in pings)),
             "points_classified_bottom": int(sum(p.pt_type == 1 for ps, _ in pings for p in ps.points)),
             "points_strong_underwater": int(len(under)), "points_seabed": int(len(bed)),
+            "points_water_column": int(len(W)), "objects": len(objs),
+            "objects_seen_on_several_passes": sum(o["passes"] > 1 for o in objs),
+            "objects_below_seabed": sum(o["note"].startswith("below") for o in objs),
             "pings_with_seabed": int(bed_tab[:, 2].sum()) if len(bed_tab) else 0,
-            "angle_sign": sign,
+            "angle_sign": sign, "seabed_line_tilt_deg_by_sign": seabed_tilt,
+            "mount_yaw_deg": yaw, "pass_disagreement_m": yaw_dis, "pass_overlap_cells": yaw_cells,
+            "pass_disagreement_by_yaw": yaw_table,
             "fraction_above_surface": above, "track_m": round(path_m, 1),
             "track_extent_m": [round(float(np.ptp(te)), 1), round(float(np.ptp(tn)), 1)],
             "gps_fixes": int(m.sum()),
