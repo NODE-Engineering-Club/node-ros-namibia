@@ -1,0 +1,92 @@
+{
+  "home": [
+    -26.6405465,
+    15.1588228
+  ],
+  "recordings": [
+    {
+      "file": "2026-11-17-07-25.svlz",
+      "utc": [
+        "07:25:11",
+        "07:28:30"
+      ],
+      "pings": 1990,
+      "points_total": 1011509,
+      "points_classified_bottom": 0,
+      "points_strong_underwater": 283450,
+      "points_seabed": 209981,
+      "pings_with_seabed": 613,
+      "angle_sign": -1,
+      "fraction_above_surface": {
+        "1": 0.5487633330568742,
+        "-1": 0.5390449799079229
+      },
+      "track_m": 44.5,
+      "track_extent_m": [
+        4.6,
+        9.1
+      ],
+      "gps_fixes": 1992,
+      "depth_m_p5_p50_p95": [
+        2.64,
+        3.07,
+        3.63
+      ],
+      "range_window_m": [
+        10.5
+      ],
+      "roll_deg_p5_p50_p95": [
+        65.5,
+        101.6,
+        159.5
+      ],
+      "pitch_deg_p5_p50_p95": [
+        -49.4,
+        -38.7,
+        -4.5
+      ]
+    },
+    {
+      "file": "2026-11-17-07-28.svlz",
+      "utc": [
+        "07:28:44",
+        "07:37:47"
+      ],
+      "pings": 5425,
+      "points_total": 2838069,
+      "points_classified_bottom": 0,
+      "points_strong_underwater": 1214306,
+      "points_seabed": 965952,
+      "pings_with_seabed": 3897,
+      "angle_sign": -1,
+      "fraction_above_surface": {
+        "1": 0.46617995630913106,
+        "-1": 0.29952357685964526
+      },
+      "track_m": 579.9,
+      "track_extent_m": [
+        236.3,
+        248.7
+      ],
+      "gps_fixes": 5425,
+      "depth_m_p5_p50_p95": [
+        3.27,
+        4.57,
+        8.23
+      ],
+      "range_window_m": [
+        12.3
+      ],
+      "roll_deg_p5_p50_p95": [
+        32.5,
+        90.8,
+        169.1
+      ],
+      "pitch_deg_p5_p50_p95": [
+        -23.1,
+        -10.1,
+        14.3
+      ]
+    }
+  ]
+}

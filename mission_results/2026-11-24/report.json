@@ -1,0 +1,80 @@
+{
+  "home": [
+    -26.6405465,
+    15.1588228
+  ],
+  "recordings": [
+    {
+      "file": "2026-11-24-07-27.svlz",
+      "utc": [
+        "07:27:06",
+        "07:37:13"
+      ],
+      "pings": 6074,
+      "points_total": 4009147,
+      "points_classified_bottom": 0,
+      "points_strong_underwater": 2112307,
+      "points_seabed": 1498008,
+      "points_water_column": 4063,
+      "objects": 12,
+      "objects_seen_on_several_passes": 4,
+      "objects_below_seabed": 3,
+      "pings_with_seabed": 5210,
+      "angle_sign": -1,
+      "seabed_line_tilt_deg_by_sign": {
+        "1": 116.5,
+        "-1": 1.9
+      },
+      "mount_yaw_deg": 165,
+      "pass_disagreement_m": 0.11883193513867907,
+      "pass_overlap_cells": 1237,
+      "pass_disagreement_by_yaw": {
+        "0": 0.359,
+        "30": 0.458,
+        "60": 0.409,
+        "90": 0.419,
+        "120": 0.277,
+        "130": 0.227,
+        "140": 0.192,
+        "150": 0.144,
+        "155": 0.137,
+        "160": 0.122,
+        "165": 0.119,
+        "170": 0.125,
+        "180": 0.148,
+        "210": 0.22,
+        "240": 0.317,
+        "270": 0.307,
+        "300": 0.309,
+        "330": 0.363
+      },
+      "fraction_above_surface": {
+        "-1": 0.014864430628226469
+      },
+      "track_m": 420.7,
+      "track_extent_m": [
+        45.3,
+        73.4
+      ],
+      "gps_fixes": 6073,
+      "depth_m_p5_p50_p95": [
+        1.17,
+        1.91,
+        2.55
+      ],
+      "range_window_m": [
+        10.5
+      ],
+      "roll_deg_p5_p50_p95": [
+        56.0,
+        58.7,
+        61.5
+      ],
+      "pitch_deg_p5_p50_p95": [
+        -1.0,
+        1.1,
+        3.4
+      ]
+    }
+  ]
+}
