@@ -33,6 +33,9 @@ Outputs, per recording, in --out:
   <name>_seabed.csv.gz lat, lon, depth_m, power, ping, utc_ms (for GIS)
   <name>_track.csv     GPS track during the recording
   <name>_preview.png   plan view + depth profile, for a quick look
+  <name>_filtered_out.ply / .csv.gz  points the seabed filter dropped
+                       (same columns as the seabed CSV), for review
+  <name>_water.csv.gz  the water-column echoes below, same columns
   <name>_water.ply     everything that is NOT seabed: echoes that stand out from
                        the background at their range (objects, fish, ropes ...)
   <name>_objects.csv   candidate objects: compact echo clusters that stay at one
@@ -212,7 +215,7 @@ def georeference(pings, fix, hdg, sign, mount_yaw, mount_depth, strong_only):
     return np.hstack(cols).T if cols else np.zeros((0, 8))
 
 
-def seabed_filter(P, window=25, band_m=1.0, max_iqr_m=2.0, min_depth_m=1.0):
+def seabed_filter(P, window=25, band_m=1.0, max_iqr_m=2.0, min_depth_m=1.0, with_rejected=False):
     """Keep returns near a running seabed estimate.
 
     Per ping: median depth and inter-quartile spread of its returns. A ping
@@ -220,9 +223,10 @@ def seabed_filter(P, window=25, band_m=1.0, max_iqr_m=2.0, min_depth_m=1.0):
     the head out of the water) is dropped. The seabed is the running median of
     the remaining per-ping medians over +-window pings; points more than
     band_m from it (fish, kelp, surface, multipath) are dropped. Returns
-    (seabed_points, per-ping table [utc_ms, seabed_depth_m, kept])."""
+    (seabed_points, per-ping table [utc_ms, seabed_depth_m, kept]), plus the
+    dropped points as a third value when with_rejected is set."""
     if not len(P):
-        return P, np.zeros((0, 3))
+        return (P, np.zeros((0, 3)), P) if with_rejected else (P, np.zeros((0, 3)))
     order = np.argsort(P[:, 5], kind="stable")
     P = P[order]
     t, starts = np.unique(P[:, 5], return_index=True)
@@ -243,6 +247,8 @@ def seabed_filter(P, window=25, band_m=1.0, max_iqr_m=2.0, min_depth_m=1.0):
     for k, (s, e) in enumerate(zip(starts, ends)):
         if ok[k] and not np.isnan(bed[k]):
             keep[s:e] = (np.abs(P[s:e, 2] - bed[k]) <= band_m) & (P[s:e, 2] <= -min_depth_m)
+    if with_rejected:
+        return P[keep], np.c_[t, -bed, ok], P[~keep]
     return P[keep], np.c_[t, -bed, ok]
 
 
@@ -646,10 +652,14 @@ def main():
             for row in fix[m]:
                 fh.write(f"{row[0]:.3f},{row[1]:.7f},{row[2]:.7f}\n")
 
-        bed, bed_tab = seabed_filter(under, min_depth_m=a.min_depth)
+        bed, bed_tab, rejected = seabed_filter(under, min_depth_m=a.min_depth, with_rejected=True)
         write_ply(os.path.join(out, f"{name}_cloud.ply"), under)
         write_ply(os.path.join(out, f"{name}_seabed.ply"), bed)
         write_csv(os.path.join(out, f"{name}_seabed.csv.gz"), bed)
+        # what the seabed filter dropped: surface clutter, multipath, but also
+        # anything standing off the bottom (pillars, kelp) -- kept for review
+        write_ply(os.path.join(out, f"{name}_filtered_out.ply"), rejected)
+        write_csv(os.path.join(out, f"{name}_filtered_out.csv.gz"), rejected)
         utc = lambda s: datetime.fromtimestamp(s, timezone.utc).strftime("%H:%M:%S")
         write_preview(os.path.join(out, f"{name}_preview.png"), under, track,
                       f"{name}  {utc(t0)}-{utc(t1)} UTC  raw: {len(under):,} points")
@@ -666,6 +676,7 @@ def main():
         tag_objects(objs, bed)
         if len(W):
             write_ply(os.path.join(out, f"{name}_water.ply"), W)
+            write_csv(os.path.join(out, f"{name}_water.csv.gz"), W)
         if omask.any():
             write_ply(os.path.join(out, f"{name}_objects.ply"), W[omask])
         write_objects_csv(os.path.join(out, f"{name}_objects.csv"), objs)
