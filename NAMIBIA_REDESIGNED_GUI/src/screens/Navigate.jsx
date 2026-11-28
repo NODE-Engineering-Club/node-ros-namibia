@@ -20,7 +20,7 @@ import { bearingDeg, distanceM, estimateS, fmtKm, fmtMin, legs, routeLengthM } f
 import { worstAlarm } from '../lib/vessel.js';
 import { useDeployedRoute } from '../lib/missionStore.js';
 import {
-  WAYPOINT_LABEL, deployedIsLive, isRunning, routeOf, routePill, startBlock, waypointStatus,
+  NOGO_BLOCK, WAYPOINT_LABEL, deployedIsLive, isRunning, nogoIsOnlyBlock, routeOf, routePill, startBlock, waypointStatus,
 } from '../lib/route.js';
 import { streamNotes } from '../lib/streamNotes.js';
 
@@ -482,6 +482,12 @@ function MissionPanel({ v, connection, active, library, onNavigate, shown }) {
   const startWhy = !active ? 'Choose a mission first.'
     : !canStart ? 'This route is only in this browser. Upload it to the server in Repo.'
       : startBlock(v, connection) || undefined;
+  // The deliberate way past a NO-GO pre-flight (backend force_nogo, logged):
+  // offered only when NO-GO is the one thing in the way.
+  const canForce = Boolean(active) && canStart && !running && nogoIsOnlyBlock(v, connection);
+  // With a NO-GO, say what else would still block a forced start (RC, CH3, armed).
+  const afterNogo = startWhy === NOGO_BLOCK ? startBlock(v, connection, { forceNogo: true }) : null;
+  const [nogoAcknowledged, setNogoAcknowledged] = useState(false);
 
   return (
     <GlassPanel title="Mission" icon={<IconFlag />} className="mission-glass" collapsible="nav-mission"
@@ -512,6 +518,29 @@ function MissionPanel({ v, connection, active, library, onNavigate, shown }) {
             />
           </div>
           {startWhy && !running && <div className="launch-note">{startWhy}</div>}
+          {afterNogo && !running && <div className="launch-note">Even forced: {afterNogo}</div>}
+          {canForce && (
+            <div className="nogo-force">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={nogoAcknowledged}
+                  onChange={(e) => setNogoAcknowledged(e.target.checked)}
+                />
+                I have read the pre-flight and accept the NO-GO
+              </label>
+              <ConfirmAction
+                connection={connection} state={state} command="start_route"
+                args={{ route_id: active.id, force_nogo: true }}
+                label="I know it is NO-GO, force start" icon={<IconSend />} variant="danger"
+                prompt={`Start ${active.name || 'this mission'} over a NO-GO pre-flight? The boat will drive itself. This is logged.`}
+                disabled={!nogoAcknowledged}
+                title="Starts the route despite the NO-GO. RC link, CH3 in AUTO and armed are still required."
+                onSent={() => setNogoAcknowledged(false)}
+                failuresOnly
+              />
+            </div>
+          )}
           <div className="mission-stats">
             <div>
               <div className="label">Recording</div>

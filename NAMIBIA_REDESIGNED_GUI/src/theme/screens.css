@@ -497,3 +497,13 @@ body.dragging-split .navigate iframe, body.dragging-split .navigate canvas { poi
 .bms-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
 .bms-stats { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 13px; }
 .bms-cells { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* Navigate › Mission: the deliberate force-start over a NO-GO pre-flight.
+   Boxed in alarm red so it is not read as an ordinary button. */
+.mission-footer .nogo-force {
+  flex-basis: 100%; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  border: 1px dashed var(--alarm); border-radius: var(--radius-sm);
+  background: var(--alarm-tint); font-size: 12px;
+}
+.mission-footer .nogo-force label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.mission-footer .nogo-force input { accent-color: var(--alarm); }
