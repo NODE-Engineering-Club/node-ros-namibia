@@ -575,14 +575,18 @@ class Hub:
         return cmd.to_dict()
 
     def _start_blocker(self) -> str | None:
-        """Why a route cannot start now, in words, from the vessel's own report."""
+        """Why a route cannot start now, in words, from the vessel's own report.
+
+        The pre-flight GO/NO-GO is not among these: it is gated separately, by
+        ``_route_nogo_gate``, with the same forced-override escape hatch
+        ``_nogo_gate`` already gives ``set_mode AUTONOMOUS`` (see that method).
+        Everything here stays a hard stop with no override, because each is
+        the vessel refusing to do something the transmitter could not catch in
+        time — a route already under way, no RC link to take over with, the
+        mode switch not even in AUTO.
+        """
         state = self.source.state()
         pico = state.get("pico") or {}
-        sample = self.source.snapshot("diagnostics", DETAIL_FULL)
-        report = sample.payload if sample is not None else None
-        if not report or report.get("go") is not True:
-            summary = (report or {}).get("summary") or "not run"
-            return f"the pre-flight is {summary}. It must be GO."
         if pico.get("rc_link_ok") is not True:
             return "no RC link. The pilot must be able to take over."
         if pico.get("link_live") is False:
@@ -611,6 +615,9 @@ class Hub:
             return self._refuse(CMD_START_ROUTE, shown, now_utc, command_id, str(exc))
         shown["name"] = route.get("name")
         shown["waypoint_count"] = len(route["waypoints"])
+        refused = self._route_nogo_gate(args, shown, now_utc, command_id)
+        if refused is not None:
+            return refused
         blocker = self._start_blocker()
         if blocker:
             return self._refuse(CMD_START_ROUTE, shown, now_utc, command_id,
@@ -704,14 +711,55 @@ class Hub:
             result = cmd.to_dict()
             result["nogo"] = True
             return result
+        self._log_forced_nogo_override(
+            "autonomous_forced_over_nogo", summary, report.get("run_utc_ms"),
+            args.get("by"), now_utc,
+        )
+        return None
+
+    def _route_nogo_gate(
+        self, args: dict, shown: dict, now_utc: int, command_id: str | None,
+    ) -> dict | None:
+        """A route start is refused while the latest pre-flight is NO-GO.
+
+        Same escape hatch as ``_nogo_gate`` and for the same reason: an aid,
+        not a safety (the RC transmitter stays the authority regardless), so
+        it stops the one press that is almost always a mistake and leaves a
+        deliberate, logged way past it — ``force_nogo`` in the request — rather
+        than either silently blocking forever or silently not checking at all.
+        """
+        sample = self.source.snapshot("diagnostics", DETAIL_FULL)
+        report = sample.payload if sample is not None else None
+        if not report or report.get("go") is not False:
+            return None
+        summary = str(report.get("summary") or "NO-GO")
+        if not args.get("force_nogo"):
+            result = self._refuse(
+                CMD_START_ROUTE, shown, now_utc, command_id,
+                f"Not started: the pre-flight is {summary}. Fix it and run the "
+                "pre-flight again, or use \"I know it is NO-GO, force\".",
+            )
+            result["nogo"] = True
+            return result
+        self._log_forced_nogo_override(
+            "route_forced_over_nogo", summary, report.get("run_utc_ms"),
+            args.get("by"), now_utc,
+        )
+        return None
+
+    def _log_forced_nogo_override(
+        self, action: str, summary: str, preflight_run_utc_ms, by, now_utc: int,
+    ) -> None:
+        """Write one line to asket_overrides.jsonl: who forced past a NO-GO
+        pre-flight, and what it said, so the question always has an answer."""
         record = {
             "utc_ms": now_utc,
-            "action": "autonomous_forced_over_nogo",
-            "by": str(args.get("by") or ""),
+            "action": action,
+            "by": str(by or ""),
             "preflight_summary": summary,
-            "preflight_run_utc_ms": report.get("run_utc_ms"),
+            "preflight_run_utc_ms": preflight_run_utc_ms,
         }
-        _log.warning("Autonomous FORCED over a NO-GO pre-flight: %s", summary)
+        _log.warning("%s over a NO-GO pre-flight: %s", action, summary)
         try:
             path = setup_store.DEFAULT_PATH.parent / "asket_overrides.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -719,7 +767,6 @@ class Hub:
                 handle.write(json.dumps(record) + "\n")
         except OSError as exc:
             _log.warning("override record not written: %s", exc)
-        return None
 
     def _save_setup(self, args: dict, now_utc: int, command_id: str | None) -> dict:
         """Write the setup file, under all three guards.

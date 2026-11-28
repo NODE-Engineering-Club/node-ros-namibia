@@ -1,5 +1,6 @@
 """Starting a mission from the cockpit, and the motherboard v2 / BMS data behind it."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,7 @@ from asket_common.battery import parse_bms_csv
 from asket_common.geofence import (
     fence_token, load_geofence, plan_route_fence, signed_distance_m,
 )
+from gui_backend.core import setup_store
 from gui_backend.core.commands import CMD_DEPLOY_ROUTE, CMD_SET_MODE, CMD_START_ROUTE
 from gui_backend.core.hub import Hub
 from gui_backend.core.pico_state import PROTOCOL_VERSION, parse_state_line
@@ -99,6 +101,22 @@ def test_start_needs_a_go_preflight(rig):
     source.go = False
     assert hub.issue_command(CMD_START_ROUTE, {"route_id": "nav-away-shore"})["status"] == "failed"
     assert source.sent == []
+
+
+def test_start_can_be_forced_over_a_nogo_preflight_and_is_logged(rig, monkeypatch, tmp_path):
+    hub, source = rig
+    monkeypatch.setattr(setup_store, "DEFAULT_PATH", tmp_path / "setup" / "asket_setup.yaml")
+    source.go = False
+    result = hub.issue_command(
+        CMD_START_ROUTE, {"route_id": "nav-away-shore", "force_nogo": True, "by": "op"},
+    )
+    assert result["status"] != "failed"
+    assert source.sent == [(CMD_SET_MODE, "AUTONOMOUS")]
+    lines = (tmp_path / "setup" / "asket_overrides.jsonl").read_text().splitlines()
+    record = json.loads(lines[-1])
+    assert record["action"] == "route_forced_over_nogo"
+    assert record["by"] == "op"
+    assert "NO-GO" in record["preflight_summary"]
 
 
 def test_motherboard_v2_line_is_fully_understood():
