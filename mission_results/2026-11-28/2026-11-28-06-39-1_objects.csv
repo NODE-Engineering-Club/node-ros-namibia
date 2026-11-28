@@ -1,0 +1,2 @@
+id,lat,lon,east_m,north_m,depth_m,top_m,bottom_m,size_m,pings,passes,first_seen_utc,last_seen_utc,slant_range_m,seabed_nearby_m,note
+1,-26.6355936,15.1024480,-5609.4,551.4,8.3,8.0,8.4,0.6,8,1,06:41:06,06:41:09,19.5,11.6,in the water column

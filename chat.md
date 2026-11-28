@@ -5537,3 +5537,50 @@ The ledgers show most older files are already in Azure. What's left is 29 files,
 ### **Claude** · 09:09
 
 The repo ignores a top-level `data/` folder, probably the container's data mount, so I'll use `mission_results/` instead so the two don't get mixed up.
+
+### **Claude** · 09:09
+
+Committed. Now I'll try the push; last time there were no GitHub credentials on the Jetson.
+
+### **Claude** · 09:10
+
+I set up both. The commit is ready but needs you to push it, and the raw-data upload to Azure is still running.
+
+**chat.md**
+- `chat.md` in the repo root now holds every conversation from this repo, oldest first. Only your messages and my written answers are kept, without the tool output.
+- **It updates automatically after each of my replies.** A hook runs `scripts/chat_to_md.py`. The hook is in `.claude/settings.local.json`, which only you use, so teammates' sessions won't overwrite your chat.md.
+- **Because it goes to GitHub, it hides sensitive details.** Email addresses, anything that looks like a key or password, and the Azure storage account name and web address are replaced with placeholders. I scanned the current file and found no passwords, keys or connection strings.
+- It is committed now. Later updates reach GitHub only when you commit and push chat.md again.
+
+**Boat data**
+- **In git, under `mission_results/2026-11-17/` and `mission_results/2026-11-24/`:** the preview images, objects and seabed CSVs, GPS tracks, `report.json` and the small object and mesh PLY files, about 26 MB in total. A README there says where the large files are. I didn't use `data/` because the repo ignores it.
+- **To Azure (uploading now):** 29 files, 255 MB, to the `asket-missions` container under `ASKET_02/`. These are today's black-box files, both 11-17 and 11-24 sonar recordings (the 07:28 and 07:27 ones), and all the processed files including the big point clouds. Older files were already in Azure and are skipped. I used the boat's own uploader code, so the boat won't send them a second time. I'll tell you when the upload finishes.
+- Nothing from `boat_data/secrets/` goes anywhere.
+
+**Push:** commit `c2c4c3f` is ready, but the Jetson has no GitHub login, so the push failed. Please run:
+
+```
+! git push origin Namibia_mission
+```
+
+That pushes both commits from today: `4b80c93` (the sonar fix) and `c2c4c3f` (the results and chat.md).
+
+### **You** · 09:12
+
+<task-notification>
+<task-id>brf164vii</task-id>
+<tool-use-id>toolu_01XUGUhNJQThosAh9teXCSNQ</tool-use-id>
+<output-file>/tmp/claude-1000/-home-node-node-ros-namibia/3e586c11-9f64-41e1-8bb2-0c533ab2f5a9/tasks/brf164vii.output</output-file>
+<status>completed</status>
+<summary>Background command "Upload raw mission data to Azure" completed (exit code 0)</summary>
+</task-notification>
+
+### **Claude** · 09:12
+
+The Azure upload is complete: all 29 files (255 MB) are in the `asket-missions` container under `ASKET_02/`. A second check finds nothing left to upload.
+
+The git commits still need your push:
+
+```
+! git push origin Namibia_mission
+```
